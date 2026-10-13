@@ -633,6 +633,7 @@ BTX_BASE_SCRIPTS = [
     'feature_matmul_trusted_mirror_bounded_park.py',
     'feature_matmul_trusted_mirror_bounded_stall_open.py',
     'feature_deepfork_autoresolve.py',
+    'feature_deep_reorg_warning.py',
     'rpc_getfinalityinfo.py',
     'feature_matmul_trusted_mirror_follow_forward.py',
     'feature_matmul_trusted_mirror_snapshot_backfill.py',
