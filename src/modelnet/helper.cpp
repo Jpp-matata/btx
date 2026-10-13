@@ -505,6 +505,11 @@ bool RunGenerateAdapter(const fs::path& exe, const fs::path& dir, const std::str
         err = "generate pipe";
         return false;
     }
+#if defined(__linux__)
+    // The child compares its parent with this pid, not with 1: a helper that
+    // is itself pid 1 (a container entrypoint) is a live parent.
+    const pid_t parent = getpid();
+#endif
     const pid_t pid = fork();
     if (pid < 0) {
         close(inpipe[0]);
@@ -519,7 +524,7 @@ bool RunGenerateAdapter(const fs::path& exe, const fs::path& dir, const std::str
         // Match the helper's parent-death watch so a crashed parent cannot
         // leave the adapter running. A new process group lets the timeout
         // signal the adapter and any process it forks.
-        if (prctl(PR_SET_PDEATHSIG, SIGTERM) == 0 && getppid() == 1) _exit(127);
+        if (prctl(PR_SET_PDEATHSIG, SIGTERM) == 0 && getppid() != parent) _exit(127);
 #endif
         // Failure leaves the child in the helper's group; the timeout then
         // signals the pid directly. Do not skip exec.
