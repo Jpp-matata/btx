@@ -10239,8 +10239,11 @@ PeerManagerImpl::GetBlockDataOutcome PeerManagerImpl::ProcessGetBlockData(
 CTransactionRef PeerManagerImpl::FindTxForGetData(const Peer::TxRelay& tx_relay, const GenTxid& gtxid)
 {
     // If a tx was in the mempool prior to the last INV for this peer, permit the request.
+    // Never serve one that is still in our Dandelion++ stempool: it has not
+    // been announced, and only its originator holds it in the mempool during
+    // the stem phase.
     auto txinfo = m_mempool.info_for_relay(gtxid, tx_relay.m_last_inv_sequence);
-    if (txinfo.tx) {
+    if (txinfo.tx && !(m_dandelion && m_dandelion->IsInStemPool(txinfo.tx->GetHash()))) {
         return std::move(txinfo.tx);
     }
 
@@ -23566,6 +23569,10 @@ bool PeerManagerImpl::SendMessages(CNode* pto)
                         if (txinfo.tx->HasShieldedBundle() && !PeerSupportsShieldedRelay(*peer, *pto)) {
                             continue;
                         }
+                        // Still in our Dandelion++ stempool: not announced yet.
+                        if (m_dandelion && m_dandelion->IsInStemPool(txinfo.tx->GetHash())) {
+                            continue;
+                        }
                         CInv inv{
                             peer->m_wtxid_relay ? MSG_WTX : MSG_TX,
                             peer->m_wtxid_relay ?
@@ -23625,6 +23632,12 @@ bool PeerManagerImpl::SendMessages(CNode* pto)
                         // Not in the mempool anymore? don't bother sending it.
                         auto txinfo = m_mempool.info(ToGenTxid(inv));
                         if (!txinfo.tx) {
+                            continue;
+                        }
+                        // Still in our Dandelion++ stempool (stem phase)? Don't
+                        // announce it. The embargo monitor queues it again
+                        // when the transaction is fluffed.
+                        if (m_dandelion && m_dandelion->IsInStemPool(txinfo.tx->GetHash())) {
                             continue;
                         }
                         if (txinfo.tx->HasShieldedBundle() && !PeerSupportsShieldedRelay(*peer, *pto)) {
