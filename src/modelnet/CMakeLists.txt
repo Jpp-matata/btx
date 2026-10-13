@@ -52,6 +52,34 @@ add_library(bitcoin_modelnet STATIC
   provider_route.cpp
   search.cpp
   canonical_codec.cpp
+  pq_delegation.cpp
+  pq_transport_binding.cpp
+  git_snapshot.cpp
+  workspace_journal.cpp
+  research_graph.cpp
+  training_evidence.cpp
+  model_admission.cpp
+  action_authority.cpp
+  realm_channel.cpp
+  admission_routes.cpp
+  workspace_git.cpp
+  research_index.cpp
+  training_profile.cpp
+  session_gate.cpp
+  capability_bridge.cpp
+  research_rpc.cpp
+  lab_api.cpp
+  lab_journey.cpp
+  lab_wire.cpp
+  lab_assurance.cpp
+  lab_gateway.cpp
+  lab_release.cpp
+  lab_research_gate.cpp
+  lab_store.cpp
+  lab_remaining.cpp
+  migrate_035.cpp
+  model_panel.cpp
+  lab035_cli.cpp
   bounty.cpp
   compute_economy.cpp
   bounty_eval.cpp
