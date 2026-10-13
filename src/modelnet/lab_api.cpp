@@ -440,7 +440,7 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
     const std::string id = Id96(method + "|" + req.write());
 
     if (method == "lab.info") {
-        result.pushKV("release", "0.35.0-private");
+        result.pushKV("release", "0.35.0rc1");
         result.pushKV("network_id", Id64("BTX/035/network"));
         result.pushKV("realm_id", Id96("BTX/035/PublicRealm/v1"));
         UniValue protocols(UniValue::VARR);
