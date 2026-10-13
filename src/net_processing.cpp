@@ -9575,6 +9575,16 @@ void PeerManagerImpl::StartScheduledTasks(CScheduler& scheduler)
             // Skip if already in mempool (e.g., added via regular TX path
             // while the embargo was still active).
             if (m_mempool.exists(GenTxid::Txid(txid))) {
+                // Only a local stem transaction is in both the stempool and
+                // the mempool. BroadcastTransaction marked it unbroadcast so
+                // that a restart during the embargo still announces it. This
+                // fluff is its initial broadcast, so drop the mark now.
+                // Otherwise it stays until a peer requests the transaction
+                // from this node, which never happens once the network has it
+                // from the stem's fluff, and the post-VERACK queue keeps
+                // announcing it to every new peer until it is mined: only the
+                // originator does that.
+                m_mempool.RemoveUnbroadcastTx(txid);
                 to_relay.emplace_back(txid, tx->GetWitnessHash());
                 continue;
             }
