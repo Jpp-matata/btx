@@ -1,0 +1,40 @@
+// Copyright (c) 2026 The BTX developers
+// Distributed under the MIT software license, see the accompanying
+// file COPYING or https://opensource.org/license/mit/.
+
+#ifndef BITCOIN_MODELNET_LAB_EXCHANGE_H
+#define BITCOIN_MODELNET_LAB_EXCHANGE_H
+
+#include <cstdint>
+#include <string>
+#include <vector>
+
+namespace modelnet {
+
+struct ExchangeObject {
+    std::string kind;
+    std::string digest;
+    std::string content;
+};
+
+/**
+ * Write `objects` as a manifest the receiver can verify without the sender's
+ * process. Each digest is the Git object digest of kind and content.
+ * A later import of different bytes under the same digest fails closed.
+ */
+bool WriteExchangeManifest(const std::vector<ExchangeObject>& objects, std::string& manifest_json, std::string& err);
+
+/** Verify every object and return the accepted rows. Does not trust the claimed digest. */
+bool VerifyExchangeManifest(const std::string& manifest_json, std::vector<ExchangeObject>& objects, std::string& err);
+
+/**
+ * Ask 127.0.0.1:`port` for lab.snapshot_export over JSON-RPC and verify the
+ * manifest it returns. Any other host is BTX035_SCOPE_DENIED.
+ */
+bool PullExchangeLoopback(const std::string& host, uint16_t port, const std::string& rpc_user,
+                          const std::string& rpc_password, const std::string& repository_id,
+                          std::string& manifest_json, std::string& err);
+
+} // namespace modelnet
+
+#endif // BITCOIN_MODELNET_LAB_EXCHANGE_H

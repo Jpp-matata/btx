@@ -4,6 +4,8 @@
 
 #include <modelnet/helper.h>
 
+#include <modelnet/admission_routes.h>
+
 #include <crypto/common.h>
 #include <crypto/sha256.h>
 #include <modelnet/community.h>
@@ -2345,6 +2347,11 @@ bool DemandSeedIfDownloadable(ModelCatalog& cat, const Digest48& id, std::string
         err = "unknown model";
         return false;
     }
+    std::string admission_code;
+    if (!LivePathAllowed(id.Hex(), false, admission_code)) {
+        err = admission_code;
+        return false;
+    }
     if (!PlaintextServeAllowed(cat, e)) {
         if (e.seeded) {
             std::string uerr;
@@ -4446,6 +4453,12 @@ bool ImportAndPublish(ModelCatalog& cat, const std::string& path, bool pin, bool
     ModelSearchRecord rec = DraftSearchFromCatalog(e);
     rec.btx_uri = uri;
     if (publish) {
+        std::string admission_code;
+        if (!LivePathAllowed(e.model_id.Hex(), false, admission_code)) {
+            err_code = admission_code;
+            err = "admission denied";
+            return false;
+        }
         EnsureSearchBound();
         EnsureEconomy(cat);
         {
@@ -7390,6 +7403,12 @@ bool DispatchHelperRpc(ModelCatalog& cat, const UniValue& request, UniValue& res
             return false;
         }
         if (method == "seedmodel") {
+            std::string admission_code;
+            if (!LivePathAllowed(id.Hex(), false, admission_code)) {
+                err_code = admission_code;
+                err = "admission denied";
+                return false;
+            }
             CatalogEntry seeded_entry;
             if (cat.Find(id, seeded_entry) && !PlaintextServeAllowed(cat, seeded_entry)) {
                 err_code = "NOT_DOWNLOADABLE";
@@ -8431,6 +8450,12 @@ bool DispatchHelperRpc(ModelCatalog& cat, const UniValue& request, UniValue& res
             err_code = "NOT_FOUND";
             return false;
         }
+        std::string admission_code;
+        if (!LivePathAllowed(e.model_id.Hex(), false, admission_code)) {
+            err_code = admission_code;
+            err = "admission denied";
+            return false;
+        }
         if (e.incomplete) {
             err_code = "INCOMPLETE";
             err = "incomplete replica cannot be loaded";
@@ -8570,6 +8595,12 @@ bool DispatchHelperRpc(ModelCatalog& cat, const UniValue& request, UniValue& res
         CatalogEntry e;
         if (id.IsNull() || !cat.Find(id, e)) {
             err_code = "NOT_FOUND";
+            return false;
+        }
+        std::string admission_code;
+        if (!LivePathAllowed(e.model_id.Hex(), true, admission_code)) {
+            err_code = admission_code;
+            err = "admission denied";
             return false;
         }
         if (e.incomplete) {

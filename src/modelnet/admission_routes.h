@@ -40,6 +40,13 @@ void RegisterStrictModel(const std::string& model_id, StrictAdmissionRecord reco
 bool RouteMayServe(const std::string& model_id, bool byte_hash_matches, std::string& admission);
 bool RouteMayGenerate(const std::string& model_id, bool byte_hash_matches, std::string& admission);
 
+/**
+ * Live host, seed, publish, load, and generate paths call this before they
+ * activate a model. An unregistered id with no quarantine stays allowed.
+ * `code` is empty on success and a BTX035_* code on refusal.
+ */
+bool LivePathAllowed(const std::string& model_id, bool generate, std::string& code);
+
 } // namespace modelnet
 
 #endif // BITCOIN_MODELNET_ADMISSION_ROUTES_H

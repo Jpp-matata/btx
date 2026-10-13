@@ -1,0 +1,193 @@
+// Copyright (c) 2026 The BTX developers
+// Distributed under the MIT software license, see the accompanying
+// file COPYING or https://opensource.org/license/mit/.
+
+#include <modelnet/lab_exchange.h>
+
+#include <modelnet/git_snapshot.h>
+#include <span.h>
+#include <univalue.h>
+
+#include <cstdint>
+#include <cstring>
+#include <sstream>
+#include <string>
+#include <vector>
+
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#endif
+
+namespace modelnet {
+namespace {
+
+bool Fail(std::string& err, const char* code)
+{
+    err = code;
+    return false;
+}
+
+void CloseSock(int fd)
+{
+#ifdef _WIN32
+    closesocket(fd);
+#else
+    close(fd);
+#endif
+}
+
+} // namespace
+
+bool WriteExchangeManifest(const std::vector<ExchangeObject>& objects, std::string& manifest_json, std::string& err)
+{
+    if (objects.empty()) return Fail(err, "BTX035_NOT_FOUND");
+    UniValue arr(UniValue::VARR);
+    for (const ExchangeObject& object : objects) {
+        const std::vector<unsigned char> bytes(object.content.begin(), object.content.end());
+        std::string digest;
+        if (!GitObjectDigest(object.kind, Span<const unsigned char>{bytes.data(), bytes.size()}, digest, err)) return false;
+        if (digest != object.digest) return Fail(err, "BTX035_ID_MISMATCH");
+        UniValue row(UniValue::VOBJ);
+        row.pushKV("kind", object.kind);
+        row.pushKV("digest", digest);
+        row.pushKV("content", object.content);
+        arr.push_back(std::move(row));
+    }
+    UniValue root(UniValue::VOBJ);
+    root.pushKV("objects", arr);
+    manifest_json = root.write();
+    err.clear();
+    return true;
+}
+
+bool VerifyExchangeManifest(const std::string& manifest_json, std::vector<ExchangeObject>& objects, std::string& err)
+{
+    UniValue root;
+    if (!root.read(manifest_json) || !root.isObject() || !root.exists("objects") || !root["objects"].isArray() ||
+        root["objects"].empty()) {
+        return Fail(err, "BTX035_SCHEMA");
+    }
+    objects.clear();
+    for (size_t i = 0; i < root["objects"].size(); ++i) {
+        const UniValue& row = root["objects"][i];
+        if (!row.isObject() || !row.exists("kind") || !row["kind"].isStr() || !row.exists("digest") ||
+            !row["digest"].isStr() || !row.exists("content") || !row["content"].isStr()) {
+            return Fail(err, "BTX035_SCHEMA");
+        }
+        ExchangeObject object;
+        object.kind = row["kind"].get_str();
+        object.digest = row["digest"].get_str();
+        object.content = row["content"].get_str();
+        const std::vector<unsigned char> bytes(object.content.begin(), object.content.end());
+        std::string digest;
+        if (!GitObjectDigest(object.kind, Span<const unsigned char>{bytes.data(), bytes.size()}, digest, err)) return false;
+        if (digest != object.digest) return Fail(err, "BTX035_ID_MISMATCH");
+        objects.push_back(std::move(object));
+    }
+    err.clear();
+    return true;
+}
+
+bool PullExchangeLoopback(const std::string& host, uint16_t port, const std::string& rpc_user,
+                          const std::string& rpc_password, const std::string& repository_id,
+                          std::string& manifest_json, std::string& err)
+{
+    if (host != "127.0.0.1" || port == 0 || repository_id.empty()) return Fail(err, "BTX035_SCOPE_DENIED");
+    UniValue inner(UniValue::VOBJ);
+    inner.pushKV("repository_id", repository_id);
+    inner.pushKV("idempotency_key", "peer-snapshot-pull");
+    inner.pushKV("expected_state", UniValue());
+    UniValue params(UniValue::VARR);
+    params.push_back("lab.snapshot_export");
+    params.push_back(inner.write());
+    UniValue rpc_body(UniValue::VOBJ);
+    rpc_body.pushKV("jsonrpc", "1.0");
+    rpc_body.pushKV("id", "lab");
+    rpc_body.pushKV("method", "lab035");
+    rpc_body.pushKV("params", params);
+    const std::string body = rpc_body.write();
+    std::ostringstream request;
+    request << "POST / HTTP/1.1\r\nHost: 127.0.0.1:" << port
+            << "\r\nAuthorization: Basic ";
+    const std::string raw = rpc_user + ":" + rpc_password;
+    static const char* kB64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string auth;
+    for (size_t i = 0; i < raw.size(); i += 3) {
+        const unsigned int a = static_cast<unsigned char>(raw[i]);
+        const unsigned int b = i + 1 < raw.size() ? static_cast<unsigned char>(raw[i + 1]) : 0;
+        const unsigned int c = i + 2 < raw.size() ? static_cast<unsigned char>(raw[i + 2]) : 0;
+        const unsigned int triple = (a << 16) | (b << 8) | c;
+        auth.push_back(kB64[(triple >> 18) & 63]);
+        auth.push_back(kB64[(triple >> 12) & 63]);
+        auth.push_back(i + 1 < raw.size() ? kB64[(triple >> 6) & 63] : '=');
+        auth.push_back(i + 2 < raw.size() ? kB64[triple & 63] : '=');
+    }
+    request << auth << "\r\nContent-Type: application/json\r\nContent-Length: " << body.size()
+            << "\r\nConnection: close\r\n\r\n"
+            << body;
+
+#ifdef _WIN32
+    WSADATA wsa;
+    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) return Fail(err, "BTX035_TRANSPORT");
+#endif
+    const int fd = static_cast<int>(socket(AF_INET, SOCK_STREAM, 0));
+    if (fd < 0) return Fail(err, "BTX035_TRANSPORT");
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_port = htons(port);
+    if (inet_pton(AF_INET, "127.0.0.1", &address.sin_addr) != 1) {
+        CloseSock(fd);
+        return Fail(err, "BTX035_SCOPE_DENIED");
+    }
+    if (connect(fd, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0) {
+        CloseSock(fd);
+        return Fail(err, "BTX035_TRANSPORT");
+    }
+    const std::string bytes = request.str();
+    size_t sent = 0;
+    while (sent < bytes.size()) {
+        const auto n = send(fd, bytes.data() + sent, bytes.size() - sent, 0);
+        if (n <= 0) {
+            CloseSock(fd);
+            return Fail(err, "BTX035_TRANSPORT");
+        }
+        sent += static_cast<size_t>(n);
+    }
+    std::string response;
+    char buf[4096];
+    while (true) {
+        const auto n = recv(fd, buf, sizeof(buf), 0);
+        if (n < 0) {
+            CloseSock(fd);
+            return Fail(err, "BTX035_TRANSPORT");
+        }
+        if (n == 0) break;
+        response.append(buf, buf + n);
+    }
+    CloseSock(fd);
+    const auto split = response.find("\r\n\r\n");
+    if (split == std::string::npos) return Fail(err, "BTX035_TRANSPORT");
+    const std::string payload = response.substr(split + 4);
+    const auto json_at = payload.find('{');
+    if (json_at == std::string::npos) return Fail(err, "BTX035_TRANSPORT");
+    UniValue rpc;
+    if (!rpc.read(payload.substr(json_at)) || !rpc.isObject() || !rpc.exists("result") || !rpc["result"].isObject()) {
+        return Fail(err, "BTX035_SCHEMA");
+    }
+    const UniValue& envelope = rpc["result"];
+    if (!envelope.exists("result") || !envelope["result"].isObject() || !envelope["result"].exists("manifest") ||
+        !envelope["result"]["manifest"].isStr()) {
+        return Fail(err, "BTX035_SCHEMA");
+    }
+    manifest_json = envelope["result"]["manifest"].get_str();
+    std::vector<ExchangeObject> objects;
+    return VerifyExchangeManifest(manifest_json, objects, err);
+}
+
+} // namespace modelnet

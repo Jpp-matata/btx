@@ -7,11 +7,15 @@
 #include <modelnet/action_authority.h>
 #include <modelnet/canonical_codec.h>
 #include <modelnet/git_snapshot.h>
+#include <modelnet/guard_machine.h>
 #include <modelnet/identity.h>
+#include <modelnet/lab_exchange.h>
 #include <modelnet/model_admission.h>
 #include <modelnet/pq_delegation.h>
 #include <modelnet/realm_channel.h>
 #include <modelnet/research_graph.h>
+#include <modelnet/research_views.h>
+#include <modelnet/training_integer.h>
 #include <modelnet/workspace_journal.h>
 #include <crypto/sha384.h>
 #include <span.h>
@@ -20,6 +24,7 @@
 #include <util/fs.h>
 #include <util/strencodings.h>
 
+#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
@@ -65,6 +70,26 @@ struct IssuedPermit {
     int64_t not_after_ms{0};
 };
 
+struct TrainKept {
+    IntegerState state;
+    std::vector<Interval> intervals;
+    std::string author;
+};
+
+/** Bearer that authorizes one snapshot export of one repository. */
+struct FetchTicket {
+    std::string repository_id;
+    std::string operation;
+    int64_t max_bytes{0};
+    int64_t not_after_ms{0};
+    bool consumed{false};
+};
+
+int64_t NowMs()
+{
+    return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+}
+
 struct Store {
     Store() : gate(std::make_unique<ActionGate>()) {}
     std::unique_ptr<ActionGate> gate;
@@ -98,8 +123,15 @@ struct Store {
     std::map<std::string, std::string> lineage;
     std::map<std::string, std::string> bindings;
     std::set<std::string> migrations;
+    std::set<std::string> migration_plans;
     std::map<std::string, std::string> tokens;
     std::string token_subject;
+    GuardTable guards;
+    std::map<std::string, TrainKept> trains;
+    std::vector<ResearchObservation> observations;
+    std::map<std::string, std::vector<ExchangeObject>> repo_objects;
+    std::map<std::string, FetchTicket> fetch_tickets;
+    std::vector<std::string> endpoint_receipts;
 };
 
 Store& State()
@@ -630,12 +662,37 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
             !Digest48::FromHex(store.active_root, author, err)) {
             return false;
         }
-        if (!store.research.Publish(topic, cid, author, false, record_id, err)) return false;
+        const std::string visibility = RequireStr(req, "visibility");
+        const bool negative = visibility == "NEGATIVE";
+        if (!store.research.Publish(topic, cid, author, negative, record_id, err)) return false;
         store.published.push_back(record_id);
         store.records[record_id] = req.write();
+        ResearchObservation observation;
+        observation.record_id = record_id;
+        observation.topic_id = topic_hex;
+        observation.author_id = store.active_root;
+        observation.content_hash = record_id;
+        observation.negative = negative;
+        observation.is_private = visibility == "PRIVATE";
+        observation.sequence = store.published.size();
+        observation.reproduction_count = visibility == "REPRODUCED" ? 1 : 0;
+        observation.contest_count = visibility == "CONTESTED" ? 1 : 0;
+        store.observations.push_back(std::move(observation));
         return Rec(result, record_id, "PUBLISHED");
     }
-    if (method == "lab.research_query" || method == "lab.research_frontier" || method == "lab.git_refs" || method == "lab.agent_lineage") {
+    if (method == "lab.research_frontier") {
+        ResearchView view;
+        if (!ParseResearchView(RequireStr(req, "view"), view, err)) return false;
+        std::vector<std::string> ids;
+        if (!SortResearchView(view, store.observations, true, ids, err)) return false;
+        int limit = 100;
+        if (req.exists("limit") && req["limit"].isNum()) limit = req["limit"].getInt<int>();
+        if (limit < 1) limit = 1;
+        if (static_cast<int>(ids.size()) > limit) ids.resize(static_cast<size_t>(limit));
+        QueryOut(result, ids, method + req.write());
+        return true;
+    }
+    if (method == "lab.research_query" || method == "lab.git_refs" || method == "lab.agent_lineage") {
         std::vector<std::string> ids = store.published;
         if (method == "lab.agent_lineage") {
             ids.clear();
@@ -650,21 +707,105 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
         QueryOut(result, ids, method + req.write());
         return true;
     }
-    if (method == "lab.research_context" || method == "lab.source_query") {
-        result.pushKV("result_ref", RefOf("RECORD", Id96(method + req.write())));
-        result.pushKV("coverage", Coverage("LOCAL"));
-        if (method == "lab.source_query") result.pushKV("index_source_roots", UniValue(UniValue::VARR));
+    if (method == "lab.research_context") {
+        std::vector<std::string> ids;
+        std::set<std::string> roots;
+        if (req["root_ids"].isArray()) {
+            for (size_t i = 0; i < req["root_ids"].size(); ++i) {
+                if (req["root_ids"][i].isStr()) roots.insert(req["root_ids"][i].get_str());
+            }
+        }
+        int max_records = 0;
+        if (req.exists("max_records") && req["max_records"].isNum()) max_records = req["max_records"].getInt<int>();
+        for (const ResearchObservation& observation : store.observations) {
+            if (!roots.count(observation.record_id) && !roots.count(observation.topic_id) && !roots.count(observation.author_id)) continue;
+            ids.push_back(observation.record_id);
+            if (max_records > 0 && static_cast<int>(ids.size()) >= max_records) break;
+        }
+        QueryOut(result, ids, method + req.write());
         return true;
     }
-    if (method == "lab.research_execute" || method == "lab.artifact_acquire" || method == "lab.agent_adopt" ||
-        method == "lab.promotion_verify" || method == "lab.workspace_hydrate" || method == "lab.workspace_restore") {
-        if (!Expect(store, req, method + "|" + RequireStr(req, "idempotency_key"), err)) return false;
-        const char* physical = "NOT_DISPATCHED";
-        const char* state = "RUNNING";
-        if (method == "lab.research_execute" && !store.grants.count(RequireStr(req, "local_capability_grant_id"))) {
-            state = "FAILED";
-            physical = "STOPPED_QUIESCENT";
+    if (method == "lab.source_query") {
+        const std::string query = RequireStr(req, "query");
+        int limit = 0;
+        if (req.exists("limit") && req["limit"].isNum()) limit = req["limit"].getInt<int>();
+        if (limit < 0) return Fail(err, "BTX035_SCHEMA");
+        std::set<std::string> wanted;
+        if (req["snapshot_ids"].isArray()) {
+            for (size_t i = 0; i < req["snapshot_ids"].size(); ++i) {
+                if (req["snapshot_ids"][i].isStr()) wanted.insert(req["snapshot_ids"][i].get_str());
+            }
         }
+        UniValue matches(UniValue::VARR);
+        UniValue roots(UniValue::VARR);
+        for (const auto& entry : store.repo_objects) {
+            bool used = false;
+            for (const ExchangeObject& object : entry.second) {
+                if (!wanted.empty() && !wanted.count(entry.first) && !wanted.count(object.digest)) continue;
+                if (!query.empty() && object.content.find(query) == std::string::npos) continue;
+                if (!HexN(object.digest, 96)) continue;
+                matches.push_back(object.digest);
+                used = true;
+                if (limit > 0 && static_cast<int>(matches.size()) >= limit) break;
+            }
+            if (used && HexN(entry.first, 96)) roots.push_back(entry.first);
+            if (limit > 0 && static_cast<int>(matches.size()) >= limit) break;
+        }
+        result.pushKV("matches", matches);
+        result.pushKV("index_source_roots", roots);
+        UniValue coverage = Coverage("LOCAL");
+        coverage.pushKV("complete", true);
+        coverage.pushKV("observed_records", std::to_string(matches.size()));
+        result.pushKV("coverage", coverage);
+        return true;
+    }
+    if (method == "lab.research_execute") {
+        if (!Expect(store, req, method + "|" + RequireStr(req, "idempotency_key"), err)) return false;
+        if (!store.grants.count(RequireStr(req, "local_capability_grant_id"))) {
+            return OpOut(store, result, id, "FAILED", "STOPPED_QUIESCENT");
+        }
+        if (RequireStr(req, "recipe_id") != INTEGER_PROFILE) return Fail(err, "BTX035_PROFILE");
+        IntegerTrainer trainer;
+        if (!trainer.Run(IntegerDataset().size(), err)) return false;
+        TrainKept kept;
+        kept.state = trainer.State();
+        kept.intervals = trainer.Intervals();
+        kept.author = store.active_root;
+        for (Interval& interval : kept.intervals) interval.ancestry = kept.author;
+        store.trains[id] = std::move(kept);
+        store.records[id] = store.trains[id].state.state_hash;
+        return OpOut(store, result, id, "COMPLETE", "STOPPED_QUIESCENT");
+    }
+    if (method == "lab.artifact_acquire") {
+        if (!Expect(store, req, method + "|" + RequireStr(req, "idempotency_key"), err)) return false;
+        int64_t max_bytes = 0;
+        if (!ParseDec(RequireStr(req, "max_bytes"), max_bytes) || max_bytes < 0) return Fail(err, "BTX035_SCHEMA");
+        const UniValue& resource = req["resource"];
+        const std::string digest = resource.isObject() && resource.exists("digest") && resource["digest"].isStr() ? resource["digest"].get_str() : "";
+        std::string content;
+        bool found = false;
+        if (!digest.empty()) {
+            for (const auto& entry : store.repo_objects) {
+                for (const ExchangeObject& object : entry.second) {
+                    if (object.digest != digest) continue;
+                    content = object.content;
+                    found = true;
+                    break;
+                }
+                if (found) break;
+            }
+        }
+        if (!found || static_cast<int64_t>(content.size()) > max_bytes) {
+            return OpOut(store, result, id, "FAILED", "STOPPED_QUIESCENT");
+        }
+        store.records[id] = std::move(content);
+        return OpOut(store, result, id, "COMPLETE", "STOPPED_QUIESCENT");
+    }
+    if (method == "lab.agent_adopt" || method == "lab.promotion_verify" ||
+        method == "lab.workspace_hydrate" || method == "lab.workspace_restore") {
+        if (!Expect(store, req, method + "|" + RequireStr(req, "idempotency_key"), err)) return false;
+        const char* physical = "STOPPED_QUIESCENT";
+        const char* state = "FAILED";
         if (method == "lab.agent_adopt") {
             bool ready = store.grants.count(RequireStr(req, "grant_id")) != 0 && req["evaluation_ids"].isArray() && !req["evaluation_ids"].empty();
             if (ready) {
@@ -672,20 +813,41 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
                     if (!req["evaluation_ids"][i].isStr() || !store.records.count(req["evaluation_ids"][i].get_str())) ready = false;
                 }
             }
+            const std::string release = RequireStr(req, "release_id");
+            const std::string prior = RequireStr(req, "prior_release_id");
+            const std::string grant = RequireStr(req, "grant_id");
+            if (ready && (!prior.empty() && prior == release)) ready = false;
+            if (ready && store.identity_sk.count(grant)) ready = false;
             if (!ready) {
                 state = "FAILED";
                 physical = "STOPPED_QUIESCENT";
             } else {
-                store.lineage[RequireStr(req, "release_id")] = RequireStr(req, "prior_release_id");
+                if (store.lineage.count(release)) store.records["previous|" + release] = store.lineage[release];
+                store.lineage[release] = prior;
                 state = "COMPLETE";
                 physical = "STOPPED_QUIESCENT";
             }
         }
-        if (method == "lab.promotion_verify" && !store.records.count(RequireStr(req, "promotion_id"))) {
-            state = "FAILED";
+        if (method == "lab.promotion_verify") {
+            bool ready = store.records.count(RequireStr(req, "promotion_id")) != 0 && req["attestation_ids"].isArray() && !req["attestation_ids"].empty();
+            if (ready) {
+                for (size_t i = 0; i < req["attestation_ids"].size(); ++i) {
+                    if (!req["attestation_ids"][i].isStr() || !store.records.count(req["attestation_ids"][i].get_str())) ready = false;
+                }
+            }
+            state = ready ? "COMPLETE" : "FAILED";
             physical = "STOPPED_QUIESCENT";
         }
-        if (method == "lab.workspace_hydrate" && !store.workspace_backend.count(RequireStr(req, "workspace_id"))) return Fail(err, "BTX035_NOT_FOUND");
+        if (method == "lab.workspace_hydrate") {
+            const std::string ws = RequireStr(req, "workspace_id");
+            if (!store.workspace_backend.count(ws)) return Fail(err, "BTX035_NOT_FOUND");
+            int64_t want = 0;
+            if (!ParseDec(RequireStr(req, "generation"), want) || want < 0) return Fail(err, "BTX035_SCHEMA");
+            if (static_cast<uint64_t>(want) == store.workspaces.Generation(ws)) {
+                state = "COMPLETE";
+                physical = "STOPPED_QUIESCENT";
+            }
+        }
         if (method == "lab.workspace_restore") {
             if (!store.checkpoints.count(RequireStr(req, "checkpoint_id"))) return Fail(err, "BTX035_NOT_FOUND");
             const std::string ws = store.checkpoints[RequireStr(req, "checkpoint_id")];
@@ -703,10 +865,18 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
             store.repo_commit[repo] = RequireStr(req, "required_commit");
             return OpOut(store, result, id, "COMPLETE", "STOPPED_QUIESCENT");
         }
-        const std::string commit = RequireStr(req, "commit");
+        std::string commit;
+        if (req["commit"].isStr()) commit = req["commit"].get_str();
+        else if (req["commit"].isObject() || req["commit"].isArray()) commit = req["commit"].write();
+        else return Fail(err, "BTX035_SCHEMA");
         const std::vector<unsigned char> bytes(commit.begin(), commit.end());
         std::string digest;
         if (!GitObjectDigest("commit", Span<const unsigned char>{bytes.data(), bytes.size()}, digest, err)) return false;
+        ExchangeObject object;
+        object.kind = "commit";
+        object.digest = digest;
+        object.content = commit;
+        store.repo_objects[repo].push_back(object);
         store.records[Id96(digest)] = digest;
         if (req["history_required"].isTrue()) return OpOut(store, result, id, "FAILED", "STOPPED_QUIESCENT");
         store.snapshots.insert(id);
@@ -714,11 +884,26 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
     }
     if (method == "lab.git_fetch_ticket") {
         if (!Expect(store, req, "ticket|" + RequireStr(req, "repository_id"), err)) return false;
-        if (!store.repos.count(RequireStr(req, "repository_id"))) return Fail(err, "BTX035_NOT_FOUND");
-        const std::string ticket = Id64("ticket|" + RequireStr(req, "repository_id") + "|" + RequireStr(req, "idempotency_key"));
+        const std::string repo = RequireStr(req, "repository_id");
+        if (!store.repos.count(repo)) return Fail(err, "BTX035_NOT_FOUND");
+        const std::string operation = RequireStr(req, "operation");
+        if (operation.empty()) return Fail(err, "BTX035_SCHEMA");
+        int64_t max_bytes = 0;
+        if (!ParseDec(RequireStr(req, "max_bytes"), max_bytes) || max_bytes < 0) return Fail(err, "BTX035_SCHEMA");
+        const std::string ticket = GuardRandomHex();
+        if (ticket.size() != 64 || store.fetch_tickets.count(ticket)) return Fail(err, "BTX035_PERMIT");
+        FetchTicket row;
+        row.repository_id = repo;
+        row.operation = operation;
+        row.max_bytes = max_bytes;
+        row.not_after_ms = NowMs() + GuardTable::kPermitTtlMs;
+        store.fetch_tickets.emplace(ticket, row);
+        const auto objects = store.repo_objects.find(repo);
         result.pushKV("ticket", ticket);
-        result.pushKV("expires_ms", "30000");
-        result.pushKV("socket_path", "btx-git:" + ticket);
+        result.pushKV("expires_ms", std::to_string(row.not_after_ms));
+        result.pushKV("repository_id", repo);
+        result.pushKV("object_count", static_cast<int>(objects == store.repo_objects.end() ? 0 : objects->second.size()));
+        result.pushKV("transport", "lab.snapshot_export");
         return true;
     }
     if (method == "lab.git_attest") {
@@ -735,8 +920,10 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
     }
     if (method == "lab.git_push_authorize") {
         if (!Expect(store, req, "push|" + RequireStr(req, "batch_id"), err)) return false;
-        if (!HexN(RequireStr(req, "batch_id"), 96)) return Fail(err, "BTX035_SCHEMA");
-        result.pushKV("transaction_id", Id96("tx|" + RequireStr(req, "batch_id")));
+        const std::string batch = RequireStr(req, "batch_id");
+        if (!HexN(batch, 96)) return Fail(err, "BTX035_SCHEMA");
+        if (!store.records.count(batch) && !store.repos.count(batch)) return Fail(err, "BTX035_NOT_FOUND");
+        result.pushKV("transaction_id", Id96("tx|" + batch));
         result.pushKV("state", "PREPARED");
         return true;
     }
@@ -822,13 +1009,33 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
     }
     if (method == "lab.admission_evaluate") {
         if (!Expect(store, req, "admit|" + RequireStr(req, "model_ref"), err)) return false;
-        std::vector<std::string> roots;
+        std::vector<std::string> evidence_ids;
         if (req["evidence_ids"].isArray()) {
             for (size_t i = 0; i < req["evidence_ids"].size(); ++i) {
-                if (req["evidence_ids"][i].isStr()) roots.push_back(req["evidence_ids"][i].get_str());
+                if (req["evidence_ids"][i].isStr()) evidence_ids.push_back(req["evidence_ids"][i].get_str());
             }
         }
-        const AdmissionResult decision = Admit(Assurance::PUBLIC_STRICT, false, {}, 0, "", "", roots, false);
+        std::vector<Interval> intervals;
+        std::vector<std::string> roots;
+        std::string start_state;
+        std::string final_state;
+        uint64_t total = 0;
+        bool hash_ok = !evidence_ids.empty();
+        for (const std::string& evidence : evidence_ids) {
+            const auto train = store.trains.find(evidence);
+            if (train == store.trains.end()) {
+                hash_ok = false;
+                continue;
+            }
+            std::string check_err;
+            if (!IntegerTrainer::CheckState(train->second.state, check_err)) hash_ok = false;
+            if (start_state.empty() && !train->second.intervals.empty()) start_state = train->second.intervals.front().start_state;
+            if (!train->second.intervals.empty()) final_state = train->second.intervals.back().end_state;
+            if (train->second.state.step > total) total = train->second.state.step;
+            intervals.insert(intervals.end(), train->second.intervals.begin(), train->second.intervals.end());
+            if (!train->second.author.empty()) roots.push_back(train->second.author);
+        }
+        const AdmissionResult decision = Admit(Assurance::PUBLIC_STRICT, hash_ok, intervals, total, start_state, final_state, roots, false);
         store.admissions[id] = decision.admitted ? "ADMITTED" : decision.code;
         return OpOut(store, result, id, decision.admitted ? "COMPLETE" : "FAILED", "STOPPED_QUIESCENT");
     }
@@ -851,36 +1058,49 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
         if (!Expect(store, req, "prepare|" + RequireStr(req, "intent_id"), err)) return false;
         const std::string intent = RequireStr(req, "intent_id");
         if (!HexN(intent, 96)) return Fail(err, "BTX035_SCHEMA");
+        const int64_t now = NowMs();
+        GuardPermit issued;
+        if (!store.guards.Prepare("research.run", Id96("fp|" + intent), 1, now, issued, err)) return false;
         ActionPermit permit;
-        permit.permit_id = Id96("permit|" + intent + "|" + RequireStr(req, "idempotency_key"));
+        permit.permit_id = issued.commitment;
         permit.grant_id = intent;
-        permit.generation = 1;
-        permit.effect = "lab.action";
-        permit.not_after_ms = 32503680000000LL;
-        permit.parameter_fingerprint = Id96("fp|" + intent);
+        permit.generation = issued.generation;
+        permit.effect = issued.effect;
+        permit.not_after_ms = issued.not_after_ms;
+        permit.parameter_fingerprint = issued.fingerprint;
         if (!store.gate->Issue(permit, err)) return false;
         IssuedPermit row;
         row.effect = permit.effect;
         row.generation = permit.generation;
         row.fingerprint = permit.parameter_fingerprint;
         row.not_after_ms = permit.not_after_ms;
-        store.permit_rows[permit.permit_id] = row;
+        store.permit_rows[issued.secret] = row;
         store.grants[intent] = "ALLOW";
-        return Rec(result, permit.permit_id, "PREPARED");
+        result.pushKV("one_use_permit", issued.secret);
+        result.pushKV("permit_commitment", issued.commitment);
+        return Rec(result, issued.commitment, "PREPARED");
     }
     if (method == "lab.action_execute") {
         if (!Expect(store, req, "exec|" + RequireStr(req, "one_use_permit"), err)) return false;
-        const std::string permit_id = RequireStr(req, "one_use_permit");
-        const auto it = store.permit_rows.find(permit_id);
+        const std::string secret = RequireStr(req, "one_use_permit");
+        const auto it = store.permit_rows.find(secret);
         if (it == store.permit_rows.end()) return Fail(err, "BTX035_PERMIT");
-        const IssuedPermit& row = it->second;
-        if (!store.gate->Consume(permit_id, row.effect, row.generation, 1, row.fingerprint, err)) return false;
-        return Rec(result, Id96("exec|" + permit_id), "EXECUTED");
+        const IssuedPermit row = it->second;
+        const int64_t now = NowMs();
+        std::string receipt;
+        if (!store.guards.Execute(secret, now, receipt, err)) return false;
+        if (!store.gate->Consume(GuardCommitment(secret), row.effect, row.generation, now, row.fingerprint, err)) return false;
+        result.pushKV("physical_disposition", "STOPPED_QUIESCENT");
+        return Rec(result, receipt, "EXECUTED");
     }
     if (method == "lab.runtime_bind") {
         if (!Expect(store, req, "bind|" + RequireStr(req, "release_id"), err)) return false;
+        const std::string assurance = RequireStr(req, "assurance");
+        if (assurance == "SOFTWARE_ISOLATED" || assurance == "VM_ISOLATED" || assurance == "HARDWARE_ATTESTED") {
+            if (std::getenv("BTX_GUARD_PORT") == nullptr) return Fail(err, "BTX035_SCOPE_DENIED");
+        }
         const std::string binding = Id96("bind|" + RequireStr(req, "release_id") + "|" + RequireStr(req, "environment_ref"));
-        store.bindings[binding] = RequireStr(req, "assurance");
+        store.bindings[binding] = assurance;
         return Rec(result, binding, "BOUND");
     }
     if (method == "lab.runtime_pause") {
@@ -888,6 +1108,7 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
         const std::string binding = RequireStr(req, "runtime_binding_id");
         if (!store.bindings.count(binding)) return Fail(err, "BTX035_NOT_FOUND");
         store.gate->Pause();
+        store.guards.Pause();
         store.paused_bindings.insert(binding);
         result.pushKV("state", "PAUSED");
         result.pushKV("receipt_id", Id96("pause|" + binding));
@@ -899,7 +1120,10 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
         if (!store.paused_bindings.count(binding)) return Fail(err, "BTX035_NOT_FOUND");
         if (!store.grants.count(RequireStr(req, "new_grant_id"))) return Fail(err, "BTX035_PERMIT");
         store.paused_bindings.erase(binding);
-        if (store.paused_bindings.empty()) store.gate->Resume();
+        if (store.paused_bindings.empty()) {
+            store.gate->Resume();
+            store.guards.Resume();
+        }
         return Rec(result, Id96("resume|" + binding), "RESUMED");
     }
     if (method == "lab.journal_checkpoint") {
@@ -917,8 +1141,11 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
     }
     if (method == "lab.journal_witness") {
         if (!Expect(store, req, "wit|" + RequireStr(req, "checkpoint_id"), err)) return false;
-        if (!store.checkpoints.count(RequireStr(req, "checkpoint_id"))) return Fail(err, "BTX035_NOT_FOUND");
-        return Rec(result, Id96("wit|" + RequireStr(req, "checkpoint_id")), "WITNESSED");
+        const std::string checkpoint = RequireStr(req, "checkpoint_id");
+        if (!store.checkpoints.count(checkpoint)) return Fail(err, "BTX035_NOT_FOUND");
+        const std::string witness = "witness|" + checkpoint;
+        if (!store.records.count(witness)) return Fail(err, "BTX035_WITNESS");
+        return Rec(result, Id96("wit|" + checkpoint), "WITNESSED");
     }
     if (method == "lab.incident_publish") {
         if (!Expect(store, req, "inc|" + RequireStr(req, "incident_id"), err)) return false;
@@ -966,8 +1193,12 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
     }
     if (method == "lab.promotion_attest") {
         if (!Expect(store, req, "promo-att|" + RequireStr(req, "promotion_id"), err)) return false;
-        if (!store.records.count(RequireStr(req, "promotion_id"))) return Fail(err, "BTX035_NOT_FOUND");
-        return Rec(result, Id96("patt|" + RequireStr(req, "promotion_id")), "ATTESTED");
+        const std::string promotion = RequireStr(req, "promotion_id");
+        if (!store.records.count(promotion)) return Fail(err, "BTX035_NOT_FOUND");
+        if (!req["checks_ref"].isObject() || req["checks_ref"].getKeys().empty()) return Fail(err, "BTX035_SCHEMA");
+        const std::string attestation = Id96("patt|" + promotion);
+        store.records[attestation] = req.write();
+        return Rec(result, attestation, "ATTESTED");
     }
     if (method == "lab.channel_publish") {
         if (!Expect(store, req, "chan|" + RequireStr(req, "update_id"), err)) return false;
@@ -1039,7 +1270,9 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
         counts.pushKV("failed", std::to_string(fleet.unhealthy));
         if (store.plans[plan] == "PAUSED") counts.pushKV("paused", "1");
         if (method == "lab.rollout_endpoints") {
-            result.pushKV("endpoints", UniValue(UniValue::VARR));
+            UniValue endpoints(UniValue::VARR);
+            for (const std::string& receipt : store.endpoint_receipts) endpoints.push_back(receipt);
+            result.pushKV("endpoints", endpoints);
             result.pushKV("counts", counts);
             result.pushKV("target_set_root", Id96("targets|" + plan));
             result.pushKV("snapshot_id", Id96("ends|" + plan));
@@ -1061,6 +1294,7 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
         if (!Expect(store, req, "obs|" + RequireStr(req, "receipt_id"), err)) return false;
         if (!HexN(RequireStr(req, "receipt_id"), 96)) return Fail(err, "BTX035_SCHEMA");
         store.records[RequireStr(req, "receipt_id")] = req.write();
+        store.endpoint_receipts.push_back(RequireStr(req, "receipt_id"));
         return Rec(result, RequireStr(req, "receipt_id"), "OBSERVED");
     }
     if (method == "lab.trust_reconcile") {
@@ -1101,15 +1335,23 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
         return OpOut(store, result, id, "COMPLETE", "STOPPED_QUIESCENT");
     }
     if (method == "lab.migration_plan") {
-        result.pushKV("plan_ref", RefOf("RELEASE", Id96("plan|" + RequireStr(req, "target_version"))));
+        const std::string plan = Id96("plan|" + RequireStr(req, "target_version"));
+        store.migration_plans.insert(plan);
+        store.records[plan] = req.write();
+        result.pushKV("plan_ref", RefOf("RELEASE", plan));
         result.pushKV("legacy_model_count", "0");
         result.pushKV("requires_stop", false);
         return true;
     }
     if (method == "lab.migration_apply") {
         if (!Expect(store, req, "mig|" + RequireStr(req, "idempotency_key"), err)) return false;
-        if (!req["plan_ref"].isObject()) return Fail(err, "BTX035_SCHEMA");
+        if (!req["plan_ref"].isObject() || !req["backup_ref"].isObject()) return Fail(err, "BTX035_SCHEMA");
+        const std::string plan = req["plan_ref"].exists("digest48") && req["plan_ref"]["digest48"].isStr() ? req["plan_ref"]["digest48"].get_str() : "";
+        if (!store.migration_plans.count(plan) || !store.records.count(plan)) {
+            return OpOut(store, result, id, "FAILED", "STOPPED_QUIESCENT");
+        }
         store.migrations.insert(id);
+        store.records[id] = req.write();
         return OpOut(store, result, id, "COMPLETE", "STOPPED_QUIESCENT");
     }
     if (method == "lab.migration_verify") {
@@ -1158,12 +1400,82 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
         return true;
     }
     if (method == "lab.audit_coverage") {
-        result.pushKV("complete_path", false);
-        result.pushKV("accepted_attestation_ids", UniValue(UniValue::VARR));
+        const auto train = store.trains.find(RequireStr(req, "trajectory_id"));
         UniValue gaps(UniValue::VARR);
-        gaps.push_back("BTX035_NOT_FOUND");
+        UniValue accepted(UniValue::VARR);
+        bool complete = false;
+        if (train == store.trains.end()) {
+            gaps.push_back("BTX035_NOT_FOUND");
+        } else {
+            std::string check_err;
+            const bool state_ok = IntegerTrainer::CheckState(train->second.state, check_err);
+            const bool path_ok = !train->second.intervals.empty() &&
+                                 FullReplayCoverage(train->second.state.step, train->second.intervals.front().start_state,
+                                                    train->second.state.state_hash, train->second.intervals);
+            complete = state_ok && path_ok;
+            if (!complete) gaps.push_back(check_err.empty() ? "BTX035_REPLAY" : check_err);
+            else if (!train->second.author.empty()) accepted.push_back(train->second.author);
+        }
+        result.pushKV("complete_path", complete);
+        result.pushKV("accepted_attestation_ids", accepted);
         result.pushKV("gaps", gaps);
         result.pushKV("mode", "LOCAL_REPLAY");
+        return true;
+    }
+    if (method == "lab.snapshot_export") {
+        if (!Expect(store, req, "snapex|" + RequireStr(req, "repository_id"), err)) return false;
+        const std::string repo = RequireStr(req, "repository_id");
+        const auto it = store.repo_objects.find(repo);
+        if (it == store.repo_objects.end()) return Fail(err, "BTX035_NOT_FOUND");
+        if (req.exists("fetch_ticket") && req["fetch_ticket"].isStr() && !req["fetch_ticket"].get_str().empty()) {
+            const std::string ticket = req["fetch_ticket"].get_str();
+            const auto auth = store.fetch_tickets.find(ticket);
+            if (auth == store.fetch_tickets.end()) return Fail(err, "BTX035_PERMIT");
+            if (auth->second.consumed) return Fail(err, "BTX035_REPLAY");
+            if (auth->second.repository_id != repo) return Fail(err, "BTX035_ID_MISMATCH");
+            if (NowMs() > auth->second.not_after_ms) return Fail(err, "BTX035_EXPIRED");
+            int64_t bytes = 0;
+            for (const ExchangeObject& object : it->second) bytes += static_cast<int64_t>(object.content.size());
+            if (bytes > auth->second.max_bytes) return Fail(err, "BTX035_POLICY");
+        }
+        std::string manifest;
+        if (!WriteExchangeManifest(it->second, manifest, err)) return false;
+        if (req.exists("fetch_ticket") && req["fetch_ticket"].isStr() && !req["fetch_ticket"].get_str().empty()) {
+            store.fetch_tickets[req["fetch_ticket"].get_str()].consumed = true;
+        }
+        result.pushKV("manifest", manifest);
+        result.pushKV("object_count", static_cast<int>(it->second.size()));
+        return true;
+    }
+    if (method == "lab.snapshot_import") {
+        if (!Expect(store, req, "snapim|" + RequireStr(req, "idempotency_key"), err)) return false;
+        std::vector<ExchangeObject> objects;
+        if (!VerifyExchangeManifest(RequireStr(req, "manifest"), objects, err)) return false;
+        const std::string repo = Id96(RequireStr(req, "manifest"));
+        store.repos.insert(repo);
+        store.repo_objects[repo] = objects;
+        store.snapshots.insert(repo);
+        result.pushKV("repository_id", repo);
+        result.pushKV("object_count", static_cast<int>(objects.size()));
+        return true;
+    }
+    if (method == "lab.snapshot_pull") {
+        if (!Expect(store, req, "snappull|" + RequireStr(req, "idempotency_key"), err)) return false;
+        if (!req.exists("port") || !req["port"].isNum()) return Fail(err, "BTX035_SCHEMA");
+        const int port_num = req["port"].getInt<int>();
+        if (port_num <= 0 || port_num > 65535) return Fail(err, "BTX035_SCHEMA");
+        std::string manifest;
+        if (!PullExchangeLoopback(RequireStr(req, "host"), static_cast<uint16_t>(port_num), RequireStr(req, "rpc_user"),
+                                  RequireStr(req, "rpc_password"), RequireStr(req, "repository_id"), manifest, err)) {
+            return false;
+        }
+        std::vector<ExchangeObject> objects;
+        if (!VerifyExchangeManifest(manifest, objects, err)) return false;
+        const std::string repo = RequireStr(req, "repository_id");
+        store.repos.insert(repo);
+        store.repo_objects[repo] = std::move(objects);
+        result.pushKV("manifest", manifest);
+        result.pushKV("repository_id", repo);
         return true;
     }
     return Fail(err, "BTX035_NOT_IMPLEMENTED");

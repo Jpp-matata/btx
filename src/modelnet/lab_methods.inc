@@ -74,4 +74,7 @@ static const LabMethod kLabMethods[] = {
     {"lab.identity_refresh", "principal_id,challenge_nonce,idempotency_key,expected_state", "expected_state", "principal_id:string,challenge_nonce:string,idempotency_key:string,expected_state:string", LabKind::IDENTITY_REFRESH},
     {"lab.research_execute", "input_capsule_id,recipe_id,runtime_binding_id,research_grant_id,local_capability_grant_id,idempotency_key,expected_state", "expected_state", "input_capsule_id:string,recipe_id:string,runtime_binding_id:string,research_grant_id:string,local_capability_grant_id:string,idempotency_key:string,expected_state:string", LabKind::OP_START},
     {"lab.trust_reconcile", "anchor_record_ids,identity_state_ids,owner_approval_id,idempotency_key,expected_state", "expected_state", "anchor_record_ids:array,identity_state_ids:array,owner_approval_id:string,idempotency_key:string,expected_state:string", LabKind::RECORD},
+    {"lab.snapshot_export", "repository_id,idempotency_key,expected_state", "expected_state", "repository_id:string,idempotency_key:string,expected_state:string,fetch_ticket:string", LabKind::OP_START},
+    {"lab.snapshot_import", "manifest,idempotency_key,expected_state", "expected_state", "manifest:string,idempotency_key:string,expected_state:string", LabKind::OP_START},
+    {"lab.snapshot_pull", "host,port,rpc_user,rpc_password,repository_id,idempotency_key,expected_state", "expected_state", "host:string,port:integer,rpc_user:string,rpc_password:string,repository_id:string,idempotency_key:string,expected_state:string", LabKind::OP_START},
 };

@@ -71,4 +71,16 @@ bool RouteMayGenerate(const std::string& model_id, bool byte_hash_matches, std::
     return RouteDecision(model_id, byte_hash_matches, admission);
 }
 
+bool LivePathAllowed(const std::string& model_id, bool generate, std::string& code)
+{
+    std::string admission;
+    const bool ok = generate ? RouteMayGenerate(model_id, true, admission) : RouteMayServe(model_id, true, admission);
+    if (!ok) {
+        code = admission.empty() ? "BTX035_ADMISSION" : admission;
+        return false;
+    }
+    code.clear();
+    return true;
+}
+
 } // namespace modelnet

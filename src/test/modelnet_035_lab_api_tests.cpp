@@ -916,7 +916,10 @@ BOOST_AUTO_TEST_CASE(lab_methods_keep_state_and_reject_bad_transitions)
     prepare.pushKV("intent_id", hex_a);
     prepare.pushKV("idempotency_key", "idempotency-prepare");
     prepare.pushKV("expected_state", UniValue());
-    const std::string permit = LabResult("lab.action_prepare", prepare)["record_id"].get_str();
+    const UniValue prepared = LabResult("lab.action_prepare", prepare);
+    const std::string permit = prepared["one_use_permit"].get_str();
+    BOOST_CHECK_NE(permit, prepared["record_id"].get_str());
+    BOOST_CHECK_EQUAL(prepared["record_id"].get_str(), prepared["permit_commitment"].get_str());
     UniValue execute(UniValue::VOBJ);
     execute.pushKV("decision_id", hex_b);
     execute.pushKV("one_use_permit", permit);
@@ -937,7 +940,9 @@ BOOST_AUTO_TEST_CASE(lab_methods_keep_state_and_reject_bad_transitions)
     const std::string binding = LabResult("lab.runtime_bind", bind)["record_id"].get_str();
     prepare.pushKV("intent_id", hex_b);
     prepare.pushKV("idempotency_key", "idempotency-prepare-2");
-    const std::string permit2 = LabResult("lab.action_prepare", prepare)["record_id"].get_str();
+    const UniValue prepared2 = LabResult("lab.action_prepare", prepare);
+    const std::string permit2 = prepared2["one_use_permit"].get_str();
+    BOOST_CHECK_NE(permit2, prepared2["record_id"].get_str());
     UniValue pause(UniValue::VOBJ);
     pause.pushKV("runtime_binding_id", binding);
     pause.pushKV("reason", "operator");

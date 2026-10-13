@@ -2207,6 +2207,16 @@ if(BUILD_UTIL)
   add_legacy_binary_alias(btx-util bitcoin-util)
   add_legacy_target_alias(bitcoin-util btx-util)
 
+  add_executable(btx-guardd btx-guardd.cpp modelnet/guard_machine.cpp)
+  target_include_directories(btx-guardd PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+  target_link_libraries(btx-guardd core_interface)
+  if((UNIX AND NOT APPLE) OR MINGW)
+    target_link_btx_linux_archive_group(btx-guardd ${BTX_BASE_ARCHIVES})
+  else()
+    target_link_libraries(btx-guardd bitcoin_common)
+  endif()
+  install_binary_component(btx-guardd)
+
   add_executable(btx-matmul-backend-info btx-matmul-backend-info.cpp)
   target_link_libraries(btx-matmul-backend-info
     core_interface
