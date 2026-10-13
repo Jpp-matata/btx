@@ -36,7 +36,10 @@ from test_framework.p2p import (
     p2p_lock,
 )
 from test_framework.test_framework import BitcoinTestFramework
-from test_framework.util import assert_equal
+from test_framework.util import (
+    assert_equal,
+    assert_raises_rpc_error,
+)
 from test_framework.wallet import MiniWallet
 
 # Dandelion::EMBARGO_MAX (src/dandelion.h)
@@ -146,6 +149,19 @@ class DandelionOriginatorTest(BitcoinTestFramework):
             stem.sync_with_ping()
         with p2p_lock:
             assert not spy.announced(local), "originator announced its stem transaction after a forcerelay echo"
+
+        self.log.info("A transaction retried after a rejected submission still goes on the stem")
+        parent = wallet.create_self_transfer()
+        child = wallet.create_self_transfer(utxo_to_spend=parent["new_utxo"])
+        assert_raises_rpc_error(-25, "bad-txns-inputs-missingorspent", node.sendrawtransaction, hexstring=child["hex"], maxfeerate=0)
+        wallet.sendrawtransaction(from_node=node, tx_hex=parent["hex"])
+        node.sendrawtransaction(hexstring=child["hex"], maxfeerate=0)
+        for _ in range(3):
+            spy.sync_with_ping()
+            stem.sync_with_ping()
+        with p2p_lock:
+            assert stem.got_dltx(parent) and stem.got_dltx(child), "retried transaction was not stemmed"
+            assert not spy.announced(child), "originator announced a retried stem transaction"
 
         self.log.info("After the embargo the originator announces it and serves it")
         node.setmocktime(mock_time + EMBARGO_MAX + 1)

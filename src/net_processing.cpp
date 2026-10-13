@@ -9297,9 +9297,10 @@ void PeerManagerImpl::TransactionAddedToMempool(const NewMempoolTransactionInfo&
 {
     // Reorg-resurrected transactions arrive here without passing through the
     // normal peer/RPC accept path, so they still need an inventory announcement.
-    // A local transaction is placed in the stempool before this callback is
-    // queued. Announcing it here would tell every peer the originator during
-    // the embargo. BroadcastTransaction records the tx in the persisted
+    // A local transaction enters the stempool before BroadcastTransaction
+    // releases cs_main. Announcing it here would tell every peer the originator
+    // during the embargo; if this runs first and queues an inv anyway,
+    // SendMessages drops it. BroadcastTransaction records the tx in the persisted
     // unbroadcast set so a restart, which drops the in-memory embargo, can
     // announce it later.
     const uint256& txid = tx.info.m_tx->GetHash();
