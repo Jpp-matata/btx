@@ -7273,7 +7273,7 @@ bool DispatchHelperRpc(ModelCatalog& cat, const UniValue& request, UniValue& res
             result.pushKV("global_complete", false);
             return true;
         }
-        const Digest48 id = ResolveUserId(Arg(0).get_str(), err);
+        const Digest48 id = ResolveUserIdLocked(Arg(0).get_str(), err);
         SearchHit h;
         const auto* r = g_search_idx.Get(id);
         if (r) h.rec = *r;
@@ -7354,7 +7354,7 @@ bool DispatchHelperRpc(ModelCatalog& cat, const UniValue& request, UniValue& res
         };
         std::lock_guard<std::mutex> lock(g_search_mu);
         if (Arg(0).isStr() && !Arg(0).get_str().empty()) {
-            const Digest48 id = ResolveUserId(Arg(0).get_str(), err);
+            const Digest48 id = ResolveUserIdLocked(Arg(0).get_str(), err);
             if (const auto* r = g_search_idx.Get(id)) push_aliases(*r);
         } else {
             for (const auto& r : g_search_idx.All()) push_aliases(r);
