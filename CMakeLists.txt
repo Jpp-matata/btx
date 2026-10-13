@@ -436,6 +436,8 @@ if(WIN32)
     WIN32_LEAN_AND_MEAN
     NOMINMAX
   )
+  target_include_directories(core_interface BEFORE INTERFACE
+    ${PROJECT_SOURCE_DIR}/src/compat/mingw)
 
   if(MSVC)
     if(VCPKG_TARGET_TRIPLET MATCHES "-static")

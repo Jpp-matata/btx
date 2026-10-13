@@ -172,6 +172,14 @@ target_include_directories(bitcoin_modelnet
   PUBLIC
     ${PROJECT_SOURCE_DIR}/src
 )
+if(WIN32)
+  # POSIX shims for the model plane. Linux and macOS keep the system headers.
+  target_include_directories(bitcoin_modelnet BEFORE PUBLIC
+    ${PROJECT_SOURCE_DIR}/src/compat/mingw)
+  target_compile_options(bitcoin_modelnet PRIVATE
+    "SHELL:-include ${PROJECT_SOURCE_DIR}/src/compat/mingw/posix_extra.h")
+  target_link_libraries(bitcoin_modelnet PUBLIC ws2_32)
+endif()
 
 set(_btx_crl12_schema "${PROJECT_SOURCE_DIR}/contrib/modelnet/crl12/schemas/CognitiveReserveLayer.schema.json")
 set(_btx_crl12_ops "${PROJECT_SOURCE_DIR}/contrib/modelnet/crl12/schemas/operations-v1.2.json")
