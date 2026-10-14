@@ -9,6 +9,7 @@
 #include <modelnet/git_snapshot.h>
 #include <modelnet/guard_machine.h>
 #include <modelnet/identity.h>
+#include <modelnet/lab_ancestry.h>
 #include <modelnet/lab_disk.h>
 #include <modelnet/lab_exchange.h>
 #include <modelnet/lab_guard_client.h>
@@ -835,6 +836,204 @@ bool CollectResearch(const std::vector<ExchangeObject>& objects, std::vector<Res
     return true;
 }
 
+bool ContributionKindOk(const std::string& kind)
+{
+    return kind == "HYPOTHESIS" || kind == "EXPERIMENT" || kind == "NEGATIVE_RESULT" || kind == "REPRODUCTION" ||
+           kind == "CRITIQUE" || kind == "SYNTHESIS" || kind == "TOOL_IMPROVEMENT";
+}
+
+bool ReadIdVector(const UniValue& payload, const char* key, const std::string& self, std::vector<std::string>& out, std::string& err)
+{
+    out.clear();
+    if (!payload.exists(key) || !payload[key].isArray()) return Fail(err, "BTX035_SCHEMA");
+    std::set<std::string> seen;
+    for (size_t i = 0; i < payload[key].size(); ++i) {
+        if (!payload[key][i].isStr()) return Fail(err, "BTX035_SCHEMA");
+        const std::string id = payload[key][i].get_str();
+        if (!HexN(id, 96) || id == self || !seen.insert(id).second) return Fail(err, "BTX035_SCHEMA");
+        out.push_back(id);
+    }
+    err.clear();
+    return true;
+}
+
+bool ReadContributionPayload(const UniValue& envelope, const std::string& self, ResearchObservation& observation, std::string& err)
+{
+    if (!envelope.exists("body") || !envelope["body"].isObject()) return Fail(err, "BTX035_SCHEMA");
+    const UniValue& body = envelope["body"];
+    if (!body.exists("payload") || !body["payload"].isObject()) return Fail(err, "BTX035_SCHEMA");
+    const UniValue& payload = body["payload"];
+    if (!payload.exists("kind") || !payload["kind"].isStr()) return Fail(err, "BTX035_SCHEMA");
+    const std::string kind = payload["kind"].get_str();
+    if (!ContributionKindOk(kind)) return Fail(err, "BTX035_SCHEMA");
+    std::vector<std::string> physical;
+    std::vector<std::string> informed;
+    if (!ReadIdVector(payload, "physical_parent_ids", self, physical, err)) return false;
+    if (!ReadIdVector(payload, "informed_by", self, informed, err)) return false;
+    observation.kind = kind;
+    observation.physical_parent_ids = std::move(physical);
+    observation.informed_by = std::move(informed);
+    err.clear();
+    return true;
+}
+
+bool StoredRecordType(const Store& store, const std::string& record_id, UniValue& envelope, std::string& record_type)
+{
+    record_type.clear();
+    const auto it = store.records.find(record_id);
+    if (it == store.records.end()) return false;
+    if (!envelope.read(it->second) || !envelope.isObject()) return false;
+    if (!envelope.exists("body") || !envelope["body"].isObject()) return false;
+    const UniValue& body = envelope["body"];
+    if (!body.exists("record_type") || !body["record_type"].isStr()) return false;
+    record_type = body["record_type"].get_str();
+    return true;
+}
+
+// Replace this row's link. Do not append its parents onto another contribution.
+void PutObservationLink(std::map<std::string, ContributionLink>& links, const ResearchObservation& observation)
+{
+    if (observation.record_id.empty()) return;
+    ContributionLink link;
+    link.record_id = observation.record_id;
+    link.kind = observation.kind;
+    link.physical_parent_ids = observation.physical_parent_ids;
+    link.informed_by = observation.informed_by;
+    link.announcement = false;
+    links[observation.record_id] = std::move(link);
+}
+
+void LinksFromObservations(const std::vector<ResearchObservation>& observations, std::map<std::string, ContributionLink>& links)
+{
+    links.clear();
+    for (const ResearchObservation& observation : observations) PutObservationLink(links, observation);
+}
+
+std::string JoinComma(const std::vector<std::string>& ids)
+{
+    std::string out;
+    for (size_t i = 0; i < ids.size(); ++i) {
+        if (i != 0) out.push_back(',');
+        out += ids[i];
+    }
+    return out;
+}
+
+bool ParseCsvIds(const std::string& field, const std::string& self, std::vector<std::string>& out, std::string& err)
+{
+    out.clear();
+    if (field.empty()) {
+        err.clear();
+        return true;
+    }
+    std::set<std::string> seen;
+    size_t begin = 0;
+    for (;;) {
+        const size_t comma = field.find(',', begin);
+        const std::string id = field.substr(begin, comma == std::string::npos ? std::string::npos : comma - begin);
+        if (!HexN(id, 96) || id == self || !seen.insert(id).second) return Fail(err, "BTX035_SCHEMA");
+        out.push_back(id);
+        if (comma == std::string::npos) break;
+        begin = comma + 1;
+        if (begin >= field.size()) return Fail(err, "BTX035_SCHEMA");
+    }
+    err.clear();
+    return true;
+}
+
+void SplitPipes(const std::string& line, std::vector<std::string>& parts)
+{
+    parts.clear();
+    std::string current;
+    for (char c : line) {
+        if (c == '|') {
+            parts.push_back(current);
+            current.clear();
+        } else {
+            current.push_back(c);
+        }
+    }
+    parts.push_back(current);
+}
+
+// Canonical lineage snapshot line, one line with no spaces and no raw CR or LF:
+//   v1|<record_id>|<kind>|<physical ids joined by comma>|<informed_by ids joined by comma>
+// An empty id list is an empty field. Private rows are omitted.
+
+bool DecodeLineageLine(const std::string& line, std::string& record_id, std::string& kind, std::vector<std::string>& physical,
+                       std::vector<std::string>& informed, std::string& err)
+{
+    if (line.empty() || line.find('\n') != std::string::npos || line.find('\r') != std::string::npos ||
+        line.find(' ') != std::string::npos) {
+        return Fail(err, "BTX035_SCHEMA");
+    }
+    std::vector<std::string> parts;
+    SplitPipes(line, parts);
+    if (parts.size() != 5 || parts[0] != "v1") return Fail(err, "BTX035_SCHEMA");
+    if (!HexN(parts[1], 96)) return Fail(err, "BTX035_SCHEMA");
+    if (!parts[2].empty() && !ContributionKindOk(parts[2])) return Fail(err, "BTX035_SCHEMA");
+    if (!ParseCsvIds(parts[3], parts[1], physical, err) || !ParseCsvIds(parts[4], parts[1], informed, err)) return false;
+    record_id = parts[1];
+    kind = parts[2];
+    err.clear();
+    return true;
+}
+
+bool EncodeLineageLine(const ResearchObservation& row, std::string& line, std::string& err)
+{
+    if (!HexN(row.record_id, 96)) return Fail(err, "BTX035_SCHEMA");
+    if (!row.kind.empty() && !ContributionKindOk(row.kind)) return Fail(err, "BTX035_SCHEMA");
+    std::vector<std::string> checked;
+    if (!ParseCsvIds(JoinComma(row.physical_parent_ids), row.record_id, checked, err)) return false;
+    if (!ParseCsvIds(JoinComma(row.informed_by), row.record_id, checked, err)) return false;
+    line = "v1|" + row.record_id + "|" + row.kind + "|" + JoinComma(row.physical_parent_ids) + "|" + JoinComma(row.informed_by);
+    if (line.find('\n') != std::string::npos || line.find('\r') != std::string::npos || line.find(' ') != std::string::npos) {
+        return Fail(err, "BTX035_SCHEMA");
+    }
+    err.clear();
+    return true;
+}
+
+bool AppendLineage(const std::vector<ResearchObservation>& rows, std::vector<ExchangeObject>& objects, std::string& err)
+{
+    for (const ResearchObservation& row : rows) {
+        if (row.is_private) continue;
+        if (row.kind.empty() && row.physical_parent_ids.empty() && row.informed_by.empty()) continue;
+        ExchangeObject object;
+        object.kind = "lineage";
+        if (!EncodeLineageLine(row, object.content, err)) return false;
+        const std::vector<unsigned char> bytes(object.content.begin(), object.content.end());
+        if (!GitObjectDigest("lineage", Span<const unsigned char>{bytes.data(), bytes.size()}, object.digest, err)) return false;
+        objects.push_back(std::move(object));
+    }
+    err.clear();
+    return true;
+}
+
+bool AttachLineage(const std::vector<ExchangeObject>& objects, std::vector<ResearchObservation>& rows, std::string& err)
+{
+    std::map<std::string, size_t> index;
+    for (size_t i = 0; i < rows.size(); ++i) index.emplace(rows[i].record_id, i);
+    std::set<std::string> attached;
+    for (const ExchangeObject& object : objects) {
+        if (object.kind != "lineage") continue;
+        std::string record_id;
+        std::string kind;
+        std::vector<std::string> physical;
+        std::vector<std::string> informed;
+        if (!DecodeLineageLine(object.content, record_id, kind, physical, informed, err)) return false;
+        const auto found = index.find(record_id);
+        if (found == index.end()) continue;
+        if (!attached.insert(record_id).second) return Fail(err, "BTX035_SCHEMA");
+        ResearchObservation& row = rows[found->second];
+        row.kind = std::move(kind);
+        row.physical_parent_ids = std::move(physical);
+        row.informed_by = std::move(informed);
+    }
+    err.clear();
+    return true;
+}
+
 enum class GuardRoute { Local, Remote, Invalid };
 
 GuardRoute GuardRouteForCall(uint16_t& port, std::string& err)
@@ -1061,20 +1260,37 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
             return false;
         }
         const std::string visibility = RequireStr(req, "visibility");
-        const bool negative = visibility == "NEGATIVE";
-        if (!store.research.Publish(topic, cid, author, negative, record_id, err)) return false;
-        store.published.push_back(record_id);
-        store.records[record_id] = req.write();
+        UniValue envelope;
+        std::string record_type;
+        const bool stored_envelope = StoredRecordType(store, record_id, envelope, record_type);
+        if (stored_envelope && record_type == "ActivityAnnouncement") {
+            store.published.push_back(record_id);
+            return Rec(result, record_id, "PUBLISHED");
+        }
+        const bool contribution = stored_envelope && record_type == "ResearchContribution";
         ResearchObservation observation;
         observation.record_id = record_id;
         observation.topic_id = topic_hex;
         observation.author_id = store.active_root;
         observation.content_hash = record_id;
-        observation.negative = negative;
         observation.is_private = visibility == "PRIVATE";
-        observation.sequence = store.published.size();
         observation.reproduction_count = visibility == "REPRODUCED" ? 1 : 0;
         observation.contest_count = visibility == "CONTESTED" ? 1 : 0;
+        bool negative = visibility == "NEGATIVE";
+        if (contribution) {
+            if (!ReadContributionPayload(envelope, record_id, observation, err)) return false;
+            if (observation.kind == "NEGATIVE_RESULT") negative = true;
+            std::map<std::string, ContributionLink> links;
+            LinksFromObservations(store.observations, links);
+            PutObservationLink(links, observation);
+            AncestryReport report;
+            if (!WalkAncestry(record_id, links, report, err)) return false;
+        }
+        observation.negative = negative;
+        if (!store.research.Publish(topic, cid, author, negative, record_id, err)) return false;
+        store.published.push_back(record_id);
+        if (!contribution) store.records[record_id] = req.write();
+        observation.sequence = store.published.size();
         store.observations.push_back(std::move(observation));
         return Rec(result, record_id, "PUBLISHED");
     }
@@ -1115,12 +1331,35 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
         }
         int max_records = 0;
         if (req.exists("max_records") && req["max_records"].isNum()) max_records = req["max_records"].getInt<int>();
+        std::map<std::string, ContributionLink> links;
+        LinksFromObservations(store.observations, links);
+        std::set<std::string> seen;
+        uint64_t physical_edges = 0;
+        uint64_t informed_edges = 0;
         for (const ResearchObservation& observation : store.observations) {
             if (!roots.count(observation.record_id) && !roots.count(observation.topic_id) && !roots.count(observation.author_id)) continue;
-            ids.push_back(observation.record_id);
+            if (seen.insert(observation.record_id).second) {
+                if (max_records > 0 && static_cast<int>(ids.size()) >= max_records) break;
+                ids.push_back(observation.record_id);
+            }
+            if (links.count(observation.record_id) == 0) continue;
+            AncestryReport report;
+            if (!WalkAncestry(observation.record_id, links, report, err)) return false;
+            physical_edges += report.physical_edges;
+            informed_edges += report.informed_edges;
+            for (const std::string& ancestor : report.record_ids) {
+                if (!seen.insert(ancestor).second) continue;
+                if (max_records > 0 && static_cast<int>(ids.size()) >= max_records) break;
+                ids.push_back(ancestor);
+            }
             if (max_records > 0 && static_cast<int>(ids.size()) >= max_records) break;
         }
         QueryOut(result, ids, method + req.write());
+        UniValue coverage = result["coverage"];
+        coverage.pushKV("physical_edges", std::to_string(physical_edges));
+        coverage.pushKV("informed_edges", std::to_string(informed_edges));
+        coverage.pushKV("selection_is_proof", false);
+        result.pushKV("coverage", coverage);
         return true;
     }
     if (method == "lab.source_query") {
@@ -1868,11 +2107,12 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
         }
         std::vector<ExchangeObject> exported;
         for (const ExchangeObject& object : it->second) {
-            if (object.kind == "research" || object.kind == "train") continue;
+            if (object.kind == "research" || object.kind == "train" || object.kind == "lineage") continue;
             exported.push_back(object);
         }
         if (!AppendPublicResearch(store.observations, exported, err)) return false;
         if (!AppendTrains(store.trains, exported, err)) return false;
+        if (!AppendLineage(store.observations, exported, err)) return false;
         if (ticketed) {
             const auto auth = store.fetch_tickets.find(req["fetch_ticket"].get_str());
             if (auth == store.fetch_tickets.end()) return Fail(err, "BTX035_PERMIT");
@@ -1895,6 +2135,7 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
         if (!CollectResearch(objects, observed, err)) return false;
         std::map<std::string, IntegerState> trains;
         if (!CollectTrains(objects, trains, err)) return false;
+        if (!AttachLineage(objects, observed, err)) return false;
         const std::string repo = Id96(RequireStr(req, "manifest"));
         store.repos.insert(repo);
         store.repo_objects[repo] = objects;
@@ -1921,6 +2162,7 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
         if (!CollectResearch(objects, observed, err)) return false;
         std::map<std::string, IntegerState> trains;
         if (!CollectTrains(objects, trains, err)) return false;
+        if (!AttachLineage(objects, observed, err)) return false;
         const std::string repo = RequireStr(req, "repository_id");
         store.repos.insert(repo);
         store.repo_objects[repo] = std::move(objects);

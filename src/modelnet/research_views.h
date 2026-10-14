@@ -31,6 +31,10 @@ struct ResearchObservation {
     uint64_t sequence{0};
     uint32_t reproduction_count{0};
     uint32_t contest_count{0};
+    /** Empty unless this row is a research contribution. View sorts do not read these. */
+    std::string kind;
+    std::vector<std::string> physical_parent_ids;
+    std::vector<std::string> informed_by;
 };
 
 bool ParseResearchView(std::string_view name, ResearchView& out, std::string& err);

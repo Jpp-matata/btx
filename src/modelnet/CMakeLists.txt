@@ -70,6 +70,7 @@ add_library(bitcoin_modelnet STATIC
   research_rpc.cpp
   lab_api.cpp
   lab_disk.cpp
+  lab_ancestry.cpp
   lab_guard_client.cpp
   lab_exchange.cpp
   training_integer.cpp

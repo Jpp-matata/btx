@@ -111,6 +111,29 @@ bool FieldStr(const UniValue& obj, const char* key, std::string& out)
     return true;
 }
 
+bool ReadOptionalString(const UniValue& obj, const char* key, std::string& out)
+{
+    if (!obj.exists(key)) {
+        out.clear();
+        return true;
+    }
+    if (!obj[key].isStr()) return false;
+    out = obj[key].get_str();
+    return true;
+}
+
+bool ReadOptionalIdList(const UniValue& obj, const char* key, std::vector<std::string>& out)
+{
+    out.clear();
+    if (!obj.exists(key)) return true;
+    if (!obj[key].isArray()) return false;
+    for (size_t i = 0; i < obj[key].size(); ++i) {
+        if (!obj[key][i].isStr()) return false;
+        out.push_back(obj[key][i].get_str());
+    }
+    return true;
+}
+
 bool ReadObservations(const UniValue& arr, std::vector<ResearchObservation>& out)
 {
     if (!arr.isArray()) return false;
@@ -141,6 +164,11 @@ bool ReadObservations(const UniValue& arr, std::vector<ResearchObservation>& out
         observation.sequence = sequence_n;
         observation.reproduction_count = static_cast<uint32_t>(reproduction_n);
         observation.contest_count = static_cast<uint32_t>(contest_n);
+        if (!ReadOptionalString(row, "kind", observation.kind) ||
+            !ReadOptionalIdList(row, "physical_parent_ids", observation.physical_parent_ids) ||
+            !ReadOptionalIdList(row, "informed_by", observation.informed_by)) {
+            return false;
+        }
         out.push_back(std::move(observation));
     }
     return true;
@@ -259,6 +287,13 @@ std::string EncodeImage(const LabDiskImage& image)
         row.pushKV("sequence", std::to_string(observation.sequence));
         row.pushKV("reproduction_count", std::to_string(observation.reproduction_count));
         row.pushKV("contest_count", std::to_string(observation.contest_count));
+        row.pushKV("kind", observation.kind);
+        UniValue physical(UniValue::VARR);
+        for (const std::string& id : observation.physical_parent_ids) physical.push_back(id);
+        row.pushKV("physical_parent_ids", physical);
+        UniValue informed(UniValue::VARR);
+        for (const std::string& id : observation.informed_by) informed.push_back(id);
+        row.pushKV("informed_by", informed);
         observations.push_back(std::move(row));
     }
     UniValue repos(UniValue::VOBJ);

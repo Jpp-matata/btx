@@ -65,6 +65,93 @@ bool LabCall(const char* method, const UniValue& request, UniValue& result, std:
     return true;
 }
 
+UniValue ContributionPayload(const char* kind, const UniValue& physical, const UniValue& informed)
+{
+    UniValue payload(UniValue::VOBJ);
+    payload.pushKV("objective_id", std::string(96, 'b'));
+    payload.pushKV("kind", kind);
+    payload.pushKV("source_snapshot_id", std::string(96, 'c'));
+    payload.pushKV("physical_parent_ids", physical);
+    payload.pushKV("informed_by", informed);
+    payload.pushKV("capsule_id", UniValue());
+    payload.pushKV("claim_refs", UniValue(UniValue::VARR));
+    payload.pushKV("evidence_refs", UniValue(UniValue::VARR));
+    payload.pushKV("summary", "local");
+    return payload;
+}
+
+std::string SignAndStore(const char* record_type, const UniValue& payload, const char* idem)
+{
+    UniValue sign(UniValue::VOBJ);
+    sign.pushKV("record_type", record_type);
+    sign.pushKV("payload", payload);
+    sign.pushKV("realm_id", std::string(96, 'a'));
+    sign.pushKV("delegation_id", UniValue());
+    sign.pushKV("expires_ms", "10");
+    sign.pushKV("idempotency_key", idem);
+    sign.pushKV("expected_state", UniValue());
+    UniValue signed_result;
+    std::string err;
+    BOOST_REQUIRE(LabCall("lab.identity_sign", sign, signed_result, err));
+    BOOST_REQUIRE(signed_result["envelope"].isObject());
+    const std::string record_id = signed_result["envelope"]["record_id"].get_str();
+    BOOST_REQUIRE_EQUAL(record_id.size(), 96U);
+    UniValue import_req(UniValue::VOBJ);
+    import_req.pushKV("envelope", signed_result["envelope"]);
+    import_req.pushKV("publish", false);
+    import_req.pushKV("idempotency_key", std::string("import-") + idem);
+    import_req.pushKV("expected_state", UniValue());
+    UniValue imported;
+    BOOST_REQUIRE(LabCall("lab.record_import", import_req, imported, err));
+    BOOST_CHECK_EQUAL(imported["record_id"].get_str(), record_id);
+    BOOST_CHECK_EQUAL(imported["state"].get_str(), "STORED");
+    return record_id;
+}
+
+void PublishStored(const std::string& record_id, const char* idem)
+{
+    UniValue topics(UniValue::VARR);
+    topics.push_back(std::string(96, 'b'));
+    UniValue req(UniValue::VOBJ);
+    req.pushKV("record_id", record_id);
+    req.pushKV("topic_ids", topics);
+    req.pushKV("visibility", "PUBLIC");
+    req.pushKV("idempotency_key", idem);
+    req.pushKV("expected_state", UniValue());
+    UniValue published;
+    std::string err;
+    BOOST_REQUIRE(LabCall("lab.research_publish", req, published, err));
+    BOOST_CHECK_EQUAL(published["state"].get_str(), "PUBLISHED");
+    BOOST_CHECK_EQUAL(published["record_id"].get_str(), record_id);
+}
+
+void ExpectLinkedContext(const std::string& later, const std::string& earlier, const std::string& announcement, const std::string& unknown)
+{
+    UniValue roots(UniValue::VARR);
+    roots.push_back(later);
+    UniValue req(UniValue::VOBJ);
+    req.pushKV("root_ids", roots);
+    req.pushKV("relations", UniValue(UniValue::VARR));
+    req.pushKV("max_depth", 8);
+    req.pushKV("max_records", 16);
+    UniValue result;
+    std::string err;
+    BOOST_REQUIRE(LabCall("lab.research_context", req, result, err));
+    const UniValue& ids = result["record_ids"];
+    BOOST_REQUIRE_EQUAL(ids.size(), 2U);
+    BOOST_CHECK_EQUAL(ids[0].get_str(), later);
+    BOOST_CHECK_EQUAL(ids[1].get_str(), earlier);
+    for (size_t i = 0; i < ids.size(); ++i) {
+        BOOST_CHECK(ids[i].get_str() != announcement);
+        BOOST_CHECK(ids[i].get_str() != unknown);
+    }
+    const UniValue& coverage = result["coverage"];
+    BOOST_REQUIRE(coverage.exists("selection_is_proof"));
+    BOOST_CHECK(coverage["selection_is_proof"].isFalse());
+    BOOST_CHECK_EQUAL(coverage["physical_edges"].get_str(), "1");
+    BOOST_CHECK_EQUAL(coverage["informed_edges"].get_str(), "0");
+}
+
 } // namespace
 
 BOOST_AUTO_TEST_CASE(guard_line_is_one_use_and_refuses_spend)
@@ -439,6 +526,170 @@ BOOST_AUTO_TEST_CASE(integer_train_survives_reload_and_snapshot)
     BOOST_REQUIRE(LabCall("lab.snapshot_import", import, imported, err));
     BOOST_REQUIRE(LabCall("lab.audit_coverage", audit_req, coverage, err));
     BOOST_CHECK(coverage["complete_path"].isTrue());
+
+    modelnet::ResetLabApi();
+}
+
+BOOST_AUTO_TEST_CASE(contribution_links_survive_reload_and_snapshot)
+{
+    BOOST_REQUIRE(!m_path_root.empty());
+    ::unsetenv("BTX035_LAB_DIR");
+    ::unsetenv("BTX_GUARD_PORT");
+    modelnet::ResetLabApi();
+
+    TempTree dir{m_path_root / "btx035-lab-disk" / "contrib"};
+    LabDirEnv env(dir.path);
+    modelnet::ResetLabApi();
+
+    std::string err;
+    UniValue identity(UniValue::VOBJ);
+    identity.pushKV("label", "links");
+    identity.pushKV("recovery_key_ids", UniValue(UniValue::VARR));
+    identity.pushKV("recovery_threshold", 1);
+    identity.pushKV("recovery_delay_ms", "1");
+    identity.pushKV("idempotency_key", "idempotency-link-id");
+    identity.pushKV("expected_state", UniValue());
+    UniValue identified;
+    BOOST_REQUIRE(LabCall("lab.identity_create", identity, identified, err));
+
+    const std::string unknown(96, 'e');
+    const std::string earlier = SignAndStore("ResearchContribution", ContributionPayload("NEGATIVE_RESULT", UniValue(UniValue::VARR), UniValue(UniValue::VARR)), "idempotency-link-sign-neg");
+    PublishStored(earlier, "idempotency-link-pub-neg");
+
+    UniValue physical(UniValue::VARR);
+    physical.push_back(earlier);
+    UniValue informed(UniValue::VARR);
+    informed.push_back(unknown);
+    const std::string later = SignAndStore("ResearchContribution", ContributionPayload("EXPERIMENT", physical, informed), "idempotency-link-sign-exp");
+    PublishStored(later, "idempotency-link-pub-exp");
+
+    UniValue announcement_payload(UniValue::VOBJ);
+    announcement_payload.pushKV("objective_id", std::string(96, 'b'));
+    announcement_payload.pushKV("base_contribution_ids", UniValue(UniValue::VARR));
+    announcement_payload.pushKV("intent", "notice");
+    announcement_payload.pushKV("expires_ms", "10");
+    announcement_payload.pushKV("collaboration", false);
+    announcement_payload.pushKV("contact_binding_id", std::string(96, 'd'));
+    const std::string announcement = SignAndStore("ActivityAnnouncement", announcement_payload, "idempotency-link-sign-ann");
+    PublishStored(announcement, "idempotency-link-pub-ann");
+
+    UniValue repo(UniValue::VOBJ);
+    repo.pushKV("label", "links");
+    repo.pushKV("nonce", "link-nonce");
+    repo.pushKV("object_format", "git");
+    repo.pushKV("project_genesis_id", UniValue());
+    repo.pushKV("default_ref", "refs/heads/main");
+    repo.pushKV("idempotency_key", "idempotency-link-repo");
+    repo.pushKV("expected_state", UniValue());
+    UniValue created;
+    BOOST_REQUIRE(LabCall("lab.repository_create", repo, created, err));
+    const std::string repository = created["repository_id"].get_str();
+    UniValue commit(UniValue::VOBJ);
+    commit.pushKV("tree", "contribution source\n");
+    UniValue snap(UniValue::VOBJ);
+    snap.pushKV("repository_id", repository);
+    snap.pushKV("commit", commit);
+    snap.pushKV("dependency_lock_id", std::string(96, 'd'));
+    snap.pushKV("history_required", false);
+    snap.pushKV("idempotency_key", "idempotency-link-snap");
+    snap.pushKV("expected_state", UniValue());
+    BOOST_REQUIRE(LabCall("lab.git_snapshot", snap, created, err));
+
+    std::ifstream input(PathToString(dir.path / "lab.json"));
+    std::stringstream buffer;
+    buffer << input.rdbuf();
+    const std::string body = buffer.str();
+    UniValue disk;
+    BOOST_REQUIRE(disk.read(body));
+    BOOST_CHECK(body.find("identity_sk") == std::string::npos);
+    BOOST_CHECK(!disk.exists("identity_sk"));
+    BOOST_REQUIRE(disk["automatic_spend_atoms"].isStr());
+    BOOST_CHECK_EQUAL(disk["automatic_spend_atoms"].get_str(), "0");
+    BOOST_REQUIRE(disk["records"].exists(later));
+    const std::string stored_later = disk["records"][later].get_str();
+    BOOST_CHECK(stored_later.find("ResearchContribution") != std::string::npos);
+    BOOST_CHECK(stored_later.find("idempotency_key") == std::string::npos);
+    BOOST_CHECK(disk["records"][announcement].get_str().find("ActivityAnnouncement") != std::string::npos);
+
+    int negative_rows = 0;
+    int later_rows = 0;
+    int announcement_rows = 0;
+    const UniValue& saved_rows = disk["observations"];
+    BOOST_REQUIRE(saved_rows.isArray());
+    for (size_t i = 0; i < saved_rows.size(); ++i) {
+        const UniValue& row = saved_rows[i];
+        const std::string id = row["record_id"].get_str();
+        if (id == announcement) ++announcement_rows;
+        if (id == earlier) {
+            ++negative_rows;
+            BOOST_CHECK_EQUAL(row["kind"].get_str(), "NEGATIVE_RESULT");
+            BOOST_CHECK(row["negative"].isTrue());
+            BOOST_CHECK(row["is_private"].isFalse());
+            BOOST_CHECK_EQUAL(row["physical_parent_ids"].size(), 0U);
+            BOOST_CHECK_EQUAL(row["informed_by"].size(), 0U);
+        }
+        if (id == later) {
+            ++later_rows;
+            BOOST_CHECK_EQUAL(row["kind"].get_str(), "EXPERIMENT");
+            BOOST_CHECK(row["negative"].isFalse());
+            BOOST_REQUIRE_EQUAL(row["physical_parent_ids"].size(), 1U);
+            BOOST_CHECK_EQUAL(row["physical_parent_ids"][0].get_str(), earlier);
+            BOOST_REQUIRE_EQUAL(row["informed_by"].size(), 1U);
+            BOOST_CHECK_EQUAL(row["informed_by"][0].get_str(), unknown);
+        }
+    }
+    BOOST_CHECK_EQUAL(negative_rows, 1);
+    BOOST_CHECK_EQUAL(later_rows, 1);
+    BOOST_CHECK_EQUAL(announcement_rows, 0);
+
+    modelnet::ReloadLabFromDisk();
+    ExpectLinkedContext(later, earlier, announcement, unknown);
+
+    UniValue exp(UniValue::VOBJ);
+    exp.pushKV("repository_id", repository);
+    exp.pushKV("idempotency_key", "idempotency-link-export");
+    exp.pushKV("expected_state", UniValue());
+    UniValue exported;
+    BOOST_REQUIRE(LabCall("lab.snapshot_export", exp, exported, err));
+    BOOST_CHECK_EQUAL(exported["object_count"].getInt<int>(), 5);
+    const std::string manifest = exported["manifest"].get_str();
+    const std::string negative_line = "v1|" + earlier + "|NEGATIVE_RESULT||";
+    const std::string later_line = "v1|" + later + "|EXPERIMENT|" + earlier + "|" + unknown;
+    BOOST_CHECK(manifest.find(negative_line) != std::string::npos);
+    BOOST_CHECK(manifest.find(later_line) != std::string::npos);
+    BOOST_CHECK(manifest.find(announcement) == std::string::npos);
+
+    std::vector<modelnet::ExchangeObject> objects;
+    BOOST_REQUIRE(modelnet::VerifyExchangeManifest(manifest, objects, err));
+    int research_rows = 0;
+    int lineage_rows = 0;
+    for (const modelnet::ExchangeObject& object : objects) {
+        if (object.kind == "research") {
+            ++research_rows;
+            BOOST_CHECK(object.content.find("NEGATIVE_RESULT") == std::string::npos);
+            BOOST_CHECK(object.content.find('\n') == std::string::npos);
+        }
+        if (object.kind != "lineage") continue;
+        ++lineage_rows;
+        BOOST_CHECK(object.content.find(' ') == std::string::npos);
+        BOOST_CHECK(object.content.find('\n') == std::string::npos);
+        BOOST_CHECK(object.content.find('\r') == std::string::npos);
+        const std::vector<unsigned char> bytes(object.content.begin(), object.content.end());
+        std::string digest;
+        BOOST_REQUIRE(modelnet::GitObjectDigest("lineage", Span<const unsigned char>{bytes.data(), bytes.size()}, digest, err));
+        BOOST_CHECK_EQUAL(object.digest, digest);
+    }
+    BOOST_CHECK_EQUAL(research_rows, 2);
+    BOOST_CHECK_EQUAL(lineage_rows, 2);
+
+    modelnet::ResetLabApi();
+    UniValue import(UniValue::VOBJ);
+    import.pushKV("manifest", manifest);
+    import.pushKV("idempotency_key", "idempotency-link-import");
+    import.pushKV("expected_state", UniValue());
+    UniValue imported;
+    BOOST_REQUIRE(LabCall("lab.snapshot_import", import, imported, err));
+    ExpectLinkedContext(later, earlier, announcement, unknown);
 
     modelnet::ResetLabApi();
 }

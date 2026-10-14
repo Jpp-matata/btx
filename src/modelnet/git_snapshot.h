@@ -18,7 +18,7 @@ namespace modelnet {
 
 /**
  * Lowercase hex SHA-384 of ASCII(kind) || ' ' || ASCII(decimal byte length) || 0x00 || content.
- * kind is blob, tree, commit, tag, research, or train. This is not a Git SHA-1 or SHA-256 object id.
+ * kind is blob, tree, commit, tag, research, train, or lineage. This is not a Git SHA-1 or SHA-256 object id.
  * A strong file identity is this digest plus SafeGitPath. No multi-file Merkle root is built here.
  */
 bool GitObjectDigest(std::string_view kind, Span<const unsigned char> content, std::string& digest_hex, std::string& err);

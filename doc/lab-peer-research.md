@@ -1,0 +1,227 @@
+# How the nodes you run share lab research
+
+This is the lab contract on the 0.35 branch. It is not a release qualification. Windows and macOS are not covered by this note.
+
+You run several nodes. On each node you obtain work from the contributions already stored, train on that node, and pass the public result to a peer you also run. The calls below are local RPC on the node you are talking to:
+
+```text
+btx-cli lab035 <method> '<json>'
+```
+
+Ids in the examples are 96 lowercase hex characters. Replace them with the ids that node returned. Text in angle brackets is a slot: replace the slot, brackets included, before you run the call. `idempotency_key` is a string of at least 16 characters, unique per call. Every lab result includes `automatic_spend_atoms` as the string `"0"`. There is no wallet spend in this flow.
+
+## Create the research key
+
+`lab.identity_create` keeps the research key on the node. It does not spend. The result returns `record_id` for that principal and `state` `ACTIVE`. It does not return the key, and the key is not part of a later export.
+
+```bash
+btx-cli lab035 lab.identity_create '{
+  "label": "lab-node-a",
+  "recovery_key_ids": [],
+  "recovery_threshold": 1,
+  "recovery_delay_ms": "0",
+  "idempotency_key": "identity-create-node-a",
+  "expected_state": null
+}'
+```
+
+Repeat this on each node you run. Each node keeps its own key.
+
+## Store a contribution
+
+`lab.identity_sign` then `lab.record_import` stores a `ResearchContribution`. The payload has `kind`, `physical_parent_ids`, and `informed_by`.
+
+`kind` may be `NEGATIVE_RESULT`. `physical_parent_ids` are the contributions this one started from. `informed_by` names other contributions it used, including a negative result on another branch. Putting an id in `informed_by` does not merge that branch and does not make the cited work a parent.
+
+The payload also carries the other `ResearchContribution` fields the signer requires: `objective_id`, `source_snapshot_id`, `capsule_id`, `claim_refs`, `evidence_refs`, and `summary`. `realm_id` is 96 lowercase hex.
+
+```bash
+btx-cli lab035 lab.identity_sign '{
+  "record_type": "ResearchContribution",
+  "realm_id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "delegation_id": null,
+  "expires_ms": "86400000",
+  "idempotency_key": "sign-contribution-branch-a",
+  "expected_state": null,
+  "payload": {
+    "objective_id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "kind": "NEGATIVE_RESULT",
+    "source_snapshot_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "physical_parent_ids": [
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    ],
+    "informed_by": [
+      "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    ],
+    "capsule_id": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "claim_refs": [],
+    "evidence_refs": [],
+    "summary": "this branch stopped on the check that failed"
+  }
+}'
+```
+
+In that payload the contribution itself is the negative result. It started from `aaa…a`. It cited `bbb…b` through `informed_by`. `bbb…b` stays on its own branch. It is not a parent of this contribution.
+
+`lab.record_import` stores that signed envelope. Pass the `envelope` object from the sign result unchanged (`record_id`, `body`, and `signature_hex`). `publish` here is false. The following section is what makes the contribution visible.
+
+```bash
+btx-cli lab035 lab.record_import '{
+  "envelope": <envelope object from lab.identity_sign>,
+  "publish": false,
+  "idempotency_key": "import-contribution-branch-a",
+  "expected_state": null
+}'
+```
+
+## Publish, including a second branch
+
+`lab.research_publish` makes the contribution visible. Pass the envelope `record_id` and the topic ids you want peers to find it under.
+
+```bash
+btx-cli lab035 lab.research_publish '{
+  "record_id": "<envelope record_id>",
+  "topic_ids": [
+    "111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111"
+  ],
+  "visibility": "PUBLIC",
+  "idempotency_key": "publish-contribution-branch-a",
+  "expected_state": null
+}'
+```
+
+A second publish of a different branch does not overwrite the first branch's parents. Sign and import that second `ResearchContribution` with its own `physical_parent_ids`, then call `lab.research_publish` on its `record_id`. The first contribution still starts from the parents you stored on it.
+
+A row you publish with `visibility` `PRIVATE` stays on this node. That private row is not in the export in the snapshot section below.
+
+## Read what this contribution retains
+
+`lab.research_context` on a contribution id returns the retained ids reachable through both lists. `DERIVED_FROM` follows `physical_parent_ids`. `INFORMED_BY` follows `informed_by`. Put that contribution id in `root_ids`.
+
+```bash
+btx-cli lab035 lab.research_context '{
+  "root_ids": [
+    "<contribution record_id>"
+  ],
+  "relations": ["DERIVED_FROM", "INFORMED_BY"],
+  "max_depth": 8,
+  "max_records": 64
+}'
+```
+
+`coverage.selection_is_proof` is false. A count of nominations or announcements is not evidence the work is correct. You still read the stored contributions and decide what this node will sign next.
+
+## Say what this node is doing
+
+An `ActivityAnnouncement` is signed and imported the same way, then published. `lab.identity_sign` uses `record_type` `ActivityAnnouncement`. `lab.record_import` stores that envelope. `lab.research_publish` makes it visible.
+
+```bash
+btx-cli lab035 lab.identity_sign '{
+  "record_type": "ActivityAnnouncement",
+  "realm_id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "delegation_id": null,
+  "expires_ms": "86400000",
+  "idempotency_key": "sign-activity-node-a",
+  "expected_state": null,
+  "payload": {
+    "objective_id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "base_contribution_ids": [
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    ],
+    "intent": "training the next contribution on this node",
+    "expires_ms": "86400000",
+    "collaboration": "OPEN",
+    "contact_binding_id": "999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999"
+  }
+}'
+```
+
+It tells peers what this node is doing. It does not assign anyone else's next action. It does not appear in the context closure. `lab.research_context` on a contribution id does not return the announcement.
+
+## Pass the public lab to another node
+
+`lab.snapshot_export`, then on another node `lab.snapshot_pull` from `127.0.0.1` with the one-use fetch ticket. Pass `fetch_ticket` on the export. The ticket works once. On the other node, `host` is `127.0.0.1`.
+
+```bash
+btx-cli lab035 lab.snapshot_export '{
+  "repository_id": "<repository id held on this node>",
+  "fetch_ticket": "<one-use fetch ticket>",
+  "idempotency_key": "snapshot-export-node-a",
+  "expected_state": null
+}'
+```
+
+```bash
+btx-cli lab035 lab.snapshot_pull '{
+  "host": "127.0.0.1",
+  "port": <rpc port>,
+  "rpc_user": "<rpc user of the exporting node>",
+  "rpc_password": "<rpc password of the exporting node>",
+  "repository_id": "<same repository id>",
+  "idempotency_key": "snapshot-pull-node-b",
+  "expected_state": null
+}'
+```
+
+The pulled lab can see the same public contributions and the lineage objects. A private row is not in the export. The research key stays on the node that created it.
+
+## Train on this node
+
+`lab.research_execute` with recipe `INTEGER_LINEAR` trains on this node only. Set `recipe_id` to `INTEGER_LINEAR`. `local_capability_grant_id` is a grant this node already holds. The call does not enqueue work on a peer. When the grant is present, the result `state` is `COMPLETE` and `operation_id` is the trajectory id.
+
+```bash
+btx-cli lab035 lab.research_execute '{
+  "input_capsule_id": "222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222222",
+  "recipe_id": "INTEGER_LINEAR",
+  "runtime_binding_id": "333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333",
+  "research_grant_id": "444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444444",
+  "local_capability_grant_id": "<grant id held on this node>",
+  "idempotency_key": "execute-integer-linear-node-a",
+  "expected_state": null
+}'
+```
+
+Set `BTX035_LAB_DIR` to a directory you choose before you start the node, and use the same value after a restart. `lab.audit_coverage` reads the trajectory after that restart. Pass the execute `operation_id` as `trajectory_id`.
+
+```bash
+btx-cli lab035 lab.audit_coverage '{
+  "trajectory_id": "<operation_id from lab.research_execute>",
+  "policy_id": "555555555555555555555555555555555555555555555555555555555555555555555555555555555555555555555555"
+}'
+```
+
+The audit result is still a lab result: `automatic_spend_atoms` is `"0"`.
+
+## Record a reproduction
+
+A later `ResearchContribution` of kind `REPRODUCTION` can list the earlier contribution in `informed_by`. Sign and import it the same way, then publish it. The earlier contribution is cited. The citation does not move it into `physical_parent_ids` unless you also place that id there.
+
+```bash
+btx-cli lab035 lab.identity_sign '{
+  "record_type": "ResearchContribution",
+  "realm_id": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "delegation_id": null,
+  "expires_ms": "86400000",
+  "idempotency_key": "sign-reproduction-node-b",
+  "expected_state": null,
+  "payload": {
+    "objective_id": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "kind": "REPRODUCTION",
+    "source_snapshot_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "physical_parent_ids": [],
+    "informed_by": [
+      "<earlier contribution record_id>"
+    ],
+    "capsule_id": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+    "claim_refs": [],
+    "evidence_refs": [],
+    "summary": "reran the earlier contribution on this node"
+  }
+}'
+```
+
+## What this note leaves in place
+
+`automatic_spend_atoms` is the string `"0"` on every lab result. There is no wallet spend in this flow.
+
+Quarantine and `RESEARCH_ONLY` still fail closed before a model is served. This document does not change admission.
