@@ -69,6 +69,8 @@ add_library(bitcoin_modelnet STATIC
   capability_bridge.cpp
   research_rpc.cpp
   lab_api.cpp
+  lab_disk.cpp
+  lab_guard_client.cpp
   lab_exchange.cpp
   training_integer.cpp
   research_views.cpp

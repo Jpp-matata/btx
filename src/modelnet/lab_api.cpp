@@ -9,7 +9,9 @@
 #include <modelnet/git_snapshot.h>
 #include <modelnet/guard_machine.h>
 #include <modelnet/identity.h>
+#include <modelnet/lab_disk.h>
 #include <modelnet/lab_exchange.h>
+#include <modelnet/lab_guard_client.h>
 #include <modelnet/model_admission.h>
 #include <modelnet/pq_delegation.h>
 #include <modelnet/realm_channel.h>
@@ -137,10 +139,125 @@ struct Store {
     std::vector<std::string> endpoint_receipts;
 };
 
+void ImageFromStore(const Store& store, LabDiskImage& image)
+{
+    image = LabDiskImage{};
+    image.records = store.records;
+    image.observations = store.observations;
+    for (const auto& entry : store.repo_objects) {
+        std::vector<LabDiskObject> objects;
+        objects.reserve(entry.second.size());
+        for (const ExchangeObject& object : entry.second) {
+            LabDiskObject row;
+            row.kind = object.kind;
+            row.digest = object.digest;
+            row.content = object.content;
+            objects.push_back(std::move(row));
+        }
+        image.repo_objects.emplace(entry.first, std::move(objects));
+    }
+    image.repos = store.repos;
+    image.snapshots = store.snapshots;
+    image.realms = store.realms;
+    image.lineage = store.lineage;
+    image.plans = store.plans;
+    image.admissions = store.admissions;
+    for (const auto& item : store.identity_pk) {
+        image.identity_pk.emplace(item.first, HexStr(item.second));
+    }
+    for (const auto& item : store.trains) {
+        image.trains.emplace(item.first, item.second.state);
+    }
+}
+
+TrainKept MaterializeTrain(const IntegerState& state)
+{
+    TrainKept kept;
+    kept.state = state;
+    std::string check_err;
+    if (!IntegerTrainer::CheckState(state, check_err)) return kept;
+    IntegerTrainer trainer;
+    if (!trainer.Run(state.step, check_err)) return kept;
+    kept.intervals = trainer.Intervals();
+    return kept;
+}
+
+void ImageToStore(const LabDiskImage& image, Store& store)
+{
+    store.records = image.records;
+    store.observations = image.observations;
+    store.repo_objects.clear();
+    for (const auto& entry : image.repo_objects) {
+        std::vector<ExchangeObject> objects;
+        objects.reserve(entry.second.size());
+        for (const LabDiskObject& row : entry.second) {
+            ExchangeObject object;
+            object.kind = row.kind;
+            object.digest = row.digest;
+            object.content = row.content;
+            objects.push_back(std::move(object));
+        }
+        store.repo_objects.emplace(entry.first, std::move(objects));
+    }
+    store.repos = image.repos;
+    store.snapshots = image.snapshots;
+    store.realms = image.realms;
+    store.lineage = image.lineage;
+    store.plans = image.plans;
+    store.admissions = image.admissions;
+    store.identity_pk.clear();
+    for (const auto& item : image.identity_pk) {
+        store.identity_pk.emplace(item.first, ParseHex(item.second));
+    }
+    store.trains.clear();
+    for (const auto& item : image.trains) {
+        store.trains.emplace(item.first, MaterializeTrain(item.second));
+    }
+}
+
+bool& DiskLoadedOnce()
+{
+    static bool loaded = false;
+    return loaded;
+}
+
+void LoadDiskInto(Store& store)
+{
+    LabDiskImage image;
+    std::string err;
+    if (!LoadLabDisk(image, err)) return;
+    if (LabDiskDirectory().empty()) return;
+    ImageToStore(image, store);
+}
+
 Store& State()
 {
     static Store store;
+    if (!DiskLoadedOnce()) {
+        DiskLoadedOnce() = true;
+        LoadDiskInto(store);
+    }
     return store;
+}
+
+bool PersistDurable(std::string& err)
+{
+    if (LabDiskDirectory().empty()) {
+        err.clear();
+        return true;
+    }
+    LabDiskImage image;
+    ImageFromStore(State(), image);
+    return SaveLabDisk(image, err);
+}
+
+void WipeMemory()
+{
+    Store& store = State();
+    for (auto& item : store.identity_sk) {
+        memory_cleanse(item.second.data(), item.second.size());
+    }
+    store = Store{};
 }
 
 bool Fail(std::string& err, const char* code)
@@ -466,6 +583,284 @@ void FillOp(UniValue& result, const Operation& op)
     result.pushKV("lease_count", "0");
     result.pushKV("quiescence_evidence_id", UniValue());
     result.pushKV("completion_result", UniValue());
+}
+
+// Canonical research snapshot line, one line with no raw CR or LF:
+//   v1|<record_id>|<topic_id>|<author_id>|<content_hash>|<0|1>|<sequence>|<reproduction_count>|<contest_count>
+// Field escapes: \\ -> \, \p -> |, \n -> newline, \r -> CR. Private rows are omitted.
+// A decoded row is public.
+
+std::string EscapeResearchField(const std::string& text)
+{
+    std::string out;
+    out.reserve(text.size());
+    for (unsigned char c : text) {
+        if (c == '\\') out += "\\\\";
+        else if (c == '|') out += "\\p";
+        else if (c == '\n') out += "\\n";
+        else if (c == '\r') out += "\\r";
+        else out.push_back(static_cast<char>(c));
+    }
+    return out;
+}
+
+bool UnescapeResearchField(const std::string& text, std::string& out)
+{
+    out.clear();
+    for (size_t i = 0; i < text.size(); ++i) {
+        if (text[i] != '\\') {
+            out.push_back(text[i]);
+            continue;
+        }
+        if (i + 1 >= text.size()) return false;
+        const char next = text[++i];
+        if (next == '\\') out.push_back('\\');
+        else if (next == 'p') out.push_back('|');
+        else if (next == 'n') out.push_back('\n');
+        else if (next == 'r') out.push_back('\r');
+        else return false;
+    }
+    return true;
+}
+
+bool ParseResearchU64(const std::string& text, uint64_t& out)
+{
+    if (text.empty() || text.size() > 20) return false;
+    if (text.size() > 1 && text[0] == '0') return false;
+    uint64_t value = 0;
+    for (char c : text) {
+        if (c < '0' || c > '9') return false;
+        const uint64_t digit = static_cast<uint64_t>(c - '0');
+        if (value > (UINT64_MAX - digit) / 10) return false;
+        value = value * 10 + digit;
+    }
+    out = value;
+    return true;
+}
+
+bool EncodeResearchLine(const ResearchObservation& row, std::string& line, std::string& err)
+{
+    if (row.record_id.empty()) return Fail(err, "BTX035_SCHEMA");
+    line = "v1|" + EscapeResearchField(row.record_id) + "|" + EscapeResearchField(row.topic_id) + "|" +
+           EscapeResearchField(row.author_id) + "|" + EscapeResearchField(row.content_hash) + "|" +
+           (row.negative ? "1" : "0") + "|" + std::to_string(row.sequence) + "|" +
+           std::to_string(row.reproduction_count) + "|" + std::to_string(row.contest_count);
+    if (line.find('\n') != std::string::npos || line.find('\r') != std::string::npos) return Fail(err, "BTX035_SCHEMA");
+    err.clear();
+    return true;
+}
+
+bool DecodeResearchLine(const std::string& line, ResearchObservation& row, std::string& err)
+{
+    if (line.empty() || line.find('\n') != std::string::npos || line.find('\r') != std::string::npos) {
+        return Fail(err, "BTX035_SCHEMA");
+    }
+    std::vector<std::string> parts;
+    std::string current;
+    for (char c : line) {
+        if (c == '|') {
+            parts.push_back(current);
+            current.clear();
+        } else {
+            current.push_back(c);
+        }
+    }
+    parts.push_back(current);
+    if (parts.size() != 9 || parts[0] != "v1") return Fail(err, "BTX035_SCHEMA");
+    ResearchObservation decoded;
+    if (!UnescapeResearchField(parts[1], decoded.record_id) || decoded.record_id.empty() ||
+        !UnescapeResearchField(parts[2], decoded.topic_id) ||
+        !UnescapeResearchField(parts[3], decoded.author_id) ||
+        !UnescapeResearchField(parts[4], decoded.content_hash)) {
+        return Fail(err, "BTX035_SCHEMA");
+    }
+    if (parts[5] != "0" && parts[5] != "1") return Fail(err, "BTX035_SCHEMA");
+    uint64_t sequence = 0;
+    uint64_t reproduction = 0;
+    uint64_t contest = 0;
+    if (!ParseResearchU64(parts[6], sequence) || !ParseResearchU64(parts[7], reproduction) ||
+        !ParseResearchU64(parts[8], contest) || reproduction > UINT32_MAX || contest > UINT32_MAX) {
+        return Fail(err, "BTX035_SCHEMA");
+    }
+    decoded.negative = parts[5] == "1";
+    decoded.is_private = false;
+    decoded.sequence = sequence;
+    decoded.reproduction_count = static_cast<uint32_t>(reproduction);
+    decoded.contest_count = static_cast<uint32_t>(contest);
+    row = std::move(decoded);
+    err.clear();
+    return true;
+}
+
+bool AppendPublicResearch(const std::vector<ResearchObservation>& rows, std::vector<ExchangeObject>& objects, std::string& err)
+{
+    for (const ResearchObservation& row : rows) {
+        if (row.is_private) continue;
+        ExchangeObject object;
+        object.kind = "research";
+        if (!EncodeResearchLine(row, object.content, err)) return false;
+        const std::vector<unsigned char> bytes(object.content.begin(), object.content.end());
+        if (!GitObjectDigest("research", Span<const unsigned char>{bytes.data(), bytes.size()}, object.digest, err)) return false;
+        objects.push_back(std::move(object));
+    }
+    err.clear();
+    return true;
+}
+
+// Canonical INTEGER_LINEAR snapshot line, one line with no raw CR or LF:
+//   v1|<trajectory_id>|<weight>|<bias>|<momentum_w>|<momentum_b>|<cursor>|<step>|<state_hash>
+// trajectory_id and state_hash use the research field escapes. Integers are
+// canonical decimal (optional leading minus, no leading zeros).
+
+bool ParseTrainI64(const std::string& text, int64_t& out)
+{
+    if (text.empty() || text.size() > 20) return false;
+    size_t i = 0;
+    bool neg = false;
+    if (text[0] == '-') {
+        neg = true;
+        i = 1;
+        if (i == text.size()) return false;
+    }
+    if (text[i] == '0' && i + 1 != text.size()) return false;
+    uint64_t mag = 0;
+    for (; i < text.size(); ++i) {
+        if (text[i] < '0' || text[i] > '9') return false;
+        const uint64_t digit = static_cast<uint64_t>(text[i] - '0');
+        if (mag > (UINT64_MAX - digit) / 10) return false;
+        mag = mag * 10 + digit;
+    }
+    if (!neg) {
+        if (mag > static_cast<uint64_t>(INT64_MAX)) return false;
+        out = static_cast<int64_t>(mag);
+        return true;
+    }
+    if (mag > static_cast<uint64_t>(INT64_MAX) + 1) return false;
+    if (mag == static_cast<uint64_t>(INT64_MAX) + 1) {
+        out = INT64_MIN;
+        return true;
+    }
+    out = -static_cast<int64_t>(mag);
+    return true;
+}
+
+bool EncodeTrainLine(const std::string& trajectory_id, const IntegerState& state, std::string& line, std::string& err)
+{
+    if (!HexN(trajectory_id, 96) || !HexN(state.state_hash, 96)) return Fail(err, "BTX035_SCHEMA");
+    line = "v1|" + EscapeResearchField(trajectory_id) + "|" + std::to_string(state.weight) + "|" +
+           std::to_string(state.bias) + "|" + std::to_string(state.momentum_w) + "|" +
+           std::to_string(state.momentum_b) + "|" + std::to_string(state.cursor) + "|" +
+           std::to_string(state.step) + "|" + EscapeResearchField(state.state_hash);
+    if (line.find('\n') != std::string::npos || line.find('\r') != std::string::npos) return Fail(err, "BTX035_SCHEMA");
+    err.clear();
+    return true;
+}
+
+bool DecodeTrainLine(const std::string& line, std::string& trajectory_id, IntegerState& state, std::string& err)
+{
+    if (line.empty() || line.find('\n') != std::string::npos || line.find('\r') != std::string::npos) {
+        return Fail(err, "BTX035_SCHEMA");
+    }
+    std::vector<std::string> parts;
+    std::string current;
+    for (char c : line) {
+        if (c == '|') {
+            parts.push_back(current);
+            current.clear();
+        } else {
+            current.push_back(c);
+        }
+    }
+    parts.push_back(current);
+    if (parts.size() != 9 || parts[0] != "v1") return Fail(err, "BTX035_SCHEMA");
+    std::string hash;
+    if (!UnescapeResearchField(parts[1], trajectory_id) || !HexN(trajectory_id, 96) ||
+        !ParseTrainI64(parts[2], state.weight) || !ParseTrainI64(parts[3], state.bias) ||
+        !ParseTrainI64(parts[4], state.momentum_w) || !ParseTrainI64(parts[5], state.momentum_b) ||
+        !ParseResearchU64(parts[6], state.cursor) || !ParseResearchU64(parts[7], state.step) ||
+        !UnescapeResearchField(parts[8], hash) || !HexN(hash, 96)) {
+        return Fail(err, "BTX035_SCHEMA");
+    }
+    state.state_hash = std::move(hash);
+    err.clear();
+    return true;
+}
+
+bool AppendTrains(const std::map<std::string, TrainKept>& trains, std::vector<ExchangeObject>& objects, std::string& err)
+{
+    for (const auto& item : trains) {
+        ExchangeObject object;
+        object.kind = "train";
+        if (!EncodeTrainLine(item.first, item.second.state, object.content, err)) return false;
+        const std::vector<unsigned char> bytes(object.content.begin(), object.content.end());
+        if (!GitObjectDigest("train", Span<const unsigned char>{bytes.data(), bytes.size()}, object.digest, err)) return false;
+        objects.push_back(std::move(object));
+    }
+    err.clear();
+    return true;
+}
+
+bool CollectTrains(const std::vector<ExchangeObject>& objects, std::map<std::string, IntegerState>& out, std::string& err)
+{
+    out.clear();
+    for (const ExchangeObject& object : objects) {
+        if (object.kind != "train") continue;
+        std::string trajectory_id;
+        IntegerState state;
+        if (!DecodeTrainLine(object.content, trajectory_id, state, err)) return false;
+        if (!out.emplace(trajectory_id, std::move(state)).second) return Fail(err, "BTX035_SCHEMA");
+    }
+    err.clear();
+    return true;
+}
+
+void RestoreTrains(Store& store, const std::map<std::string, IntegerState>& trains)
+{
+    for (const auto& item : trains) {
+        store.trains[item.first] = MaterializeTrain(item.second);
+    }
+}
+
+bool CollectResearch(const std::vector<ExchangeObject>& objects, std::vector<ResearchObservation>& out, std::string& err)
+{
+    out.clear();
+    for (const ExchangeObject& object : objects) {
+        if (object.kind != "research") continue;
+        ResearchObservation row;
+        if (!DecodeResearchLine(object.content, row, err)) return false;
+        row.is_private = false;
+        out.push_back(std::move(row));
+    }
+    err.clear();
+    return true;
+}
+
+enum class GuardRoute { Local, Remote, Invalid };
+
+GuardRoute GuardRouteForCall(uint16_t& port, std::string& err)
+{
+    port = 0;
+    const char* env = std::getenv("BTX_GUARD_PORT");
+    if (env == nullptr || env[0] == '\0' || (env[0] == '0' && env[1] == '\0')) return GuardRoute::Local;
+    int64_t value = 0;
+    if (!ParseDec(env, value) || value <= 0 || value > 65535) {
+        err = "BTX035_SCHEMA";
+        return GuardRoute::Invalid;
+    }
+    port = static_cast<uint16_t>(value);
+    return GuardRoute::Remote;
+}
+
+bool DurableRead(const std::string& method)
+{
+    return method == "lab.info" || method == "lab.record_get" || method == "lab.record_verify" ||
+           method == "lab.identity_inspect" || method == "lab.grant_evaluate" || method == "lab.research_events" ||
+           method == "lab.research_frontier" || method == "lab.research_query" || method == "lab.git_refs" ||
+           method == "lab.agent_lineage" || method == "lab.research_context" || method == "lab.source_query" ||
+           method == "lab.operation_get" || method == "lab.journal_proof" || method == "lab.channel_get" ||
+           method == "lab.rollout_status" || method == "lab.rollout_endpoints" || method == "lab.migration_verify" ||
+           method == "lab.economy_refs" || method == "lab.capsule_resolve" || method == "lab.state_get" ||
+           method == "lab.audit_coverage" || method == "lab.realm_status";
 }
 
 bool Apply(const std::string& method, const UniValue& req, UniValue& result, std::string& err)
@@ -1061,9 +1456,17 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
         if (!Expect(store, req, "prepare|" + RequireStr(req, "intent_id"), err)) return false;
         const std::string intent = RequireStr(req, "intent_id");
         if (!HexN(intent, 96)) return Fail(err, "BTX035_SCHEMA");
+        uint16_t guard_port = 0;
+        const GuardRoute route = GuardRouteForCall(guard_port, err);
+        if (route == GuardRoute::Invalid) return false;
         const int64_t now = NowMs();
+        const std::string fingerprint = Id96("fp|" + intent);
         GuardPermit issued;
-        if (!store.guards.Prepare("research.run", Id96("fp|" + intent), 1, now, issued, err)) return false;
+        if (route == GuardRoute::Remote) {
+            if (!GuardClientPrepare("127.0.0.1", guard_port, "research.run", fingerprint, 1, issued, err)) return false;
+        } else if (!store.guards.Prepare("research.run", fingerprint, 1, now, issued, err)) {
+            return false;
+        }
         ActionPermit permit;
         permit.permit_id = issued.commitment;
         permit.grant_id = intent;
@@ -1089,9 +1492,16 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
         const auto it = store.permit_rows.find(secret);
         if (it == store.permit_rows.end()) return Fail(err, "BTX035_PERMIT");
         const IssuedPermit row = it->second;
+        uint16_t guard_port = 0;
+        const GuardRoute route = GuardRouteForCall(guard_port, err);
+        if (route == GuardRoute::Invalid) return false;
         const int64_t now = NowMs();
         std::string receipt;
-        if (!store.guards.Execute(secret, now, receipt, err)) return false;
+        if (route == GuardRoute::Remote) {
+            if (!GuardClientExecute("127.0.0.1", guard_port, secret, receipt, err)) return false;
+        } else if (!store.guards.Execute(secret, now, receipt, err)) {
+            return false;
+        }
         if (!store.gate->Consume(GuardCommitment(secret), row.effect, row.generation, now, row.fingerprint, err)) return false;
         result.pushKV("physical_disposition", "STOPPED_QUIESCENT");
         return Rec(result, receipt, "EXECUTED");
@@ -1110,8 +1520,15 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
         if (!Expect(store, req, "pause|" + RequireStr(req, "runtime_binding_id"), err)) return false;
         const std::string binding = RequireStr(req, "runtime_binding_id");
         if (!store.bindings.count(binding)) return Fail(err, "BTX035_NOT_FOUND");
+        uint16_t guard_port = 0;
+        const GuardRoute route = GuardRouteForCall(guard_port, err);
+        if (route == GuardRoute::Invalid) return false;
+        if (route == GuardRoute::Remote) {
+            if (!GuardClientPause("127.0.0.1", guard_port, err)) return false;
+        } else {
+            store.guards.Pause();
+        }
         store.gate->Pause();
-        store.guards.Pause();
         store.paused_bindings.insert(binding);
         result.pushKV("state", "PAUSED");
         result.pushKV("receipt_id", Id96("pause|" + binding));
@@ -1122,10 +1539,20 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
         const std::string binding = RequireStr(req, "runtime_binding_id");
         if (!store.paused_bindings.count(binding)) return Fail(err, "BTX035_NOT_FOUND");
         if (!store.grants.count(RequireStr(req, "new_grant_id"))) return Fail(err, "BTX035_PERMIT");
+        uint16_t guard_port = 0;
+        const GuardRoute route = GuardRouteForCall(guard_port, err);
+        if (route == GuardRoute::Invalid) return false;
         store.paused_bindings.erase(binding);
         if (store.paused_bindings.empty()) {
+            if (route == GuardRoute::Remote) {
+                if (!GuardClientResume("127.0.0.1", guard_port, err)) {
+                    store.paused_bindings.insert(binding);
+                    return false;
+                }
+            } else {
+                store.guards.Resume();
+            }
             store.gate->Resume();
-            store.guards.Resume();
         }
         return Rec(result, Id96("resume|" + binding), "RESUMED");
     }
@@ -1430,34 +1857,50 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
         const std::string repo = RequireStr(req, "repository_id");
         const auto it = store.repo_objects.find(repo);
         if (it == store.repo_objects.end()) return Fail(err, "BTX035_NOT_FOUND");
-        if (req.exists("fetch_ticket") && req["fetch_ticket"].isStr() && !req["fetch_ticket"].get_str().empty()) {
+        const bool ticketed = req.exists("fetch_ticket") && req["fetch_ticket"].isStr() && !req["fetch_ticket"].get_str().empty();
+        if (ticketed) {
             const std::string ticket = req["fetch_ticket"].get_str();
             const auto auth = store.fetch_tickets.find(ticket);
             if (auth == store.fetch_tickets.end()) return Fail(err, "BTX035_PERMIT");
             if (auth->second.consumed) return Fail(err, "BTX035_REPLAY");
             if (auth->second.repository_id != repo) return Fail(err, "BTX035_ID_MISMATCH");
             if (NowMs() > auth->second.not_after_ms) return Fail(err, "BTX035_EXPIRED");
+        }
+        std::vector<ExchangeObject> exported;
+        for (const ExchangeObject& object : it->second) {
+            if (object.kind == "research" || object.kind == "train") continue;
+            exported.push_back(object);
+        }
+        if (!AppendPublicResearch(store.observations, exported, err)) return false;
+        if (!AppendTrains(store.trains, exported, err)) return false;
+        if (ticketed) {
+            const auto auth = store.fetch_tickets.find(req["fetch_ticket"].get_str());
+            if (auth == store.fetch_tickets.end()) return Fail(err, "BTX035_PERMIT");
             int64_t bytes = 0;
-            for (const ExchangeObject& object : it->second) bytes += static_cast<int64_t>(object.content.size());
+            for (const ExchangeObject& object : exported) bytes += static_cast<int64_t>(object.content.size());
             if (bytes > auth->second.max_bytes) return Fail(err, "BTX035_POLICY");
         }
         std::string manifest;
-        if (!WriteExchangeManifest(it->second, manifest, err)) return false;
-        if (req.exists("fetch_ticket") && req["fetch_ticket"].isStr() && !req["fetch_ticket"].get_str().empty()) {
-            store.fetch_tickets[req["fetch_ticket"].get_str()].consumed = true;
-        }
+        if (!WriteExchangeManifest(exported, manifest, err)) return false;
+        if (ticketed) store.fetch_tickets[req["fetch_ticket"].get_str()].consumed = true;
         result.pushKV("manifest", manifest);
-        result.pushKV("object_count", static_cast<int>(it->second.size()));
+        result.pushKV("object_count", static_cast<int>(exported.size()));
         return true;
     }
     if (method == "lab.snapshot_import") {
         if (!Expect(store, req, "snapim|" + RequireStr(req, "idempotency_key"), err)) return false;
         std::vector<ExchangeObject> objects;
         if (!VerifyExchangeManifest(RequireStr(req, "manifest"), objects, err)) return false;
+        std::vector<ResearchObservation> observed;
+        if (!CollectResearch(objects, observed, err)) return false;
+        std::map<std::string, IntegerState> trains;
+        if (!CollectTrains(objects, trains, err)) return false;
         const std::string repo = Id96(RequireStr(req, "manifest"));
         store.repos.insert(repo);
         store.repo_objects[repo] = objects;
         store.snapshots.insert(repo);
+        store.observations = std::move(observed);
+        RestoreTrains(store, trains);
         result.pushKV("repository_id", repo);
         result.pushKV("object_count", static_cast<int>(objects.size()));
         return true;
@@ -1474,9 +1917,15 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
         }
         std::vector<ExchangeObject> objects;
         if (!VerifyExchangeManifest(manifest, objects, err)) return false;
+        std::vector<ResearchObservation> observed;
+        if (!CollectResearch(objects, observed, err)) return false;
+        std::map<std::string, IntegerState> trains;
+        if (!CollectTrains(objects, trains, err)) return false;
         const std::string repo = RequireStr(req, "repository_id");
         store.repos.insert(repo);
         store.repo_objects[repo] = std::move(objects);
+        store.observations = std::move(observed);
+        RestoreTrains(store, trains);
         result.pushKV("manifest", manifest);
         result.pushKV("repository_id", repo);
         return true;
@@ -1497,11 +1946,14 @@ const LabMethod* FindMethod(const std::string& method)
 void ResetLabApi()
 {
     LOCK(g_lab_mutex);
-    Store& store = State();
-    for (auto& item : store.identity_sk) {
-        memory_cleanse(item.second.data(), item.second.size());
-    }
-    State() = Store{};
+    WipeMemory();
+}
+
+void ReloadLabFromDisk()
+{
+    LOCK(g_lab_mutex);
+    WipeMemory();
+    LoadDiskInto(State());
 }
 
 bool DispatchLabApi(const std::string& method, const std::string& request_json, std::string& response_json, std::string& err)
@@ -1528,6 +1980,10 @@ bool DispatchLabApi(const std::string& method, const std::string& request_json, 
     response_json = envelope.write();
     if (!State().token_subject.empty() && envelope.exists("state_token") && envelope["state_token"].isStr()) {
         State().tokens[State().token_subject] = envelope["state_token"].get_str();
+    }
+    if (!DurableRead(method) && !PersistDurable(err)) {
+        response_json.clear();
+        return false;
     }
     Remember(req, response_json);
     err.clear();

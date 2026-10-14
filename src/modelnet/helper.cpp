@@ -2654,7 +2654,20 @@ bool HandleNativeRequest(ModelCatalog& cat, const NativeRequest& req, NativeResp
             return true;
         }
         CatalogEntry served;
-        if (!cat.Find(id, served) || !served.seeded || served.incomplete || !served.bytes_verified ||
+        if (!cat.Find(id, served)) {
+            resp.status = 404;
+            resp.body = JsonError("NOT_FOUND", "not seeded");
+            return true;
+        }
+        {
+            std::string admission_code;
+            if (!LivePathAllowed(served.model_id.Hex(), false, admission_code)) {
+                resp.status = 403;
+                resp.body = JsonError(admission_code, "admission denied");
+                return true;
+            }
+        }
+        if (!served.seeded || served.incomplete || !served.bytes_verified ||
             GlobalSafety().SubjectBlocked(served.model_id.Hex()) ||
             GlobalSafety().SubjectBlocked(served.artifact_id.Hex())) {
             resp.status = 404;
@@ -2695,6 +2708,14 @@ bool HandleNativeRequest(ModelCatalog& cat, const NativeRequest& req, NativeResp
             resp.status = 404;
             resp.body = JsonError("NOT_FOUND", "no artifact");
             return true;
+        }
+        {
+            std::string admission_code;
+            if (!LivePathAllowed(entry.model_id.Hex(), false, admission_code)) {
+                resp.status = 403;
+                resp.body = JsonError(admission_code, "admission denied");
+                return true;
+            }
         }
         if (!entry.seeded || entry.incomplete || !entry.bytes_verified ||
             GlobalSafety().SubjectBlocked(entry.model_id.Hex()) ||
@@ -2815,7 +2836,20 @@ bool HandleNativeRequest(ModelCatalog& cat, const NativeRequest& req, NativeResp
         }
         const uint32_t file_index = static_cast<uint32_t>(std::strtoul(rest.c_str() + slash + 1, nullptr, 10));
         CatalogEntry entry;
-        if (!cat.Find(artifact, entry) || !entry.seeded || entry.incomplete || !entry.bytes_verified ||
+        if (!cat.Find(artifact, entry)) {
+            resp.status = 404;
+            resp.body = JsonError("NOT_FOUND", "not seeded");
+            return true;
+        }
+        {
+            std::string admission_code;
+            if (!LivePathAllowed(entry.model_id.Hex(), false, admission_code)) {
+                resp.status = 403;
+                resp.body = JsonError(admission_code, "admission denied");
+                return true;
+            }
+        }
+        if (!entry.seeded || entry.incomplete || !entry.bytes_verified ||
             GlobalSafety().SubjectBlocked(entry.model_id.Hex()) ||
             GlobalSafety().SubjectBlocked(entry.artifact_id.Hex())) {
             resp.status = 404;
@@ -2895,6 +2929,10 @@ bool HandleNativeRequest(ModelCatalog& cat, const NativeRequest& req, NativeResp
                 if (m.exists("complete") && !m["complete"].get_bool()) continue;
                 if (m.exists("model_id") && m["model_id"].isStr() && GlobalSafety().SubjectBlocked(m["model_id"].get_str())) continue;
                 if (m.exists("artifact_id") && m["artifact_id"].isStr() && GlobalSafety().SubjectBlocked(m["artifact_id"].get_str())) continue;
+                if (m.exists("model_id") && m["model_id"].isStr()) {
+                    std::string admission_code;
+                    if (!LivePathAllowed(m["model_id"].get_str(), false, admission_code)) continue;
+                }
                 if (m.exists("artifact_id") && m["artifact_id"].isStr()) {
                     Digest48 aid;
                     std::string aerr;
@@ -3588,7 +3626,20 @@ bool HandleNativeRequest(ModelCatalog& cat, const NativeRequest& req, NativeResp
             return true;
         }
         CatalogEntry e;
-        if (!cat.Find(model_id, e) || !e.seeded || e.incomplete || !e.bytes_verified ||
+        if (!cat.Find(model_id, e)) {
+            resp.status = 404;
+            resp.body = JsonError("NOT_FOUND", "no seeded local grant");
+            return true;
+        }
+        {
+            std::string admission_code;
+            if (!LivePathAllowed(e.model_id.Hex(), false, admission_code)) {
+                resp.status = 403;
+                resp.body = JsonError(admission_code, "admission denied");
+                return true;
+            }
+        }
+        if (!e.seeded || e.incomplete || !e.bytes_verified ||
             GlobalSafety().SubjectBlocked(e.model_id.Hex()) || GlobalSafety().SubjectBlocked(e.artifact_id.Hex())) {
             resp.status = 404;
             resp.body = JsonError("NOT_FOUND", "no seeded local grant");
@@ -4580,6 +4631,16 @@ bool ImportAndPublish(ModelCatalog& cat, const std::string& path, bool pin, bool
     result.pushKV("seeded", e.seeded);
     result.pushKV("pinned", e.pinned);
     result.pushKV("propagation", ShouldDemandSeed(cat.Policy(), e.admission) || e.seeded ? "demand" : "local_only");
+    {
+        std::string admission_code;
+        if (!LivePathAllowed(e.model_id.Hex(), false, admission_code)) {
+            std::string uerr;
+            (void)cat.Seed(e.model_id, false, uerr);
+            err_code = admission_code;
+            err = "admission denied";
+            return false;
+        }
+    }
     ModelSearchRecord rec = DraftSearchFromCatalog(e);
     rec.btx_uri = uri;
     if (publish) {
@@ -5153,6 +5214,12 @@ void EnsureCloudLoaded(ModelCatalog& cat)
 
 void PublishCatalogToCloud(const CatalogEntry& e, UniValue& result)
 {
+    std::string admission_code;
+    if (!LivePathAllowed(e.model_id.Hex(), false, admission_code)) {
+        result.pushKV("cloud_uploaded", false);
+        result.pushKV("cloud_error", admission_code);
+        return;
+    }
     std::lock_guard<std::mutex> lock(g_cloud_mu);
     if (!g_cloud || !g_cloud->IsReady()) {
         result.pushKV("cloud_uploaded", false);
@@ -5196,6 +5263,11 @@ void PublishCatalogToCloud(const CatalogEntry& e, UniValue& result)
 
 bool TryHydrateFromCloud(ModelCatalog& cat, CatalogEntry& e, UniValue& result, std::string& err)
 {
+    std::string admission_code;
+    if (!LivePathAllowed(e.model_id.Hex(), false, admission_code)) {
+        err = admission_code;
+        return false;
+    }
     std::lock_guard<std::mutex> lock(g_cloud_mu);
     if (!g_cloud || !g_cloud->IsReady() || e.core.files.empty()) return false;
     const CloudObjectLayout layout = g_cloud->Layout();
@@ -7048,6 +7120,14 @@ bool DispatchHelperRpc(ModelCatalog& cat, const UniValue& request, UniValue& res
             err_code = "INVALID_PARAMETER";
             return false;
         }
+        {
+            std::string admission_code;
+            if (!LivePathAllowed(rec.model_id.Hex(), false, admission_code)) {
+                err_code = admission_code;
+                err = "admission denied";
+                return false;
+            }
+        }
         if (rec.canonical_name.empty()) rec.canonical_name = rec.display_name;
         CatalogEntry local;
         if (cat.Find(rec.model_id, local)) {
@@ -7681,6 +7761,14 @@ bool DispatchHelperRpc(ModelCatalog& cat, const UniValue& request, UniValue& res
             err_code = "INVALID_PARAMETER";
             err = "resource is not a MODEL";
             return false;
+        }
+        {
+            std::string admission_code;
+            if (!LivePathAllowed(r.digest.Hex(), false, admission_code)) {
+                err_code = admission_code;
+                err = "admission denied";
+                return false;
+            }
         }
         RetrievalMode mode = RetrievalMode::FREE_ONLY;
         int64_t budget_atoms = 0;
@@ -8477,6 +8565,14 @@ bool DispatchHelperRpc(ModelCatalog& cat, const UniValue& request, UniValue& res
                 err = "secret does not match SHA-256 key_hash";
                 return false;
             }
+            {
+                std::string admission_code;
+                if (!LivePathAllowed(camp.model_id.Hex(), false, admission_code)) {
+                    err_code = admission_code;
+                    err = "admission denied";
+                    return false;
+                }
+            }
             ModelSearchRecord rec;
             {
                 std::lock_guard<std::mutex> slock(g_search_mu);
@@ -8600,6 +8696,14 @@ bool DispatchHelperRpc(ModelCatalog& cat, const UniValue& request, UniValue& res
             err_code = "INCOMPLETE";
             err = "incomplete replica cannot be exported as a runtime root";
             return false;
+        }
+        {
+            std::string admission_code;
+            if (!LivePathAllowed(e.model_id.Hex(), false, admission_code)) {
+                err_code = admission_code;
+                err = "admission denied";
+                return false;
+            }
         }
         const fs::path checkout = HelperDir(cat) / "checkout" / fs::PathFromString(e.artifact_id.Hex());
         if (!cat.MaterializeCheckout(id, checkout, err)) {
@@ -9573,6 +9677,15 @@ bool DispatchHelperRpc(ModelCatalog& cat, const UniValue& request, UniValue& res
                 err = "no ciphertext artifact for this campaign";
                 return false;
             }
+            {
+                std::string admission_code;
+                if (!LivePathAllowed(cid.Hex(), false, admission_code) ||
+                    (have_camp && !LivePathAllowed(camp.model_id.Hex(), false, admission_code))) {
+                    err_code = admission_code;
+                    err = "admission denied";
+                    return false;
+                }
+            }
             result.pushKV("ciphertext_artifact_id", cid.Hex());
             CatalogEntry local;
             if (cat.Find(cid, local) || (have_camp && cat.Find(camp.model_id, local))) {
@@ -9848,6 +9961,13 @@ bool RetrieveFreeFromPeer(ModelCatalog& cat, Pq1Context& pq, const std::string& 
                           const Digest48& model_id, std::string& err, std::atomic<bool>* stop, const fs::path& pinfile,
                           RetrieveProgress* progress, const std::vector<std::string>& extra_peers)
 {
+    {
+        std::string admission_code;
+        if (!LivePathAllowed(model_id.Hex(), false, admission_code)) {
+            err = admission_code;
+            return false;
+        }
+    }
     auto loopback_ok = [&](const std::string& h, uint16_t p) {
         if (h != "127.0.0.1" && h != "::1") return false;
         if (IsForbiddenControlPort(p)) return false;
@@ -11351,6 +11471,10 @@ static void TryPreserveRareTick(ModelCatalog& cat, Pq1Context& pq, const fs::pat
     std::string err;
     if (!SplitHostPort(pick.peer, host, port)) return;
     if (!cat.EnforceQuota(pick.bytes, err)) return;
+    {
+        std::string admission_code;
+        if (!LivePathAllowed(pick.model_id.Hex(), false, admission_code)) return;
+    }
     if (RetrieveFreeFromPeer(cat, pq, host, port, pick.model_id, err, stop, pinfile)) {
         DemandSeedIfDownloadable(cat, pick.model_id, err);
     }

@@ -596,6 +596,7 @@ if(WITH_MODELNET)
     modelnet_035_discovery_tests.cpp
     modelnet_035_training_tests.cpp
     modelnet_035_complete_tests.cpp
+    modelnet_035_disk_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp
     modelnet_035_surface_tests.cpp
@@ -610,6 +611,7 @@ if(WITH_MODELNET)
     modelnet_035_wan_endpoint_tests.cpp
     modelnet_035_remaining_tests.cpp
     modelnet_035_journey_tests.cpp
+    modelnet_035_live_path_tests.cpp
     modelnet_submandate_tests.cpp
     modelnet_bounty_script_spend_tests.cpp
     modelnet_economy_tests.cpp

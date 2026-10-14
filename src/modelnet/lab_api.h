@@ -12,8 +12,11 @@ namespace modelnet {
 /** Dispatch one `lab.<operation>` method. Unknown names return false with BTX035_NOT_IMPLEMENTED. */
 bool DispatchLabApi(const std::string& method, const std::string& request_json, std::string& response_json, std::string& err);
 
-/** Drop process-local lab state. Tests call this between cases. */
+/** Drop process-local lab state. Tests call this between cases. Does not delete BTX035_LAB_DIR. */
 void ResetLabApi();
+
+/** Clear process-local lab state and load BTX035_LAB_DIR again when that variable is set. */
+void ReloadLabFromDisk();
 
 } // namespace modelnet
 

@@ -69,6 +69,8 @@ struct OfflineText {
     bool has_channel{false};
     int64_t channel_sequence{0};
     std::string body_hash;
+    /** Set when the live channel key is realm + newline + this name. */
+    std::string channel_name;
 };
 
 bool ReadIdList(const std::vector<std::string>& lines, std::size_t& index, const char* key, std::set<std::string>& ids)
@@ -111,6 +113,12 @@ bool ParseOfflineText(const std::vector<std::string>& lines, OfflineText& out)
     }
     if (!NextLine(lines, index, line) || !KeyValue(line, "body", out.body_hash)) return false;
     if (!out.has_channel && !out.body_hash.empty()) return false;
+    if (index < lines.size()) {
+        if (!NextLine(lines, index, line) || !KeyValue(line, "name", out.channel_name) || out.channel_name.empty() ||
+            !SingleLine(out.channel_name)) {
+            return false;
+        }
+    }
     return index == lines.size();
 }
 
@@ -739,8 +747,26 @@ bool RealmRollout::WriteOfflineBundle(const std::filesystem::path& path, const s
         }
     }
 
-    const int64_t sequence = st.has_channel ? st.channel_sequence : static_cast<int64_t>(-1);
-    const std::string body = st.has_channel ? st.body_hash : std::string();
+    int64_t sequence = st.has_channel ? st.channel_sequence : static_cast<int64_t>(-1);
+    std::string body = st.has_channel ? st.body_hash : std::string();
+    std::string channel_name;
+    if (!st.has_channel) {
+        const std::string prefix = realm + "\n";
+        for (const auto& item : m_realms) {
+            if (item.first.rfind(prefix, 0) != 0 || !item.second.has_channel) continue;
+            if (!channel_name.empty()) {
+                err = "BTX035_BUNDLE";
+                return false;
+            }
+            channel_name = item.first.substr(prefix.size());
+            sequence = item.second.channel_sequence;
+            body = item.second.body_hash;
+        }
+    }
+    if (!SingleLine(body) || !SingleLine(channel_name)) {
+        err = "BTX035_BUNDLE";
+        return false;
+    }
     std::string text = "BTX035-OFFLINE-1\n";
     text += "realm=" + realm + "\n";
     text += "threshold=" + std::to_string(st.threshold) + "\n";
@@ -750,6 +776,7 @@ bool RealmRollout::WriteOfflineBundle(const std::filesystem::path& path, const s
     for (const std::string& id : st.revoked) text += id + "\n";
     text += "channel=" + std::to_string(sequence) + "\n";
     text += "body=" + body + "\n";
+    if (!channel_name.empty()) text += "name=" + channel_name + "\n";
 
     std::ofstream out(path, std::ios::out | std::ios::trunc);
     if (!out) {
@@ -798,10 +825,17 @@ bool RealmRollout::ReadOfflineBundle(const std::filesystem::path& path, const st
     st.threshold = parsed.threshold;
     st.pinned = std::move(parsed.pinned);
     st.revoked = std::move(parsed.revoked);
-    st.has_channel = parsed.has_channel;
-    st.channel_sequence = parsed.has_channel ? parsed.channel_sequence : 0;
-    st.body_hash = parsed.has_channel ? std::move(parsed.body_hash) : std::string();
+    st.has_channel = parsed.has_channel && parsed.channel_name.empty();
+    st.channel_sequence = st.has_channel ? parsed.channel_sequence : 0;
+    st.body_hash = st.has_channel ? parsed.body_hash : std::string();
     m_realms[parsed.realm] = std::move(st);
+    if (parsed.has_channel && !parsed.channel_name.empty()) {
+        RealmState channel;
+        channel.has_channel = true;
+        channel.channel_sequence = parsed.channel_sequence;
+        channel.body_hash = parsed.body_hash;
+        m_realms[parsed.realm + "\n" + parsed.channel_name] = std::move(channel);
+    }
     err.clear();
     return true;
 }

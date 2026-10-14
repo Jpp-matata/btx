@@ -43,6 +43,14 @@ private:
     bool m_paused{false};
 };
 
+/**
+ * One line of the btx-guardd protocol. Permit TTL and one-use rules stay in GuardTable.
+ * PREPARE effect fingerprint generation -> PERMIT secret commitment not_after_ms
+ * EXECUTE secret -> RECEIPT id EXECUTED STOPPED_QUIESCENT
+ * PAUSE / RESUME -> OK
+ */
+std::string GuardHandleLine(GuardTable& table, const std::string& line, int64_t now_ms);
+
 /** SHA-384 hex of the bearer. This is the value that may be stored or announced. */
 std::string GuardCommitment(const std::string& secret);
 

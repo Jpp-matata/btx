@@ -7,6 +7,7 @@
 #include <crypto/sha384.h>
 
 #include <random>
+#include <sstream>
 #include <string>
 
 namespace modelnet {
@@ -98,6 +99,38 @@ bool GuardTable::Execute(const std::string& secret, int64_t now_ms, std::string&
     receipt_id = GuardCommitment(permit.commitment + "|" + std::to_string(now_ms));
     err.clear();
     return true;
+}
+
+std::string GuardHandleLine(GuardTable& table, const std::string& line, int64_t now_ms)
+{
+    std::istringstream in(line);
+    std::string verb;
+    in >> verb;
+    std::string err;
+    if (verb == "PREPARE") {
+        std::string effect, fingerprint;
+        uint64_t generation = 0;
+        in >> effect >> fingerprint >> generation;
+        GuardPermit permit;
+        if (!table.Prepare(effect, fingerprint, generation, now_ms, permit, err)) return "ERR " + err;
+        return "PERMIT " + permit.secret + " " + permit.commitment + " " + std::to_string(permit.not_after_ms);
+    }
+    if (verb == "EXECUTE") {
+        std::string secret;
+        in >> secret;
+        std::string receipt;
+        if (!table.Execute(secret, now_ms, receipt, err)) return "ERR " + err;
+        return "RECEIPT " + receipt + " EXECUTED STOPPED_QUIESCENT";
+    }
+    if (verb == "PAUSE") {
+        table.Pause();
+        return "OK";
+    }
+    if (verb == "RESUME") {
+        table.Resume();
+        return "OK";
+    }
+    return "ERR BTX035_SCHEMA";
 }
 
 } // namespace modelnet

@@ -7,7 +7,6 @@
 #include <chrono>
 #include <cstdint>
 #include <iostream>
-#include <sstream>
 #include <string>
 
 #ifdef _WIN32
@@ -35,38 +34,6 @@ void CloseSock(int fd)
 #else
     close(fd);
 #endif
-}
-
-std::string Handle(modelnet::GuardTable& table, const std::string& line)
-{
-    std::istringstream in(line);
-    std::string verb;
-    in >> verb;
-    std::string err;
-    if (verb == "PREPARE") {
-        std::string effect, fingerprint;
-        uint64_t generation = 0;
-        in >> effect >> fingerprint >> generation;
-        modelnet::GuardPermit permit;
-        if (!table.Prepare(effect, fingerprint, generation, NowMs(), permit, err)) return "ERR " + err;
-        return "PERMIT " + permit.secret + " " + permit.commitment + " " + std::to_string(permit.not_after_ms);
-    }
-    if (verb == "EXECUTE") {
-        std::string secret;
-        in >> secret;
-        std::string receipt;
-        if (!table.Execute(secret, NowMs(), receipt, err)) return "ERR " + err;
-        return "RECEIPT " + receipt + " EXECUTED STOPPED_QUIESCENT";
-    }
-    if (verb == "PAUSE") {
-        table.Pause();
-        return "OK";
-    }
-    if (verb == "RESUME") {
-        table.Resume();
-        return "OK";
-    }
-    return "ERR BTX035_SCHEMA";
 }
 
 } // namespace
@@ -113,7 +80,7 @@ int main(int argc, char** argv)
                 std::string line = pending.substr(0, nl);
                 pending.erase(0, nl + 1);
                 if (!line.empty() && line.back() == '\r') line.pop_back();
-                const std::string reply = Handle(table, line) + "\n";
+                const std::string reply = modelnet::GuardHandleLine(table, line, NowMs()) + "\n";
                 send(client, reply.data(), reply.size(), 0);
             }
         }
