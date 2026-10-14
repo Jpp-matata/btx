@@ -837,7 +837,7 @@ bool RecordPreimageV11(const UniValue& body, std::vector<unsigned char>& preimag
         return false;
     }
     if (!body.exists("envelope_version") || !body["envelope_version"].isNum() ||
-        body["envelope_version"].getInt<int>() != 2) {
+        body["envelope_version"].getValStr() != "2") {
         err = "BTX035_ENVELOPE_VERSION";
         return false;
     }

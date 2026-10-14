@@ -582,6 +582,7 @@ if(WITH_MODELNET)
     modelnet_cloud_tests.cpp
     modelnet_bounty_tests.cpp
     modelnet_035_codec_tests.cpp
+    modelnet_035_envver_tests.cpp
     modelnet_035_identity_tests.cpp
     modelnet_035_transport_tests.cpp
     modelnet_035_git_tests.cpp

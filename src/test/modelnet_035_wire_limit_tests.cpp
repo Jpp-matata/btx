@@ -192,6 +192,10 @@ BOOST_AUTO_TEST_CASE(wire004_canonical_uri_and_legacy_alias)
 
 BOOST_AUTO_TEST_CASE(rev003_registry_kinds_and_resource_ref)
 {
+    if (std::getenv("BTX035_SPEC") == nullptr) {
+        BOOST_TEST_MESSAGE("BTX035_SPEC is unset; skipping rev003_registry_kinds_and_resource_ref");
+        return;
+    }
     std::string err;
     UniValue registry;
     std::ifstream in(std::string(SpecRoot()) + "/schemas/resource_registry.json", std::ios::binary);

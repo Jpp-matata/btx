@@ -20,6 +20,7 @@
 #include <crypto/sha384.h>
 #include <span.h>
 #include <support/cleanse.h>
+#include <sync.h>
 #include <univalue.h>
 #include <util/fs.h>
 #include <util/strencodings.h>
@@ -37,6 +38,8 @@
 
 namespace modelnet {
 namespace {
+
+GlobalMutex g_lab_mutex;
 
 enum class LabKind {
     INFO, RECORD_GET, RECORD_IMPORT, RECORD_VERIFY, IDENTITY_INSPECT, IDENTITY_CREATE,
@@ -1493,6 +1496,7 @@ const LabMethod* FindMethod(const std::string& method)
 
 void ResetLabApi()
 {
+    LOCK(g_lab_mutex);
     Store& store = State();
     for (auto& item : store.identity_sk) {
         memory_cleanse(item.second.data(), item.second.size());
@@ -1502,6 +1506,7 @@ void ResetLabApi()
 
 bool DispatchLabApi(const std::string& method, const std::string& request_json, std::string& response_json, std::string& err)
 {
+    LOCK(g_lab_mutex);
     response_json.clear();
     const LabMethod* spec = FindMethod(method);
     if (!spec) return Fail(err, "BTX035_NOT_IMPLEMENTED");

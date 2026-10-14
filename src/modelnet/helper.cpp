@@ -63,8 +63,13 @@
 #include <util/fs.h>
 #include <util/strencodings.h>
 
+#include <openssl/bn.h>
+#include <openssl/evp.h>
 #include <openssl/opensslv.h>
+#include <openssl/pem.h>
+#include <openssl/rand.h>
 #include <openssl/ssl.h>
+#include <openssl/x509.h>
 
 #include <arpa/inet.h>
 #include <cerrno>
@@ -86,7 +91,9 @@
 #include <condition_variable>
 #include <cstdint>
 #include <cstddef>
+#include <cstdio>
 #include <cstdlib>
+#include <functional>
 #include <cstring>
 #include <ctime>
 #include <cstdlib>
@@ -262,18 +269,6 @@ void NoteRetrieveBytes(RetrieveProgress* progress, uint64_t bytes)
     if (bytes != prev) {
         progress->last_commit_ms.store(static_cast<uint64_t>(NowEpochMs()));
     }
-}
-
-/** Single-quote for std::system. Unquoted $BTX_OPENSSL must not reach the shell. */
-std::string QuoteShellArg(const std::string& arg)
-{
-    std::string out = "'";
-    for (char c : arg) {
-        if (c == '\'') out += "'\"'\"'";
-        else out += c;
-    }
-    out += "'";
-    return out;
 }
 
 bool InventorySafeTensorsFile(const fs::path& path, UniValue& tensors, uint64_t& nbytes, std::string& err)
@@ -1517,6 +1512,30 @@ bool ParseHttpResponse(const std::string& raw, NativeResponse& resp, std::string
     return true;
 }
 
+// Seconds a peer asked us to wait with Retry-After on a 429, clamped to [1, 30].
+// The serving side always sends one with its RESOURCE_GOVERNOR and grant-rate
+// 429s; without honouring it, an upload limit on the host made every fetch fail.
+int RetryAfterSeconds(const NativeResponse& resp)
+{
+    for (const auto& [k, v] : resp.headers) {
+        if (ToLower(k) == "retry-after") {
+            const long secs = std::strtol(v.c_str(), nullptr, 10);
+            return static_cast<int>(std::clamp<long>(secs, 1, 30));
+        }
+    }
+    return 1;
+}
+
+// Sleep for a throttle, waking early (false) if the job is cancelled.
+bool SleepThrottled(int seconds, std::atomic<bool>* stop)
+{
+    for (int i = 0; i < seconds * 10; ++i) {
+        if (stop && stop->load()) return false;
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    return !(stop && stop->load());
+}
+
 struct Pq1Session {
     Pq1Context* pq{nullptr};
     SSL* ssl{nullptr};
@@ -1749,6 +1768,117 @@ struct Pq1Session {
             }
         }
         return true;
+    }
+
+    /**
+     * GET a whole file without holding it until PQ1_TRANSFER_MS. `on_body` sees
+     * each slice; complete pieces the caller stores stay kept if this returns
+     * with fell_back set. A false `on_body` with an empty error is a fallback,
+     * not a hard failure. The transport is closed on fallback so piece GETs
+     * open a fresh connection.
+     */
+    bool ReadFileStream(const NativeRequest& req, uint64_t expected_size,
+                        const std::function<bool(Span<const unsigned char>, std::string&)>& on_body,
+                        int& http_status, bool& fell_back, std::string& err)
+    {
+        fell_back = false;
+        http_status = 0;
+        if (!Ensure(err)) return false;
+        std::string wire = req.method + " " + req.path + " HTTP/1.1\r\nHost: " + host + "\r\n";
+        for (const auto& h : req.headers) {
+            if (!h.first.empty()) wire += h.first + ": " + h.second + "\r\n";
+        }
+        wire += "Content-Length: " + std::to_string(req.body.size()) + "\r\nConnection: keep-alive\r\n\r\n";
+        wire += req.body;
+        if (!SslWriteAll(ssl, fd, wire, PQ1_IDLE_MS, stop, err)) {
+            if (err.empty()) err = "write failed";
+            Close();
+            return false;
+        }
+        SSL_clear_mode(ssl, SSL_MODE_AUTO_RETRY);
+        std::string acc;
+        char buf[8192];
+        const auto t0 = std::chrono::steady_clock::now();
+        auto elapsed_ms = [&]() {
+            return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
+        };
+        auto fail_close = [&](const std::string& e) {
+            err = e;
+            Close();
+            return false;
+        };
+        auto give_up = [&]() {
+            fell_back = true;
+            Close();
+            return true;
+        };
+        size_t header_end = std::string::npos;
+        uint64_t content_length = 0;
+        uint64_t body_got = 0;
+        while (true) {
+            if (stop && stop->load()) return fail_close("stopped");
+            if (WholeFileStreamShouldFallBack(expected_size, body_got, elapsed_ms(), PQ1_TRANSFER_MS)) {
+                return give_up();
+            }
+            const int n = SSL_read(ssl, buf, sizeof(buf));
+            if (n > 0) {
+                if (header_end == std::string::npos) {
+                    acc.append(buf, static_cast<size_t>(n));
+                    header_end = acc.find("\r\n\r\n");
+                    if (header_end == std::string::npos) {
+                        if (acc.size() > PQ1_HTTP_HEADER_CAP) return fail_close("http headers too large");
+                        continue;
+                    }
+                    {
+                        std::istringstream hs(acc.substr(0, header_end));
+                        std::string version;
+                        hs >> version >> http_status;
+                    }
+                    auto cl = acc.find("Content-Length:");
+                    if (cl == std::string::npos) cl = acc.find("content-length:");
+                    if (cl == std::string::npos || cl > header_end) return fail_close("file stream missing Content-Length");
+                    content_length = std::strtoull(acc.c_str() + cl + 15, nullptr, 10);
+                    if (content_length > FULL_FILE_STREAM_MAX_BYTES || http_status != 200 || content_length != expected_size) {
+                        return give_up();
+                    }
+                    const size_t body_off = header_end + 4;
+                    if (acc.size() > body_off) {
+                        const size_t nbody = acc.size() - body_off;
+                        std::string berr;
+                        if (!on_body(Span<const unsigned char>{reinterpret_cast<const unsigned char*>(acc.data() + body_off), nbody}, berr)) {
+                            if (!berr.empty()) return fail_close(berr);
+                            return give_up();
+                        }
+                        body_got += nbody;
+                    }
+                    acc.clear();
+                    if (body_got >= content_length) return true;
+                    continue;
+                }
+                const uint64_t remain = content_length - body_got;
+                size_t take = static_cast<size_t>(n);
+                if (static_cast<uint64_t>(take) > remain) take = static_cast<size_t>(remain);
+                std::string berr;
+                if (!on_body(Span<const unsigned char>{reinterpret_cast<const unsigned char*>(buf), take}, berr)) {
+                    if (!berr.empty()) return fail_close(berr);
+                    return give_up();
+                }
+                body_got += take;
+                if (body_got >= content_length) return true;
+                continue;
+            }
+            if (n == 0) return fail_close("tls closed");
+            const int w = SSL_get_error(ssl, n);
+            if (w == SSL_ERROR_WANT_READ || w == SSL_ERROR_WANT_WRITE) {
+                std::string werr;
+                if (!WaitFd(fd, w == SSL_ERROR_WANT_WRITE, 1000, stop, werr)) {
+                    if (werr.find("timeout") != std::string::npos) continue;
+                    return fail_close(werr.empty() ? "tls io" : werr);
+                }
+                continue;
+            }
+            return fail_close("tls io");
+        }
     }
 };
 
@@ -4674,6 +4804,9 @@ std::mutex g_seed_budget_mu;
 int64_t g_seed_tokens{0};
 int64_t g_seed_last_ms{0};
 
+// Set by RunModelDaemon so a pacing upload wakes on shutdown.
+static std::atomic<bool>* g_seed_pace_stop{nullptr};
+
 bool AllowModelSeedBytes(const ModelCatalog& cat, size_t n)
 {
     UniValue o;
@@ -4701,13 +4834,30 @@ bool AllowModelSeedBytes(const ModelCatalog& cat, size_t n)
                               static_cast<int64_t>(cap);
     const int64_t now = static_cast<int64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now().time_since_epoch()).count());
-    std::lock_guard<std::mutex> lock(g_seed_budget_mu);
-    if (g_seed_last_ms <= 0) g_seed_last_ms = now;
-    const int64_t dt = std::max<int64_t>(0, now - g_seed_last_ms);
-    g_seed_last_ms = now;
-    g_seed_tokens = std::min(cap_i, g_seed_tokens + cap_i * dt / 1000);
-    if (g_seed_tokens < static_cast<int64_t>(n)) return false;
-    g_seed_tokens -= static_cast<int64_t>(n);
+    // Pace instead of refusing: reserve the bytes now (the bucket may go into
+    // debt) and wait until the refill has paid for them, then send. A limit is
+    // then an average upload rate, and peers see a slower piece, not a 429.
+    // Refusing could never work: tokens never exceed cap, so a cap below the
+    // 4 MiB piece size refused every piece, and above it the 1 s bucket still
+    // refused most of a fetcher's parallel pieces, and fetchers then failed.
+    int64_t wait_ms = 0;
+    {
+        std::lock_guard<std::mutex> lock(g_seed_budget_mu);
+        if (g_seed_last_ms <= 0) g_seed_last_ms = now;
+        const int64_t dt = std::max<int64_t>(0, now - g_seed_last_ms);
+        g_seed_last_ms = now;
+        g_seed_tokens = std::min(cap_i, g_seed_tokens + cap_i * dt / 1000);
+        if (n > static_cast<size_t>(std::numeric_limits<int64_t>::max())) return false;
+        wait_ms = SeedPaceWaitMs(g_seed_tokens, static_cast<int64_t>(n), cap_i);
+        // Too far behind to finish inside a fetcher's request deadline: refuse
+        // and leave the books as they were.
+        if (wait_ms < 0) return false;
+        g_seed_tokens -= static_cast<int64_t>(n);
+    }
+    for (int64_t slept = 0; slept < wait_ms; slept += 100) {
+        if (g_seed_pace_stop && g_seed_pace_stop->load()) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(std::min<int64_t>(100, wait_ms - slept)));
+    }
     return true;
 }
 
@@ -6411,6 +6561,47 @@ bool DispatchHelperRpc(ModelCatalog& cat, const UniValue& request, UniValue& res
         result.pushKV("seeded", false);
         result.pushKV("automatic_spend_atoms", 0);
         result.pushKV("next_actions", NextActionsArray({"seedmodel", "pinmodel"}));
+        return true;
+    }
+    if (method == "removemodel") {
+        // Delete the pieces and the runnable checkout. unhostmodel keeps the bytes.
+        // The catalog in-use check runs before any unpin or unseed, inside
+        // RemoveModel, so a refusal leaves the pin in place.
+        const Digest48 id = ResolveUserId(Arg(0).get_str(), err);
+        if (id.IsNull()) {
+            err_code = "INVALID_PARAMETER";
+            return false;
+        }
+        {
+            std::lock_guard<std::mutex> lock(g_retrieve_mu);
+            for (const auto& [jid, job] : g_retrieve_jobs) {
+                if (job->model_id != id) continue;
+                std::lock_guard<std::mutex> jlock(job->mu);
+                if (job->status == "queued" || job->status == "running") {
+                    err_code = "IN_USE";
+                    err = "model is downloading; cancel job " + jid + " first";
+                    return false;
+                }
+            }
+        }
+        if (cat.TransferActive(id)) {
+            err_code = "IN_USE";
+            err = "model is in use; cancel its download or wait for the transfer to finish";
+            return false;
+        }
+        Digest48 artifact;
+        if (!cat.RemoveModel(id, artifact, err)) {
+            err_code = err == "unknown model" ? "NOT_FOUND" : "IN_USE";
+            return false;
+        }
+        std::error_code ec;
+        const fs::path checkout = HelperDir(cat) / "checkout" / fs::PathFromString(artifact.Hex());
+        const uintmax_t removed = fs::remove_all(checkout, ec);
+        result.pushKV("schema_version", 2);
+        result.pushKV("model_id", id.Hex());
+        result.pushKV("removed", true);
+        result.pushKV("checkout_removed", !ec && removed > 0);
+        result.pushKV("automatic_spend_atoms", 0);
         return true;
     }
     if (method == "removemodelalias") {
@@ -9568,18 +9759,77 @@ bool DispatchHelperRpc(ModelCatalog& cat, const UniValue& request, UniValue& res
     }
 }
 
+namespace {
+// Write a PEM object to `path` through a 0600 file created for it, so key
+// material is never readable by others, not even between open and chmod.
+template <typename Writer>
+bool WritePrivatePem(const fs::path& path, Writer&& write)
+{
+    const int fd = ::open(fs::PathToString(path).c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    if (fd < 0) return false;
+    if (::fchmod(fd, 0600) != 0) {
+        ::close(fd);
+        return false;
+    }
+    FILE* f = ::fdopen(fd, "w");
+    if (!f) {
+        ::close(fd);
+        return false;
+    }
+    const bool ok = write(f);
+    return std::fclose(f) == 0 && ok;
+}
+} // namespace
+
+// Mint the helper's self-signed ML-DSA-44 TLS identity with the OpenSSL this
+// binary already links, instead of running an `openssl` command-line tool.
+// Fetch-only start must work with no openssl binary on PATH. Same output as
+// the CLI call it replaces: an unencrypted PKCS#8 key and an X.509v3
+// self-signed cert, CN=btx-modeld, 3650 days, mode 0600.
 bool EnsureMlDsaTlsFiles(const fs::path& cert, const fs::path& key, std::string& err)
 {
     if (fs::exists(cert) && fs::exists(key)) return true;
     fs::create_directories(cert.parent_path());
-    const std::string cmd = strprintf(
-        "%s req -x509 -new -newkey mldsa44 -keyout %s -out %s -nodes -subj '/CN=btx-modeld' -days 3650 >/dev/null 2>&1",
-        QuoteShellArg(OpensslBin()), QuoteShellArg(fs::PathToString(key)), QuoteShellArg(fs::PathToString(cert)));
-    const int rc = std::system(cmd.c_str());
-    if (rc != 0 || !fs::exists(cert) || !fs::exists(key)) {
-        err = "openssl mldsa44 certificate generation failed";
+    err = "openssl mldsa44 certificate generation failed";
+
+    std::unique_ptr<EVP_PKEY, decltype(&EVP_PKEY_free)> pkey(EVP_PKEY_Q_keygen(nullptr, nullptr, "ML-DSA-44"), EVP_PKEY_free);
+    std::unique_ptr<X509, decltype(&X509_free)> x(X509_new(), X509_free);
+    if (!pkey || !x || !X509_set_version(x.get(), X509_VERSION_3)) return false;
+
+    unsigned char serial[20];
+    if (RAND_bytes(serial, sizeof(serial)) != 1) return false;
+    serial[0] &= 0x7f; // positive, as `openssl req -x509` makes it
+    std::unique_ptr<BIGNUM, decltype(&BN_free)> bn(BN_bin2bn(serial, sizeof(serial), nullptr), BN_free);
+    if (!bn || !BN_to_ASN1_INTEGER(bn.get(), X509_get_serialNumber(x.get()))) return false;
+
+    if (!X509_gmtime_adj(X509_getm_notBefore(x.get()), 0) ||
+        !X509_time_adj_ex(X509_getm_notAfter(x.get()), 3650, 0, nullptr)) return false;
+
+    X509_NAME* name = X509_get_subject_name(x.get());
+    if (!X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC,
+                                    reinterpret_cast<const unsigned char*>("btx-modeld"), -1, -1, 0) ||
+        !X509_set_issuer_name(x.get(), name) || !X509_set_pubkey(x.get(), pkey.get())) return false;
+    // ML-DSA signs the message itself, so the digest must be NULL.
+    if (X509_sign(x.get(), pkey.get(), nullptr) <= 0) return false;
+
+    // Write both under temporary names, then rename, so a crash never leaves a
+    // key without its cert (which would be regenerated, changing the pinned
+    // identity every peer has stored for this host).
+    const fs::path key_tmp = fs::PathFromString(fs::PathToString(key) + ".tmp");
+    const fs::path cert_tmp = fs::PathFromString(fs::PathToString(cert) + ".tmp");
+    if (!WritePrivatePem(key_tmp, [&](FILE* f) { return PEM_write_PrivateKey(f, pkey.get(), nullptr, nullptr, 0, nullptr, nullptr) == 1; }) ||
+        !WritePrivatePem(cert_tmp, [&](FILE* f) { return PEM_write_X509(f, x.get()) == 1; })) {
+        std::error_code ec;
+        fs::remove(key_tmp, ec);
+        fs::remove(cert_tmp, ec);
         return false;
     }
+    std::error_code ec;
+    fs::rename(key_tmp, key, ec);
+    if (ec) return false;
+    fs::rename(cert_tmp, cert, ec);
+    if (ec) return false;
+    err.clear();
     return true;
 }
 
@@ -9718,7 +9968,14 @@ bool RetrieveFreeFromPeer(ModelCatalog& cat, Pq1Context& pq, const std::string& 
         gb.pushKV("artifact_id", artifact.Hex());
         gb.pushKV("file_index", static_cast<int>(file_index));
         grant_req.body = gb.write();
-        if (!(s.Request(grant_req, grant_resp, gerr) && grant_resp.status == 200)) {
+        bool granted = false;
+        for (int waits = 0;; ++waits) {
+            gerr.clear();
+            granted = s.Request(grant_req, grant_resp, gerr) && grant_resp.status == 200;
+            if (granted || grant_resp.status != 429 || waits >= PQ1_THROTTLE_WAITS) break;
+            if (!SleepThrottled(RetryAfterSeconds(grant_resp), stop)) break;
+        }
+        if (!granted) {
             if (gerr.empty()) gerr = "missing FreeGrant";
             if (grant_resp.status != 0 && grant_resp.status != 200) {
                 gerr += " HTTP " + std::to_string(grant_resp.status);
@@ -9731,11 +9988,17 @@ bool RetrieveFreeFromPeer(ModelCatalog& cat, Pq1Context& pq, const std::string& 
             gerr = "missing FreeGrant";
             return false;
         }
-        grant_headers.clear();
-        grant_headers.emplace_back("X-BTX-Grant-Payload", gj["payload_hex"].get_str());
-        grant_headers.emplace_back("X-BTX-Grant-Sig", gj["sig_hex"].get_str());
-        grant_headers.emplace_back("X-BTX-Grant-Pubkey", gj["pubkey_hex"].get_str());
-        s.piece_headers = grant_headers;
+        std::vector<std::pair<std::string, std::string>> issued;
+        issued.emplace_back("X-BTX-Grant-Payload", gj["payload_hex"].get_str());
+        issued.emplace_back("X-BTX-Grant-Sig", gj["sig_hex"].get_str());
+        issued.emplace_back("X-BTX-Grant-Pubkey", gj["pubkey_hex"].get_str());
+        s.piece_headers = issued;
+        // A grant is signed by the host that issued it, and only that host
+        // accepts it (VerifyHostedFreeGrant, "grant identity"). The shared
+        // headers are what the primary host's pooled sessions send, so only a
+        // grant from the primary may replace them; a swarm peer's grant stays
+        // on its own session.
+        if (s.host == host && s.port == port) grant_headers = std::move(issued);
         return true;
     };
     err.clear();
@@ -9803,6 +10066,7 @@ bool RetrieveFreeFromPeer(ModelCatalog& cat, Pq1Context& pq, const std::string& 
             else preq.headers = grant_headers;
         }
         int grant_refreshes = 0;
+        int throttle_waits = 0;
         for (int attempt = 0; attempt < PQ1_PIECE_RETRIES; ++attempt) {
             if (stop && stop->load()) {
                 local_err = "stopped";
@@ -9823,10 +10087,12 @@ bool RetrieveFreeFromPeer(ModelCatalog& cat, Pq1Context& pq, const std::string& 
                 } else if (presp.status == 403 &&
                            (presp.body.find("expired") != std::string::npos ||
                             presp.body.find("replay") != std::string::npos ||
-                            presp.body.find("grant use cap") != std::string::npos)) {
+                            presp.body.find("grant use cap") != std::string::npos ||
+                            presp.body.find("grant identity") != std::string::npos)) {
                     // FreeGrant TTL is 600s (spec cap). A 4 GiB file on a slow WAN outlives one grant.
                     // "replay" on a truncated piece GET, and a 256-use cap on a 1175-piece
-                    // granite shard, mint a fresh nonce and retry.
+                    // granite shard, mint a fresh nonce and retry. "grant identity" is a
+                    // grant from another host: ask this session's own host for one.
                     if (++grant_refreshes > 64) {
                         local_err = "grant refresh limit";
                         return false;
@@ -9835,6 +10101,15 @@ bool RetrieveFreeFromPeer(ModelCatalog& cat, Pq1Context& pq, const std::string& 
                     {
                         std::lock_guard<std::mutex> lock(grant_mu);
                         preq.headers = s.piece_headers.empty() ? grant_headers : s.piece_headers;
+                    }
+                    --attempt;
+                    continue;
+                } else if (presp.status == 429 && ++throttle_waits <= PQ1_THROTTLE_WAITS) {
+                    // The peer is pacing its uploads: wait as asked, on the same
+                    // connection, without spending one of the piece's retries.
+                    if (!SleepThrottled(RetryAfterSeconds(presp), stop)) {
+                        local_err = "stopped";
+                        return false;
                     }
                     --attempt;
                     continue;
@@ -9887,17 +10162,16 @@ bool RetrieveFreeFromPeer(ModelCatalog& cat, Pq1Context& pq, const std::string& 
                 break;
             }
             NativeRequest freq;
-            NativeResponse fresp;
             freq.method = "GET";
             freq.path = std::string(MODEL_HTTP_ROOT) + "files/" + artifact.Hex() + "/" + std::to_string(fi);
             {
                 std::lock_guard<std::mutex> lock(grant_mu);
                 freq.headers = sess.piece_headers.empty() ? grant_headers : sess.piece_headers;
             }
-            if (!sess.Request(freq, fresp, gerr) || fresp.status != 200) {
-                stream_ok = false;
-                break;
-            }
+            // Files of 64 MiB or less used to buffer the whole GET for up to
+            // PQ1_TRANSFER_MS and drop it on timeout. Stream instead, keep each
+            // complete piece in the live store as it arrives, and fall back to
+            // piece GETs as soon as the measured rate cannot finish in time.
             FileStreamHydration hyd(artifact, fi, size, cat.Store(), quarantine);
             if (f.exists("sha384") && f["sha384"].isStr()) {
                 Digest48 sha;
@@ -9907,10 +10181,36 @@ bool RetrieveFreeFromPeer(ModelCatalog& cat, Pq1Context& pq, const std::string& 
                 Digest48 root;
                 if (Digest48::FromHex(f["pieces_root"].get_str(), root, gerr)) hyd.SetExpectedPiecesRoot(root);
             }
-            const auto* raw = reinterpret_cast<const unsigned char*>(fresp.body.data());
-            if (!hyd.Feed(Span<const unsigned char>{raw, fresp.body.size()}, gerr) || !hyd.Finish(gerr) ||
-                !hyd.IsAdvertisable()) {
+            auto on_body = [&](Span<const unsigned char> chunk, std::string& berr) {
+                return hyd.Feed(chunk, berr);
+            };
+            auto keep_flushed_pieces = [&]() {
+                // Complete pieces already split out of the stream. The piece
+                // retriever skips these and continues the rest, instead of
+                // dropping the prefix when the whole-file GET cannot finish.
+                std::string kerr;
+                const uint32_t flushed = hyd.Progress().next_piece;
+                for (uint32_t i = 0; i < flushed; ++i) {
+                    if (cat.Store().HasPiece(artifact, fi, i)) continue;
+                    std::vector<unsigned char> bytes;
+                    if (!quarantine.GetPiece(artifact, fi, i, bytes, kerr)) return;
+                    const Digest48 leaf = ChunkLeaf(i, bytes);
+                    if (!cat.Store().PutVerifiedPiece(artifact, fi, i, bytes, leaf, kerr)) return;
+                }
+            };
+            int http_status = 0;
+            bool fell_back = false;
+            const bool stream_read = sess.ReadFileStream(freq, size, on_body, http_status, fell_back, gerr);
+            (void)http_status;
+            if (!stream_read || fell_back) {
+                if (fell_back) keep_flushed_pieces();
                 stream_ok = false;
+                sess.Close();
+                break;
+            }
+            if (!hyd.Finish(gerr) || !hyd.IsAdvertisable()) {
+                stream_ok = false;
+                sess.Close();
                 break;
             }
             if (progress) {
@@ -10195,12 +10495,40 @@ bool RetrieveFreeFromPeer(ModelCatalog& cat, Pq1Context& pq, const std::string& 
                 err = err.empty() ? "connect failed" : err;
                 return false;
             }
-            if (progress) progress->inflight.store(static_cast<int>(pool.size()));
+            // Adaptive in-flight window. All pieces in flight share the link, so
+            // with a fixed 8 x 4 MiB window a piece takes 32 MiB / rate: past the
+            // 600 s request deadline below ~0.45 Mbit/s, where pieces that had
+            // fully arrived were dropped and fetched again. Start at 2 and size
+            // the window so it drains in PQ1_INFLIGHT_BUDGET_S at the measured
+            // rate; a fast link reaches the full pool after its first piece.
+            const int pool_n = static_cast<int>(pool.size());
+            std::atomic<int> allowed{std::min(PQ1_INFLIGHT_START, pool_n)};
+            std::atomic<int> active{0};
+            std::atomic<uint64_t> done_bytes{0};
+            const auto window_t0 = std::chrono::steady_clock::now();
+            auto resize_window = [&]() {
+                const double secs = std::chrono::duration<double>(std::chrono::steady_clock::now() - window_t0).count();
+                if (secs <= 0.0) return;
+                const double rate = static_cast<double>(done_bytes.load()) / secs;
+                allowed.store(InflightWindowForRate(rate, pool_n));
+            };
+            if (progress) progress->inflight.store(allowed.load());
             std::atomic<size_t> next{0};
             std::atomic<bool> fail{false};
             std::mutex err_mu;
             auto worker = [&](Pq1Session& s) {
                 while (!fail.load()) {
+                    for (;;) {
+                        if (fail.load() || (stop && stop->load())) return;
+                        int a = active.load();
+                        if (a < allowed.load() && active.compare_exchange_weak(a, a + 1)) break;
+                        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                    }
+                    struct WindowRelease {
+                        std::atomic<int>& n;
+                        ~WindowRelease() { n.fetch_sub(1); }
+                    } window_release{active};
+                    (void)window_release;
                     const size_t slot = next.fetch_add(1);
                     if (slot >= missing.size()) return;
                     const uint64_t i = missing[slot];
@@ -10231,6 +10559,9 @@ bool RetrieveFreeFromPeer(ModelCatalog& cat, Pq1Context& pq, const std::string& 
                     leaves[i] = ChunkLeaf(i, raw);
                     note_ok(static_cast<uint32_t>(i), raw.size(), host + ":" + std::to_string(port));
                     note_piece_progress(static_cast<uint32_t>(i));
+                    done_bytes.fetch_add(raw.size());
+                    resize_window();
+                    if (progress) progress->inflight.store(allowed.load());
                 }
             };
             std::vector<std::thread> threads;
@@ -11042,6 +11373,11 @@ int RunModelDaemon(HelperConfig cfg, std::atomic<bool>* stop)
     std::signal(SIGPIPE, SIG_IGN);
     std::atomic<bool> local_stop{false};
     if (!stop) stop = &local_stop;
+    struct ClearSeedPace {
+        ~ClearSeedPace() { g_seed_pace_stop = nullptr; }
+    } clear_seed_pace;
+    (void)clear_seed_pace;
+    g_seed_pace_stop = stop;
     fs::create_directories(cfg.modeldir);
     if (cfg.rpc_socket.empty()) cfg.rpc_socket = cfg.modeldir / "modeld.sock";
     if (cfg.tls_cert.empty()) cfg.tls_cert = cfg.modeldir / "tls" / "cert.pem";

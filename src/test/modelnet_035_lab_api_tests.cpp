@@ -4,6 +4,11 @@
 #include <test/util/setup_common.h>
 #include <boost/test/unit_test.hpp>
 
+#include <atomic>
+#include <string>
+#include <thread>
+#include <vector>
+
 BOOST_FIXTURE_TEST_SUITE(modelnet_035_lab_api_tests, BasicTestingSetup)
 
 BOOST_AUTO_TEST_CASE(every_lab_method_is_implemented)
@@ -1048,6 +1053,36 @@ BOOST_AUTO_TEST_CASE(lab_methods_keep_state_and_reject_bad_transitions)
     BOOST_CHECK(paused["paused"].get_bool());
     BOOST_CHECK_EQUAL(paused["endpoint_query_method"].get_str(), "lab.rollout_endpoints");
     BOOST_CHECK_EQUAL(LabResult("lab.rollout_status", status)["state"].get_str(), "PAUSED");
+}
+
+BOOST_AUTO_TEST_CASE(concurrent_calls_keep_the_store_consistent)
+{
+    // Mutating lab methods share one process-global store. Parallel callers
+    // must all succeed once that store is serialized.
+    modelnet::ResetLabApi();
+    constexpr int THREADS{8};
+    constexpr int CALLS{40};
+    std::atomic<int> failure_count{0};
+    std::vector<std::thread> threads;
+    for (int t = 0; t < THREADS; ++t) {
+        threads.emplace_back([t, &failure_count] {
+            for (int k = 0; k < CALLS; ++k) {
+                const std::string id{std::to_string(t) + "-" + std::to_string(k)};
+                UniValue req(UniValue::VOBJ);
+                req.pushKV("name", "realm-" + id);
+                req.pushKV("nonce", std::to_string(k));
+                req.pushKV("policy_template", "default");
+                req.pushKV("idempotency_key", "concurrent-realm-" + id);
+                req.pushKV("expected_state", UniValue());
+                std::string response, err;
+                if (!modelnet::DispatchLab035("lab.realm_create", req.write(), response, err)) ++failure_count;
+            }
+        });
+    }
+    for (auto& thread : threads) thread.join();
+    const int failures = failure_count.load();
+    BOOST_CHECK_EQUAL(failures, 0);
+    modelnet::ResetLabApi();
 }
 
 BOOST_AUTO_TEST_SUITE_END()
