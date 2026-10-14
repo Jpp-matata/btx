@@ -35,6 +35,14 @@ bool PullExchangeLoopback(const std::string& host, uint16_t port, const std::str
                           const std::string& rpc_password, const std::string& repository_id,
                           std::string& manifest_json, std::string& err);
 
+/**
+ * One JSON-RPC lab035 call to 127.0.0.1. Any other host is BTX035_SCOPE_DENIED.
+ * result_json is the inner result object.
+ */
+bool LabCallLoopback(const std::string& host, uint16_t port, const std::string& rpc_user,
+                     const std::string& rpc_password, const std::string& method,
+                     const std::string& params_json, std::string& result_json, std::string& err);
+
 } // namespace modelnet
 
 #endif // BITCOIN_MODELNET_LAB_EXCHANGE_H

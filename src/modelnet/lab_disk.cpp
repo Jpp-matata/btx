@@ -197,7 +197,7 @@ bool ReadRepoObjects(const UniValue& obj, std::map<std::string, std::vector<LabD
     return true;
 }
 
-bool ReadTrains(const UniValue& obj, std::map<std::string, IntegerState>& out)
+bool ReadTrains(const UniValue& obj, std::map<std::string, IntegerState>& out, std::map<std::string, std::string>& authors)
 {
     if (!obj.isObject()) return false;
     std::map<std::string, UniValue> items;
@@ -212,10 +212,12 @@ bool ReadTrains(const UniValue& obj, std::map<std::string, IntegerState>& out)
         std::string momentum_b;
         std::string cursor;
         std::string step;
+        std::string author;
         if (!FieldStr(row, "weight", weight) || !FieldStr(row, "bias", bias) ||
             !FieldStr(row, "momentum_w", momentum_w) || !FieldStr(row, "momentum_b", momentum_b) ||
             !FieldStr(row, "cursor", cursor) || !FieldStr(row, "step", step) ||
-            !FieldStr(row, "state_hash", state.state_hash)) {
+            !FieldStr(row, "state_hash", state.state_hash) ||
+            !ReadOptionalString(row, "author", author)) {
             return false;
         }
         if (!ParseI64(weight, state.weight) || !ParseI64(bias, state.bias) ||
@@ -224,7 +226,9 @@ bool ReadTrains(const UniValue& obj, std::map<std::string, IntegerState>& out)
             return false;
         }
         if (state.state_hash.size() != 96 || !HexEven(state.state_hash)) return false;
+        if (!author.empty() && (author.size() != 96 || !HexEven(author))) return false;
         out.emplace(item.first, std::move(state));
+        if (!author.empty()) authors.emplace(item.first, author);
     }
     return true;
 }
@@ -254,7 +258,7 @@ bool DecodeImage(const std::string& json, LabDiskImage& image)
             if (!HexEven(item.second)) return false;
         }
     }
-    if (!root.exists("trains") || !ReadTrains(root["trains"], loaded.trains)) return false;
+    if (!root.exists("trains") || !ReadTrains(root["trains"], loaded.trains, loaded.train_authors)) return false;
     image = std::move(loaded);
     return true;
 }
@@ -330,6 +334,10 @@ std::string EncodeImage(const LabDiskImage& image)
         row.pushKV("cursor", std::to_string(item.second.cursor));
         row.pushKV("step", std::to_string(item.second.step));
         row.pushKV("state_hash", item.second.state_hash);
+        const auto author = image.train_authors.find(item.first);
+        if (author != image.train_authors.end() && !author->second.empty()) {
+            row.pushKV("author", author->second);
+        }
         trains.pushKV(item.first, std::move(row));
     }
     root.pushKV("trains", trains);

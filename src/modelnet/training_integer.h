@@ -16,6 +16,12 @@ namespace modelnet {
 /** Deterministic integer linear profile. This is not the EXACT_CHECKS byte fixture. */
 inline constexpr char INTEGER_PROFILE[] = "INTEGER_LINEAR";
 
+/**
+ * Same transitions as INTEGER_LINEAR, plus a canonical artifact a peer can rehash.
+ * This is still not a language-model benchmark.
+ */
+inline constexpr char INTEGER_MODEL_PROFILE[] = "INTEGER_MODEL";
+
 struct IntegerExample {
     int32_t x{0};
     int32_t y{0};
@@ -83,6 +89,18 @@ private:
     IntegerState m_state;
     std::vector<Interval> m_intervals;
 };
+
+/**
+ * One line: v1|INTEGER_MODEL|<weight>|<bias>|<momentum_w>|<momentum_b>|<cursor>|<step>|<state_hash>
+ * A peer rehashes these bytes. The line is not a model-quality claim.
+ */
+bool EncodeModelArtifact(const IntegerState& state, std::string& bytes, std::string& err);
+
+/** Split into 32-byte chunks. The last chunk may be shorter. */
+bool SplitModelPieces(const std::string& bytes, std::vector<std::string>& pieces, std::string& err);
+
+/** Join chunks in order. A short chunk is allowed only as the last piece. */
+bool JoinModelPieces(const std::vector<std::string>& pieces, std::string& bytes, std::string& err);
 
 } // namespace modelnet
 

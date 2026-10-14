@@ -145,7 +145,7 @@ bool IsStrongGitDigest(std::string_view hex)
 bool GitObjectDigest(std::string_view kind, Span<const unsigned char> content, std::string& digest_hex, std::string& err)
 {
     if (kind != "blob" && kind != "tree" && kind != "commit" && kind != "tag" && kind != "research" && kind != "train" &&
-        kind != "lineage") {
+        kind != "lineage" && kind != "model" && kind != "piece" && kind != "replay") {
         err = "BTX035_GIT_TYPE";
         return false;
     }

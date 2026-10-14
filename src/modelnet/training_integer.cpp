@@ -129,4 +129,41 @@ bool IntegerTrainer::CheckState(const IntegerState& published, std::string& err)
     return true;
 }
 
+bool EncodeModelArtifact(const IntegerState& state, std::string& bytes, std::string& err)
+{
+    if (state.state_hash.size() != 96) return Fail(err, "BTX035_SCHEMA");
+    bytes = "v1|" + std::string(INTEGER_MODEL_PROFILE) + "|" + std::to_string(state.weight) + "|" +
+            std::to_string(state.bias) + "|" + std::to_string(state.momentum_w) + "|" +
+            std::to_string(state.momentum_b) + "|" + std::to_string(state.cursor) + "|" +
+            std::to_string(state.step) + "|" + state.state_hash;
+    if (bytes.find('\n') != std::string::npos || bytes.find('\r') != std::string::npos) return Fail(err, "BTX035_SCHEMA");
+    err.clear();
+    return true;
+}
+
+bool SplitModelPieces(const std::string& bytes, std::vector<std::string>& pieces, std::string& err)
+{
+    pieces.clear();
+    constexpr size_t kPiece = 32;
+    for (size_t i = 0; i < bytes.size(); i += kPiece) {
+        pieces.push_back(bytes.substr(i, kPiece));
+    }
+    if (bytes.empty()) return Fail(err, "BTX035_SCHEMA");
+    err.clear();
+    return true;
+}
+
+bool JoinModelPieces(const std::vector<std::string>& pieces, std::string& bytes, std::string& err)
+{
+    bytes.clear();
+    if (pieces.empty()) return Fail(err, "BTX035_GAP");
+    for (size_t i = 0; i < pieces.size(); ++i) {
+        if (pieces[i].empty()) return Fail(err, "BTX035_GAP");
+        if (i + 1 < pieces.size() && pieces[i].size() != 32) return Fail(err, "BTX035_GAP");
+        bytes += pieces[i];
+    }
+    err.clear();
+    return true;
+}
+
 } // namespace modelnet

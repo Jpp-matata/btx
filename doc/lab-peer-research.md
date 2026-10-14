@@ -220,8 +220,20 @@ btx-cli lab035 lab.identity_sign '{
 }'
 ```
 
+## Move an integer model to a peer
+
+`INTEGER_MODEL` is the same frozen integer fixture as `INTEGER_LINEAR`: eight pairs, each input mapped to its double. It is not a language-model file, a tokenizer, or a dependency lock. `lab.research_execute` with `recipe_id` `INTEGER_MODEL` writes the final trainer line as bytes, splits those bytes into 32-byte pieces, and returns `artifact_digest`. A later `lab.artifact_acquire` for that digest serves the bytes only when the digest still matches the stored bytes and the pieces join back to those same bytes. A mismatch fails with `BTX035_ID_MISMATCH`.
+
+`lab.snapshot_export` carries the model object, each piece, each train line, and a replay line `v1|<trajectory_id>|<author>`. `lab.snapshot_pull` on `127.0.0.1` checks those objects before it keeps them. After the author process exits, a node that still has the snapshot can serve it. A third node pulls from that retained node, not from the author.
+
+`lab.research_query` with `scope` `PEERS` reads this node's public records and, when `BTX035_LAB_PEER` is `127.0.0.1:<port>` with `BTX035_LAB_PEER_USER` and `BTX035_LAB_PEER_PASSWORD` set in the node process, one loopback call to that peer's `LOCAL` query. Any other host is `BTX035_SCOPE_DENIED`. With the variable unset, `coverage.complete` stays false, `queried_peers` is `"0"`, and `omissions` includes `BTX035_SCOPE_DENIED`. There is no DNS seed and no address gossip in this path.
+
+`lab.admission_evaluate` for a model digest admits only when the bytes rehash and at least two identities each ran the fixture over the same path. One author returns `FAILED`. `lab.model_host` then accepts `model_ref` as an object `{"digest":"<artifact_digest>"}` only after that admission and another rehash.
+
+A signed `RolloutPlan` with two rings starts `STAGED`. A signed `DeploymentReceipt` in state `ACTIVE` counts a ring only when `observed_closure_root` rehashes to the retained bytes. One ring is `CANARY`. Two rings are `ACTIVE`. A receipt in state `UNKNOWN`, and a receipt that is not a signed `DeploymentReceipt`, stays `UNKNOWN` and does not count as healthy. `lab.rollout_rollback` accepts a stored `ChannelUpdate` only when its sequence is higher than the sequence already published on that channel. `lab.promotion_verify` pins the attestation set as the realm threshold. `lab.promotion_attest` with `checks_ref.revoke_attestor` removes that attestor and leaves the threshold unchanged.
+
 ## What this note leaves in place
 
 `automatic_spend_atoms` is the string `"0"` on every lab result. There is no wallet spend in this flow.
 
-Quarantine and `RESEARCH_ONLY` still fail closed before a model is served. This document does not change admission.
+Quarantine and `RESEARCH_ONLY` still fail closed before a model is served. Windows and macOS are not run by the journey script. This note does not mark the sealed acceptance catalogue.

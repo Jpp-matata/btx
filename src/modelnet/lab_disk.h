@@ -41,6 +41,8 @@ struct LabDiskImage {
     std::map<std::string, std::string> identity_pk;
     /** INTEGER_LINEAR trainer state keyed by trajectory id. No secret keys. */
     std::map<std::string, IntegerState> trains;
+    /** Trajectory id to the public identity that ran it. Absent for an older file. */
+    std::map<std::string, std::string> train_authors;
 };
 
 /** BTX035_LAB_DIR, or empty when unset. No relative or home fallback. */

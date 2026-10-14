@@ -94,18 +94,15 @@ bool VerifyExchangeManifest(const std::string& manifest_json, std::vector<Exchan
     return true;
 }
 
-bool PullExchangeLoopback(const std::string& host, uint16_t port, const std::string& rpc_user,
-                          const std::string& rpc_password, const std::string& repository_id,
-                          std::string& manifest_json, std::string& err)
+bool LabCallLoopback(const std::string& host, uint16_t port, const std::string& rpc_user,
+                     const std::string& rpc_password, const std::string& method,
+                     const std::string& params_json, std::string& result_json, std::string& err)
 {
-    if (host != "127.0.0.1" || port == 0 || repository_id.empty()) return Fail(err, "BTX035_SCOPE_DENIED");
-    UniValue inner(UniValue::VOBJ);
-    inner.pushKV("repository_id", repository_id);
-    inner.pushKV("idempotency_key", "peer-snapshot-pull");
-    inner.pushKV("expected_state", UniValue());
+    result_json.clear();
+    if (host != "127.0.0.1" || port == 0 || method.empty() || params_json.empty()) return Fail(err, "BTX035_SCOPE_DENIED");
     UniValue params(UniValue::VARR);
-    params.push_back("lab.snapshot_export");
-    params.push_back(inner.write());
+    params.push_back(method);
+    params.push_back(params_json);
     UniValue rpc_body(UniValue::VOBJ);
     rpc_body.pushKV("jsonrpc", "1.0");
     rpc_body.pushKV("id", "lab");
@@ -181,11 +178,34 @@ bool PullExchangeLoopback(const std::string& host, uint16_t port, const std::str
         return Fail(err, "BTX035_SCHEMA");
     }
     const UniValue& envelope = rpc["result"];
-    if (!envelope.exists("result") || !envelope["result"].isObject() || !envelope["result"].exists("manifest") ||
-        !envelope["result"]["manifest"].isStr()) {
+    if (!envelope.exists("result") || !envelope["result"].isObject()) return Fail(err, "BTX035_SCHEMA");
+    if (envelope.exists("automatic_spend_atoms") &&
+        (!envelope["automatic_spend_atoms"].isStr() || envelope["automatic_spend_atoms"].get_str() != "0")) {
+        return Fail(err, "BTX035_SCOPE_DENIED");
+    }
+    result_json = envelope["result"].write();
+    err.clear();
+    return true;
+}
+
+bool PullExchangeLoopback(const std::string& host, uint16_t port, const std::string& rpc_user,
+                          const std::string& rpc_password, const std::string& repository_id,
+                          std::string& manifest_json, std::string& err)
+{
+    if (repository_id.empty()) return Fail(err, "BTX035_SCOPE_DENIED");
+    UniValue inner(UniValue::VOBJ);
+    inner.pushKV("repository_id", repository_id);
+    inner.pushKV("idempotency_key", "peer-snapshot-pull");
+    inner.pushKV("expected_state", UniValue());
+    std::string result_json;
+    if (!LabCallLoopback(host, port, rpc_user, rpc_password, "lab.snapshot_export", inner.write(), result_json, err)) {
+        return false;
+    }
+    UniValue result;
+    if (!result.read(result_json) || !result.isObject() || !result.exists("manifest") || !result["manifest"].isStr()) {
         return Fail(err, "BTX035_SCHEMA");
     }
-    manifest_json = envelope["result"]["manifest"].get_str();
+    manifest_json = result["manifest"].get_str();
     std::vector<ExchangeObject> objects;
     return VerifyExchangeManifest(manifest_json, objects, err);
 }
