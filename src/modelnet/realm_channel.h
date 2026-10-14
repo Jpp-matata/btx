@@ -85,6 +85,27 @@ public:
     /** Always fails BTX035_OFFLINE. Offline activation cannot advance the ring. */
     bool AdvanceRingFromOffline(std::string& err) const;
 
+    /** One realm or channel key as reloaded from the lab directory. */
+    struct SavedRealm {
+        std::string key;
+        bool policy{false};
+        int threshold{0};
+        std::vector<std::string> pins;
+        std::vector<std::string> revoked;
+        bool has_channel{false};
+        int64_t sequence{-1};
+        std::string body;
+    };
+
+    /** Copy policy, revocation, and channel sequence. Does not include secrets. */
+    std::vector<SavedRealm> SavedRealms() const;
+
+    /** Install a previously saved realm. A bad threshold or empty key fails closed. */
+    bool RestoreRealm(const SavedRealm& saved, std::string& err);
+
+    std::vector<std::pair<std::string, std::string>> SavedFleet() const;
+    std::vector<std::pair<std::string, std::string>> SavedEndpoints() const;
+
     /** Write a deterministic text bundle for realm. The first line is BTX035-OFFLINE-1,
      *  then realm, threshold, pinned ids, revoked ids, channel sequence and body hash.
      *  A realm with no policy fails BTX035_REALM. An unwritable path fails BTX035_BUNDLE.

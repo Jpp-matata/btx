@@ -804,6 +804,7 @@ BOOST_AUTO_TEST_CASE(model_pieces_survive_reload_and_need_two_roots)
     BOOST_CHECK_EQUAL(acquired["state"].get_str(), "COMPLETE");
     BOOST_CHECK_EQUAL(acquired["artifact_digest"].get_str(), digest);
     BOOST_CHECK(acquired["byte_size"].get_str() != "0");
+    BOOST_CHECK(fs::exists(dir.path / "pieces"));
 
     modelnet::ReloadLabFromDisk();
     acquire.pushKV("idempotency_key", "idempotency-piece-acquire2");
@@ -1057,6 +1058,28 @@ BOOST_AUTO_TEST_CASE(model_pieces_survive_reload_and_need_two_roots)
     BOOST_CHECK_EQUAL(status["state"].get_str(), "ROLLED_BACK");
 
     modelnet::ReloadLabFromDisk();
+    UniValue channel_get(UniValue::VOBJ);
+    channel_get.pushKV("realm_id", destination_id);
+    channel_get.pushKV("channel", "model");
+    UniValue current;
+    BOOST_REQUIRE(LabCall("lab.channel_get", channel_get, current, err));
+    BOOST_CHECK_EQUAL(current["sequence"].get_str(), "0");
+    BOOST_CHECK_EQUAL(current["state"].get_str(), "CURRENT");
+    BOOST_REQUIRE(LabCall("lab.realm_status", status_req, status, err));
+    BOOST_CHECK_EQUAL(status["threshold"].get_str(), "2");
+    BOOST_REQUIRE(LabCall("lab.rollout_status", roll_status, status, err));
+    BOOST_CHECK_EQUAL(status["state"].get_str(), "ROLLED_BACK");
+    publish.pushKV("idempotency_key", "idempotency-piece-pub-stale");
+    BOOST_CHECK(!LabCall("lab.channel_publish", publish, published, err));
+    BOOST_CHECK(err == "BTX035_STALE" || err == "BTX035_ROLLBACK");
+    UniValue foreign(UniValue::VARR);
+    foreign.push_back(pin_a);
+    foreign.push_back(promotion);
+    verify.pushKV("attestation_ids", foreign);
+    BOOST_REQUIRE(LabCall("lab.promotion_verify", verify, verified, err));
+    BOOST_CHECK_EQUAL(verified["state"].get_str(), "FAILED");
+    BOOST_REQUIRE(LabCall("lab.realm_status", status_req, status, err));
+    BOOST_CHECK_EQUAL(status["threshold"].get_str(), "2");
     admit.pushKV("idempotency_key", "idempotency-piece-admit-3");
     BOOST_REQUIRE(LabCall("lab.admission_evaluate", admit, admitted, err));
     BOOST_CHECK_EQUAL(admitted["state"].get_str(), "COMPLETE");

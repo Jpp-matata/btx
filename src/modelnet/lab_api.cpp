@@ -14,6 +14,7 @@
 #include <modelnet/lab_exchange.h>
 #include <modelnet/lab_guard_client.h>
 #include <modelnet/model_admission.h>
+#include <modelnet/piece_store.h>
 #include <modelnet/pq_delegation.h>
 #include <modelnet/realm_channel.h>
 #include <modelnet/research_graph.h>
@@ -28,6 +29,7 @@
 #include <util/fs.h>
 #include <util/strencodings.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
@@ -43,6 +45,8 @@ namespace modelnet {
 namespace {
 
 bool DecodePieceLine(const std::string& line, std::string& digest, size_t& index, std::string& chunk, std::string& err);
+bool ParseDec(const std::string& s, int64_t& out);
+bool Fail(std::string& err, const char* code);
 
 GlobalMutex g_lab_mutex;
 
@@ -178,6 +182,23 @@ void ImageFromStore(const Store& store, LabDiskImage& image)
         image.trains.emplace(item.first, item.second.state);
         if (!item.second.author.empty()) image.train_authors.emplace(item.first, item.second.author);
     }
+    for (const RealmRollout::SavedRealm& saved : store.rollout.SavedRealms()) {
+        LabDiskImage::RolloutRow row;
+        row.key = saved.key;
+        row.policy = saved.policy;
+        row.threshold = saved.threshold;
+        row.pins = saved.pins;
+        row.revoked = saved.revoked;
+        row.has_channel = saved.has_channel;
+        row.sequence = saved.sequence;
+        row.body = saved.body;
+        image.rollout.push_back(std::move(row));
+    }
+    image.hosted = store.hosted;
+    image.verified_rings = store.verified_rings;
+    for (const auto& item : store.rollout.SavedFleet()) image.fleet.emplace(item.first, item.second);
+    for (const auto& item : store.rollout.SavedEndpoints()) image.endpoints.emplace(item.first, item.second);
+    for (const auto& item : store.pause_epoch) image.pause_epochs.emplace(item.first, std::to_string(item.second));
     std::vector<LabDiskObject> model_rows;
     for (const auto& item : store.models) {
         LabDiskObject row;
@@ -296,6 +317,34 @@ void ImageToStore(const LabDiskImage& image, Store& store)
         }
     }
     RestorePublished(store);
+    for (const LabDiskImage::RolloutRow& row : image.rollout) {
+        RealmRollout::SavedRealm saved;
+        saved.key = row.key;
+        saved.policy = row.policy;
+        saved.threshold = row.threshold;
+        saved.pins = row.pins;
+        saved.revoked = row.revoked;
+        saved.has_channel = row.has_channel;
+        saved.sequence = row.sequence;
+        saved.body = row.body;
+        std::string restore_err;
+        if (!store.rollout.RestoreRealm(saved, restore_err)) continue;
+    }
+    for (const auto& item : image.fleet) {
+        std::string restore_err;
+        store.rollout.Observe(item.first, item.second, restore_err);
+    }
+    for (const auto& item : image.endpoints) {
+        std::string restore_err;
+        store.rollout.ObserveEndpoint(item.first, item.second, restore_err);
+    }
+    store.hosted = image.hosted;
+    store.verified_rings = image.verified_rings;
+    for (const auto& item : image.pause_epochs) {
+        int64_t epoch = 0;
+        if (!ParseDec(item.second, epoch) || epoch < 0) continue;
+        store.pause_epoch[item.first] = static_cast<uint64_t>(epoch);
+    }
 }
 
 bool& DiskLoadedOnce()
@@ -304,6 +353,8 @@ bool& DiskLoadedOnce()
     return loaded;
 }
 
+void CheckPieceStore(Store& store);
+
 void LoadDiskInto(Store& store)
 {
     LabDiskImage image;
@@ -311,6 +362,7 @@ void LoadDiskInto(Store& store)
     if (!LoadLabDisk(image, err)) return;
     if (LabDiskDirectory().empty()) return;
     ImageToStore(image, store);
+    CheckPieceStore(store);
 }
 
 Store& State()
@@ -323,6 +375,70 @@ Store& State()
     return store;
 }
 
+bool SaveModelPieces(const Store& store, std::string& err)
+{
+    const fs::path root = LabDiskDirectory();
+    if (root.empty() || store.models.empty()) {
+        err.clear();
+        return true;
+    }
+    const fs::path piece_root = root / "pieces";
+    fs::create_directories(piece_root);
+    LocalPieceStore pieces(piece_root, 64ull * 1024ull * 1024ull);
+    for (const auto& item : store.models) {
+        Digest48 artifact;
+        if (!Digest48::FromHex(item.first, artifact, err)) return false;
+        const auto found = store.model_pieces.find(item.first);
+        if (found == store.model_pieces.end()) continue;
+        for (size_t i = 0; i < found->second.size(); ++i) {
+            const std::string& chunk = found->second[i];
+            const std::vector<unsigned char> raw(chunk.begin(), chunk.end());
+            const Span<const unsigned char> span{raw.data(), raw.size()};
+            if (!pieces.PutVerifiedPiece(artifact, 0, static_cast<uint32_t>(i), span, ChunkLeaf(static_cast<uint64_t>(i), span), err)) {
+                return false;
+            }
+        }
+    }
+    err.clear();
+    return true;
+}
+
+void CheckPieceStore(Store& store)
+{
+    const fs::path root = LabDiskDirectory();
+    if (root.empty()) return;
+    const fs::path piece_root = root / "pieces";
+    if (!fs::exists(piece_root)) return;
+    LocalPieceStore pieces(piece_root, 64ull * 1024ull * 1024ull);
+    std::vector<std::string> drop;
+    for (const auto& item : store.models) {
+        Digest48 artifact;
+        std::string err;
+        if (!Digest48::FromHex(item.first, artifact, err)) {
+            drop.push_back(item.first);
+            continue;
+        }
+        std::vector<uint32_t> indexes;
+        if (!pieces.EnumerateCommittedPieces(artifact, 0, indexes) || indexes.empty()) continue;
+        std::sort(indexes.begin(), indexes.end());
+        std::vector<std::string> chunks(indexes.size());
+        bool dense = true;
+        for (size_t i = 0; i < indexes.size(); ++i) {
+            if (indexes[i] != static_cast<uint32_t>(i)) dense = false;
+            std::vector<unsigned char> raw;
+            if (!pieces.GetPiece(artifact, 0, indexes[i], raw, err)) dense = false;
+            else chunks[i].assign(raw.begin(), raw.end());
+        }
+        std::string joined;
+        if (!dense || !JoinModelPieces(chunks, joined, err) || joined != item.second) drop.push_back(item.first);
+        else store.model_pieces[item.first] = std::move(chunks);
+    }
+    for (const std::string& digest : drop) {
+        store.models.erase(digest);
+        store.model_pieces.erase(digest);
+    }
+}
+
 bool PersistDurable(std::string& err)
 {
     if (LabDiskDirectory().empty()) {
@@ -331,7 +447,8 @@ bool PersistDurable(std::string& err)
     }
     LabDiskImage image;
     ImageFromStore(State(), image);
-    return SaveLabDisk(image, err);
+    if (!SaveLabDisk(image, err)) return false;
+    return SaveModelPieces(State(), err);
 }
 
 void WipeMemory()
@@ -1838,9 +1955,24 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
         }
         if (method == "lab.promotion_verify") {
             bool ready = store.records.count(RequireStr(req, "promotion_id")) != 0 && req["attestation_ids"].isArray() && !req["attestation_ids"].empty();
+            const std::string promotion_id = RequireStr(req, "promotion_id");
             if (ready) {
                 for (size_t i = 0; i < req["attestation_ids"].size(); ++i) {
-                    if (!req["attestation_ids"][i].isStr() || !store.records.count(req["attestation_ids"][i].get_str())) ready = false;
+                    if (!req["attestation_ids"][i].isStr()) {
+                        ready = false;
+                        continue;
+                    }
+                    const auto record = store.records.find(req["attestation_ids"][i].get_str());
+                    if (record == store.records.end()) {
+                        ready = false;
+                        continue;
+                    }
+                    UniValue attestation;
+                    if (!attestation.read(record->second) || !attestation.isObject() ||
+                        !attestation.exists("promotion_id") || !attestation["promotion_id"].isStr() ||
+                        attestation["promotion_id"].get_str() != promotion_id) {
+                        ready = false;
+                    }
                 }
             }
             state = ready ? "COMPLETE" : "FAILED";

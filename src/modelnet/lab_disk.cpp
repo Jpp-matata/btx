@@ -259,6 +259,58 @@ bool DecodeImage(const std::string& json, LabDiskImage& image)
         }
     }
     if (!root.exists("trains") || !ReadTrains(root["trains"], loaded.trains, loaded.train_authors)) return false;
+    if (root.exists("rollout")) {
+        if (!root["rollout"].isArray()) return false;
+        for (size_t i = 0; i < root["rollout"].size(); ++i) {
+            const UniValue& row = root["rollout"][i];
+            if (!row.isObject()) return false;
+            LabDiskImage::RolloutRow saved;
+            std::string threshold;
+            std::string sequence;
+            int64_t threshold_n = 0;
+            if (!FieldStr(row, "key", saved.key) || saved.key.empty() ||
+                !row.exists("policy") || !row["policy"].isBool() ||
+                !FieldStr(row, "threshold", threshold) || !ParseI64(threshold, threshold_n) ||
+                threshold_n < 0 || threshold_n > 1000000 ||
+                !row.exists("has_channel") || !row["has_channel"].isBool() ||
+                !FieldStr(row, "sequence", sequence) || !ParseI64(sequence, saved.sequence) ||
+                !FieldStr(row, "body", saved.body) ||
+                !row.exists("pins") || !row["pins"].isArray() ||
+                !row.exists("revoked") || !row["revoked"].isArray()) {
+                return false;
+            }
+            saved.policy = row["policy"].get_bool();
+            saved.has_channel = row["has_channel"].get_bool();
+            saved.threshold = static_cast<int>(threshold_n);
+            for (size_t j = 0; j < row["pins"].size(); ++j) {
+                if (!row["pins"][j].isStr() || row["pins"][j].get_str().empty()) return false;
+                saved.pins.push_back(row["pins"][j].get_str());
+            }
+            for (size_t j = 0; j < row["revoked"].size(); ++j) {
+                if (!row["revoked"][j].isStr() || row["revoked"][j].get_str().empty()) return false;
+                saved.revoked.push_back(row["revoked"][j].get_str());
+            }
+            loaded.rollout.push_back(std::move(saved));
+        }
+    }
+    if (root.exists("hosted") && !ReadStringSet(root["hosted"], loaded.hosted)) return false;
+    if (root.exists("verified_rings")) {
+        if (!root["verified_rings"].isObject()) return false;
+        std::map<std::string, UniValue> rings;
+        root["verified_rings"].getObjMap(rings);
+        for (const auto& item : rings) {
+            if (!item.second.isArray()) return false;
+            std::set<std::string> ids;
+            for (size_t i = 0; i < item.second.size(); ++i) {
+                if (!item.second[i].isStr() || item.second[i].get_str().empty()) return false;
+                ids.insert(item.second[i].get_str());
+            }
+            loaded.verified_rings.emplace(item.first, std::move(ids));
+        }
+    }
+    if (root.exists("fleet") && !ReadStringMap(root["fleet"], loaded.fleet)) return false;
+    if (root.exists("endpoints") && !ReadStringMap(root["endpoints"], loaded.endpoints)) return false;
+    if (root.exists("pause_epochs") && !ReadStringMap(root["pause_epochs"], loaded.pause_epochs)) return false;
     image = std::move(loaded);
     return true;
 }
@@ -341,6 +393,31 @@ std::string EncodeImage(const LabDiskImage& image)
         trains.pushKV(item.first, std::move(row));
     }
     root.pushKV("trains", trains);
+    UniValue rollout(UniValue::VARR);
+    for (const LabDiskImage::RolloutRow& saved : image.rollout) {
+        UniValue row(UniValue::VOBJ);
+        row.pushKV("key", saved.key);
+        row.pushKV("policy", saved.policy);
+        row.pushKV("threshold", std::to_string(saved.threshold));
+        UniValue pins(UniValue::VARR);
+        for (const std::string& id : saved.pins) pins.push_back(id);
+        row.pushKV("pins", pins);
+        UniValue revoked(UniValue::VARR);
+        for (const std::string& id : saved.revoked) revoked.push_back(id);
+        row.pushKV("revoked", revoked);
+        row.pushKV("has_channel", saved.has_channel);
+        row.pushKV("sequence", std::to_string(saved.sequence));
+        row.pushKV("body", saved.body);
+        rollout.push_back(std::move(row));
+    }
+    root.pushKV("rollout", rollout);
+    root.pushKV("hosted", StringSet(image.hosted));
+    UniValue rings(UniValue::VOBJ);
+    for (const auto& item : image.verified_rings) rings.pushKV(item.first, StringSet(item.second));
+    root.pushKV("verified_rings", rings);
+    root.pushKV("fleet", StringMap(image.fleet));
+    root.pushKV("endpoints", StringMap(image.endpoints));
+    root.pushKV("pause_epochs", StringMap(image.pause_epochs));
     return root.write();
 }
 

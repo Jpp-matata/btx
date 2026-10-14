@@ -722,6 +722,79 @@ bool RealmRollout::AdvanceRingFromOffline(std::string& err) const
     return false;
 }
 
+std::vector<RealmRollout::SavedRealm> RealmRollout::SavedRealms() const
+{
+    std::vector<SavedRealm> out;
+    out.reserve(m_realms.size());
+    for (const auto& item : m_realms) {
+        SavedRealm row;
+        row.key = item.first;
+        row.policy = item.second.policy_set;
+        row.threshold = item.second.threshold;
+        row.pins.assign(item.second.pinned.begin(), item.second.pinned.end());
+        row.revoked.assign(item.second.revoked.begin(), item.second.revoked.end());
+        row.has_channel = item.second.has_channel;
+        row.sequence = item.second.has_channel ? item.second.channel_sequence : static_cast<int64_t>(-1);
+        row.body = item.second.has_channel ? item.second.body_hash : std::string();
+        out.push_back(std::move(row));
+    }
+    return out;
+}
+
+bool RealmRollout::RestoreRealm(const SavedRealm& saved, std::string& err)
+{
+    if (saved.key.empty()) {
+        err = "BTX035_REALM";
+        return false;
+    }
+    if (saved.policy && saved.threshold < 1) {
+        err = "BTX035_THRESHOLD";
+        return false;
+    }
+    if (saved.has_channel && saved.sequence < 0) {
+        err = "BTX035_ROLLBACK";
+        return false;
+    }
+    RealmState& st = m_realms[saved.key];
+    if (saved.policy) {
+        st.policy_set = true;
+        st.threshold = saved.threshold;
+        st.pinned.clear();
+        for (const std::string& id : saved.pins) {
+            if (id.empty()) {
+                err = "BTX035_POLICY";
+                return false;
+            }
+            st.pinned.insert(id);
+        }
+        st.revoked.clear();
+        for (const std::string& id : saved.revoked) {
+            if (id.empty()) {
+                err = "BTX035_POLICY";
+                return false;
+            }
+            st.revoked.insert(id);
+        }
+    }
+    if (saved.has_channel) {
+        st.has_channel = true;
+        st.channel_sequence = saved.sequence;
+        st.body_hash = saved.body;
+    }
+    err.clear();
+    return true;
+}
+
+std::vector<std::pair<std::string, std::string>> RealmRollout::SavedFleet() const
+{
+    return {m_observed.begin(), m_observed.end()};
+}
+
+std::vector<std::pair<std::string, std::string>> RealmRollout::SavedEndpoints() const
+{
+    return {m_endpoint_state.begin(), m_endpoint_state.end()};
+}
+
 bool RealmRollout::WriteOfflineBundle(const std::filesystem::path& path, const std::string& realm, std::string& err) const
 {
     const auto it = m_realms.find(realm);

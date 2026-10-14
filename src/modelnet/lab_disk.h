@@ -43,6 +43,23 @@ struct LabDiskImage {
     std::map<std::string, IntegerState> trains;
     /** Trajectory id to the public identity that ran it. Absent for an older file. */
     std::map<std::string, std::string> train_authors;
+    /** Channel and policy rows. Absent on a file written before this field. */
+    struct RolloutRow {
+        std::string key;
+        bool policy{false};
+        int threshold{0};
+        std::vector<std::string> pins;
+        std::vector<std::string> revoked;
+        bool has_channel{false};
+        int64_t sequence{-1};
+        std::string body;
+    };
+    std::vector<RolloutRow> rollout;
+    std::set<std::string> hosted;
+    std::map<std::string, std::set<std::string>> verified_rings;
+    std::map<std::string, std::string> fleet;
+    std::map<std::string, std::string> endpoints;
+    std::map<std::string, std::string> pause_epochs;
 };
 
 /** BTX035_LAB_DIR, or empty when unset. No relative or home fallback. */
