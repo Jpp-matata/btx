@@ -9,6 +9,7 @@
 #include <univalue.h>
 
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <sstream>
 #include <string>
@@ -40,6 +41,61 @@ void CloseSock(int fd)
 #else
     close(fd);
 #endif
+}
+
+std::string EnvOrEmpty(const char* key)
+{
+    const char* value = std::getenv(key);
+    if (value == nullptr) return {};
+    return std::string(value);
+}
+
+std::string TrimSpaces(const std::string& text)
+{
+    size_t begin = 0;
+    while (begin < text.size() && (text[begin] == ' ' || text[begin] == '\t')) ++begin;
+    size_t end = text.size();
+    while (end > begin && (text[end - 1] == ' ' || text[end - 1] == '\t')) --end;
+    return text.substr(begin, end - begin);
+}
+
+void AppendPeerToken(std::vector<std::string>& tokens, const std::string& raw)
+{
+    const std::string text = TrimSpaces(raw);
+    if (!text.empty()) tokens.push_back(text);
+}
+
+void AppendPeerList(std::vector<std::string>& tokens, const std::string& list)
+{
+    size_t start = 0;
+    for (size_t i = 0; i <= list.size(); ++i) {
+        if (i == list.size() || list[i] == ',') {
+            AppendPeerToken(tokens, list.substr(start, i - start));
+            start = i + 1;
+        }
+    }
+}
+
+// Loopback only. Does not dial DNS or any host other than 127.0.0.1.
+bool ParseLoopbackEndpoint(const std::string& endpoint, std::string& host, uint16_t& port, std::string& err)
+{
+    const auto colon = endpoint.rfind(':');
+    if (colon == std::string::npos || endpoint.substr(0, colon) != "127.0.0.1") {
+        return Fail(err, "BTX035_SCOPE_DENIED");
+    }
+    if (colon + 1 >= endpoint.size()) return Fail(err, "BTX035_SCOPE_DENIED");
+    uint64_t parsed = 0;
+    for (size_t i = colon + 1; i < endpoint.size(); ++i) {
+        const char ch = endpoint[i];
+        if (ch < '0' || ch > '9') return Fail(err, "BTX035_SCOPE_DENIED");
+        parsed = parsed * 10 + static_cast<unsigned>(ch - '0');
+        if (parsed > 65535) return Fail(err, "BTX035_SCOPE_DENIED");
+    }
+    if (parsed == 0) return Fail(err, "BTX035_SCOPE_DENIED");
+    host = "127.0.0.1";
+    port = static_cast<uint16_t>(parsed);
+    err.clear();
+    return true;
 }
 
 } // namespace
@@ -99,7 +155,12 @@ bool LabCallLoopback(const std::string& host, uint16_t port, const std::string& 
                      const std::string& params_json, std::string& result_json, std::string& err)
 {
     result_json.clear();
-    if (host != "127.0.0.1" || port == 0 || method.empty() || params_json.empty()) return Fail(err, "BTX035_SCOPE_DENIED");
+    std::string parsed_host;
+    uint16_t parsed_port = 0;
+    if (!ParseLoopbackEndpoint(host + ":" + std::to_string(port), parsed_host, parsed_port, err) ||
+        parsed_host != host || parsed_port != port || method.empty() || params_json.empty()) {
+        return Fail(err, "BTX035_SCOPE_DENIED");
+    }
     UniValue params(UniValue::VARR);
     params.push_back(method);
     params.push_back(params_json);
@@ -188,6 +249,78 @@ bool LabCallLoopback(const std::string& host, uint16_t port, const std::string& 
     return true;
 }
 
+bool PeerRouteLoopback(const std::string& host, uint16_t port, const std::string& rpc_user,
+                       const std::string& rpc_password, const std::string& route,
+                       const std::string& body_json, std::string& result_json, std::string& err)
+{
+    result_json.clear();
+    std::string parsed_host;
+    uint16_t parsed_port = 0;
+    if (!ParseLoopbackEndpoint(host + ":" + std::to_string(port), parsed_host, parsed_port, err) ||
+        parsed_host != host || parsed_port != port || route.empty() || route.find('/') == 0 || body_json.empty()) {
+        return Fail(err, "BTX035_SCOPE_DENIED");
+    }
+    std::ostringstream request;
+    request << "POST /btx-model/3/" << route << " HTTP/1.1\r\nHost: 127.0.0.1:" << port
+            << "\r\nContent-Type: application/json\r\nContent-Length: " << body_json.size()
+            << "\r\nConnection: close\r\n\r\n"
+            << body_json;
+    (void)rpc_user;
+    (void)rpc_password;
+#ifdef _WIN32
+    WSADATA wsa;
+    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) return Fail(err, "BTX035_TRANSPORT");
+#endif
+    const int fd = static_cast<int>(socket(AF_INET, SOCK_STREAM, 0));
+    if (fd < 0) return Fail(err, "BTX035_TRANSPORT");
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_port = htons(port);
+    if (inet_pton(AF_INET, "127.0.0.1", &address.sin_addr) != 1) {
+        CloseSock(fd);
+        return Fail(err, "BTX035_SCOPE_DENIED");
+    }
+    if (connect(fd, reinterpret_cast<sockaddr*>(&address), sizeof(address)) != 0) {
+        CloseSock(fd);
+        return Fail(err, "BTX035_TRANSPORT");
+    }
+    const std::string bytes = request.str();
+    size_t sent = 0;
+    while (sent < bytes.size()) {
+        const auto n = send(fd, bytes.data() + sent, bytes.size() - sent, 0);
+        if (n <= 0) {
+            CloseSock(fd);
+            return Fail(err, "BTX035_TRANSPORT");
+        }
+        sent += static_cast<size_t>(n);
+    }
+    std::string response;
+    char buf[4096];
+    while (true) {
+        const auto n = recv(fd, buf, sizeof(buf), 0);
+        if (n < 0) {
+            CloseSock(fd);
+            return Fail(err, "BTX035_TRANSPORT");
+        }
+        if (n == 0) break;
+        response.append(buf, buf + n);
+    }
+    CloseSock(fd);
+    const auto split = response.find("\r\n\r\n");
+    if (split == std::string::npos || response.size() < 12) return Fail(err, "BTX035_TRANSPORT");
+    const bool ok = response.compare(0, 12, "HTTP/1.1 200") == 0 || response.compare(0, 12, "HTTP/1.0 200") == 0;
+    const std::string payload = response.substr(split + 4);
+    if (!ok) {
+        const auto line_end = payload.find_first_of("\r\n");
+        err = line_end == std::string::npos ? payload : payload.substr(0, line_end);
+        if (err.empty()) err = "BTX035_TRANSPORT";
+        return false;
+    }
+    result_json = payload;
+    err.clear();
+    return true;
+}
+
 bool PullExchangeLoopback(const std::string& host, uint16_t port, const std::string& rpc_user,
                           const std::string& rpc_password, const std::string& repository_id,
                           std::string& manifest_json, std::string& err)
@@ -208,6 +341,55 @@ bool PullExchangeLoopback(const std::string& host, uint16_t port, const std::str
     manifest_json = result["manifest"].get_str();
     std::vector<ExchangeObject> objects;
     return VerifyExchangeManifest(manifest_json, objects, err);
+}
+
+bool LoopbackPeers(std::vector<LoopbackPeer>& peers, bool& configured, std::string& err)
+{
+    peers.clear();
+    configured = false;
+    err.clear();
+
+    std::vector<std::string> tokens;
+    AppendPeerToken(tokens, EnvOrEmpty("BTX035_LAB_PEER"));
+    AppendPeerList(tokens, EnvOrEmpty("BTX035_LAB_PEERS"));
+    if (tokens.empty()) return true;
+
+    std::vector<LoopbackPeer> accepted;
+    for (const std::string& token : tokens) {
+        std::string host;
+        uint16_t port = 0;
+        if (!ParseLoopbackEndpoint(token, host, port, err)) {
+            peers.clear();
+            return false;
+        }
+        bool seen = false;
+        for (const LoopbackPeer& have : accepted) {
+            if (have.host == host && have.port == port) {
+                seen = true;
+                break;
+            }
+        }
+        if (seen) continue;
+        LoopbackPeer peer;
+        peer.host = std::move(host);
+        peer.port = port;
+        accepted.push_back(std::move(peer));
+    }
+
+    const std::string user = EnvOrEmpty("BTX035_LAB_PEER_USER");
+    const std::string password = EnvOrEmpty("BTX035_LAB_PEER_PASSWORD");
+    if (user.empty() || password.empty()) {
+        peers.clear();
+        return Fail(err, "BTX035_PERMIT");
+    }
+    for (LoopbackPeer& peer : accepted) {
+        peer.user = user;
+        peer.password = password;
+    }
+    peers = std::move(accepted);
+    configured = true;
+    err.clear();
+    return true;
 }
 
 } // namespace modelnet

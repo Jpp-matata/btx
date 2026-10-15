@@ -2066,6 +2066,7 @@ target_link_libraries(bitcoin_node
 if(WITH_MODELNET)
   target_sources(bitcoin_node PRIVATE rpc/modelnet.cpp)
   target_link_libraries(bitcoin_node PRIVATE bitcoin_modelnet)
+  target_compile_definitions(bitcoin_node PRIVATE BTX_WITH_MODELNET=1)
 endif()
 
 

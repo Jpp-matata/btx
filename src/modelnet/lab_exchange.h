@@ -43,6 +43,24 @@ bool LabCallLoopback(const std::string& host, uint16_t port, const std::string& 
                      const std::string& rpc_password, const std::string& method,
                      const std::string& params_json, std::string& result_json, std::string& err);
 
+/**
+ * POST `body_json` to `http://127.0.0.1:port/btx-model/3/` + `route`.
+ * A non-200 body that is a BTX035_* code is returned in `err`.
+ */
+bool PeerRouteLoopback(const std::string& host, uint16_t port, const std::string& rpc_user,
+                       const std::string& rpc_password, const std::string& route,
+                       const std::string& body_json, std::string& result_json, std::string& err);
+
+struct LoopbackPeer {
+    std::string host;
+    uint16_t port;
+    std::string user;
+    std::string password;
+};
+
+/** Loopback only. Does not dial DNS or any host other than 127.0.0.1. */
+bool LoopbackPeers(std::vector<LoopbackPeer>& peers, bool& configured, std::string& err);
+
 } // namespace modelnet
 
 #endif // BITCOIN_MODELNET_LAB_EXCHANGE_H

@@ -1055,6 +1055,85 @@ BOOST_AUTO_TEST_CASE(lab_methods_keep_state_and_reject_bad_transitions)
     BOOST_CHECK_EQUAL(LabResult("lab.rollout_status", status)["state"].get_str(), "PAUSED");
 }
 
+BOOST_AUTO_TEST_CASE(git_publish_ref_rejects_stale_old_target)
+{
+    modelnet::ResetLabApi();
+    const std::string realm(96, 'a');
+    const std::string stale_target(96, 'd');
+
+    UniValue identity(UniValue::VOBJ);
+    identity.pushKV("label", "ref");
+    identity.pushKV("recovery_key_ids", UniValue(UniValue::VARR));
+    identity.pushKV("recovery_threshold", 1);
+    identity.pushKV("recovery_delay_ms", "1");
+    identity.pushKV("idempotency_key", "idempotency-stale-id");
+    identity.pushKV("expected_state", UniValue());
+    BOOST_CHECK_EQUAL(LabResult("lab.identity_create", identity)["state"].get_str(), "ACTIVE");
+
+    UniValue repo(UniValue::VOBJ);
+    repo.pushKV("label", "refs");
+    repo.pushKV("nonce", "stale-nonce");
+    repo.pushKV("object_format", "git");
+    repo.pushKV("project_genesis_id", UniValue());
+    repo.pushKV("default_ref", "refs/heads/main");
+    repo.pushKV("idempotency_key", "idempotency-stale-repo");
+    repo.pushKV("expected_state", UniValue());
+    const UniValue created = LabResult("lab.repository_create", repo);
+    const std::string repository = created["repository_id"].get_str();
+    const std::string genesis = created["repository_genesis_id"].get_str();
+    BOOST_CHECK_NE(stale_target, genesis);
+
+    auto SignAndStore = [&](const UniValue& payload, const char* idem) {
+        UniValue sign(UniValue::VOBJ);
+        sign.pushKV("record_type", "GitRefUpdate");
+        sign.pushKV("payload", payload);
+        sign.pushKV("realm_id", realm);
+        sign.pushKV("delegation_id", UniValue());
+        sign.pushKV("expires_ms", "10");
+        sign.pushKV("idempotency_key", idem);
+        sign.pushKV("expected_state", UniValue());
+        const UniValue signed_result = LabResult("lab.identity_sign", sign);
+        UniValue import_req(UniValue::VOBJ);
+        import_req.pushKV("envelope", signed_result["envelope"]);
+        import_req.pushKV("publish", false);
+        import_req.pushKV("idempotency_key", std::string("import-") + idem);
+        import_req.pushKV("expected_state", UniValue());
+        const UniValue imported = LabResult("lab.record_import", import_req);
+        BOOST_CHECK_EQUAL(imported["state"].get_str(), "STORED");
+        return signed_result["envelope"]["record_id"].get_str();
+    };
+
+    UniValue payload(UniValue::VOBJ);
+    payload.pushKV("repository_id", repository);
+    payload.pushKV("ref_name", "refs/heads/main");
+    payload.pushKV("old_target", stale_target);
+    payload.pushKV("new_target", std::string(96, 'e'));
+    payload.pushKV("snapshot_id", UniValue());
+    payload.pushKV("sequence", "0");
+    payload.pushKV("previous_update_id", UniValue());
+    payload.pushKV("policy_id", UniValue());
+    payload.pushKV("force", false);
+    const std::string update_id = SignAndStore(payload, "idempotency-stale-sign");
+
+    UniValue publish(UniValue::VOBJ);
+    publish.pushKV("update_id", update_id);
+    publish.pushKV("approval_set_id", UniValue());
+    publish.pushKV("idempotency_key", "idempotency-stale-pub");
+    publish.pushKV("expected_state", UniValue());
+    std::string response, err;
+    BOOST_CHECK(!modelnet::DispatchLab035("lab.git_publish_ref", publish.write(), response, err));
+    BOOST_CHECK_EQUAL(err, "BTX035_STALE");
+    BOOST_CHECK(response.empty());
+
+    UniValue refs(UniValue::VOBJ);
+    refs.pushKV("repository_id", repository);
+    refs.pushKV("namespace", "refs/heads");
+    refs.pushKV("after_cursor", UniValue());
+    const UniValue listed = LabResult("lab.git_refs", refs);
+    BOOST_REQUIRE_EQUAL(listed["record_ids"].size(), 1U);
+    BOOST_CHECK_EQUAL(listed["record_ids"][0].get_str(), genesis);
+}
+
 BOOST_AUTO_TEST_CASE(concurrent_calls_keep_the_store_consistent)
 {
     // Mutating lab methods share one process-global store. Parallel callers

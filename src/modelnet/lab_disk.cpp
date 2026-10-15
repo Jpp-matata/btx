@@ -351,6 +351,9 @@ bool DecodeImage(const std::string& json, LabDiskImage& image)
     if (root.exists("active_generation") && !ReadOptionalString(root, "active_generation", loaded.active_generation)) return false;
     if (root.exists("previous_generation") && !ReadOptionalString(root, "previous_generation", loaded.previous_generation)) return false;
     if (root.exists("grants") && !ReadStringMap(root["grants"], loaded.grants)) return false;
+    if (root.exists("repo_commit") && !ReadStringMap(root["repo_commit"], loaded.repo_commit)) return false;
+    if (root.exists("repo_genesis") && !ReadStringMap(root["repo_genesis"], loaded.repo_genesis)) return false;
+    if (root.exists("repo_ref_published") && !ReadStringSet(root["repo_ref_published"], loaded.repo_ref_published)) return false;
     if (root.exists("bindings") && !ReadStringMap(root["bindings"], loaded.bindings)) return false;
     if (root.exists("workspaces")) {
         if (!root["workspaces"].isObject()) return false;
@@ -514,6 +517,9 @@ std::string EncodeImage(const LabDiskImage& image)
     root.pushKV("active_generation", image.active_generation);
     root.pushKV("previous_generation", image.previous_generation);
     root.pushKV("grants", StringMap(image.grants));
+    root.pushKV("repo_commit", StringMap(image.repo_commit));
+    root.pushKV("repo_genesis", StringMap(image.repo_genesis));
+    root.pushKV("repo_ref_published", StringSet(image.repo_ref_published));
     root.pushKV("bindings", StringMap(image.bindings));
     UniValue workspaces(UniValue::VOBJ);
     for (const auto& item : image.workspaces) {

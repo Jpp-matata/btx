@@ -602,6 +602,7 @@ if(WITH_MODELNET)
     modelnet_035_grant_tests.cpp
     modelnet_035_surface_tests.cpp
     modelnet_035_lab_api_tests.cpp
+    modelnet_035_peer_route_tests.cpp
     modelnet_035_e2e_gate_tests.cpp
     modelnet_035_wire_limit_tests.cpp
     modelnet_035_assurance_tests.cpp

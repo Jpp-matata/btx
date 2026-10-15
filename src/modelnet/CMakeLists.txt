@@ -73,6 +73,7 @@ add_library(bitcoin_modelnet STATIC
   lab_ancestry.cpp
   lab_guard_client.cpp
   lab_exchange.cpp
+  lab_peer.cpp
   training_integer.cpp
   research_views.cpp
   guard_machine.cpp

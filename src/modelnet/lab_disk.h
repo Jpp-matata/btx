@@ -32,6 +32,9 @@ struct LabDiskImage {
     std::vector<ResearchObservation> observations;
     std::map<std::string, std::vector<LabDiskObject>> repo_objects;
     std::set<std::string> repos;
+    std::map<std::string, std::string> repo_commit;
+    std::map<std::string, std::string> repo_genesis;
+    std::set<std::string> repo_ref_published;
     std::set<std::string> snapshots;
     std::map<std::string, std::string> realms;
     std::map<std::string, std::string> lineage;

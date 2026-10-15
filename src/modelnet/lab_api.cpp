@@ -12,6 +12,7 @@
 #include <modelnet/lab_ancestry.h>
 #include <modelnet/lab_disk.h>
 #include <modelnet/lab_exchange.h>
+#include <modelnet/lab_peer.h>
 #include <modelnet/lab_guard_client.h>
 #include <modelnet/model_admission.h>
 #include <modelnet/piece_store.h>
@@ -126,6 +127,10 @@ struct Store {
     std::vector<std::string> published;
     std::set<std::string> repos;
     std::map<std::string, std::string> repo_commit;
+    /** Genesis commit stored at repository create. First null old_target may replace it. */
+    std::map<std::string, std::string> repo_genesis;
+    /** Repositories that already accepted a GitRefUpdate. */
+    std::set<std::string> repo_ref_published;
     std::set<std::string> snapshots;
     std::map<std::string, std::string> checkpoints;
     std::map<std::string, std::string> realms;
@@ -200,6 +205,9 @@ void ImageFromStore(const Store& store, LabDiskImage& image)
         image.repo_objects.emplace(entry.first, std::move(objects));
     }
     image.repos = store.repos;
+    image.repo_commit = store.repo_commit;
+    image.repo_genesis = store.repo_genesis;
+    image.repo_ref_published = store.repo_ref_published;
     image.snapshots = store.snapshots;
     image.realms = store.realms;
     image.lineage = store.lineage;
@@ -322,6 +330,9 @@ void ImageToStore(const LabDiskImage& image, Store& store)
         store.repo_objects.emplace(entry.first, std::move(objects));
     }
     store.repos = image.repos;
+    store.repo_commit = image.repo_commit;
+    store.repo_genesis = image.repo_genesis;
+    store.repo_ref_published = image.repo_ref_published;
     store.snapshots = image.snapshots;
     store.realms = image.realms;
     store.lineage = image.lineage;
@@ -1305,38 +1316,6 @@ bool AcceptModelObject(Store& store, const ExchangeObject& object, std::string& 
     return true;
 }
 
-bool PeerEndpoint(std::string& host, uint16_t& port, std::string& user, std::string& password, bool& configured, std::string& err)
-{
-    configured = false;
-    const char* peer = std::getenv("BTX035_LAB_PEER");
-    if (peer == nullptr || peer[0] == '\0') {
-        err.clear();
-        return true;
-    }
-    const std::string text(peer);
-    const auto colon = text.rfind(':');
-    if (colon == std::string::npos || text.substr(0, colon) != "127.0.0.1") return Fail(err, "BTX035_SCOPE_DENIED");
-    int parsed = 0;
-    for (size_t i = colon + 1; i < text.size(); ++i) {
-        if (text[i] < '0' || text[i] > '9') return Fail(err, "BTX035_SCOPE_DENIED");
-        parsed = parsed * 10 + (text[i] - '0');
-        if (parsed > 65535) return Fail(err, "BTX035_SCOPE_DENIED");
-    }
-    if (parsed <= 0) return Fail(err, "BTX035_SCOPE_DENIED");
-    const char* rpc_user = std::getenv("BTX035_LAB_PEER_USER");
-    const char* rpc_password = std::getenv("BTX035_LAB_PEER_PASSWORD");
-    if (rpc_user == nullptr || rpc_password == nullptr || rpc_user[0] == '\0' || rpc_password[0] == '\0') {
-        return Fail(err, "BTX035_PERMIT");
-    }
-    host = "127.0.0.1";
-    port = static_cast<uint16_t>(parsed);
-    user = rpc_user;
-    password = rpc_password;
-    configured = true;
-    err.clear();
-    return true;
-}
-
 bool CollectResearch(const std::vector<ExchangeObject>& objects, std::vector<ResearchObservation>& out, std::string& err)
 {
     out.clear();
@@ -1822,7 +1801,18 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
         return true;
     }
     if (method == "lab.research_query" || method == "lab.git_refs" || method == "lab.agent_lineage") {
-        std::vector<std::string> ids = store.published;
+        std::set<std::string> hidden;
+        if (method == "lab.research_query") {
+            for (const ResearchObservation& observation : store.observations) {
+                if (observation.is_private && !observation.record_id.empty()) hidden.insert(observation.record_id);
+            }
+        }
+        std::vector<std::string> ids;
+        ids.reserve(store.published.size());
+        for (const std::string& id : store.published) {
+            if (hidden.count(id)) continue;
+            ids.push_back(id);
+        }
         std::string peer_omission;
         int queried_peers = 0;
         if (method == "lab.research_query" && RequireStr(req, "scope") == "PEERS") {
@@ -1831,12 +1821,9 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
                 if (observation.is_private) continue;
                 ids.push_back(observation.record_id);
             }
-            std::string host;
-            std::string user;
-            std::string password;
-            uint16_t port = 0;
+            std::vector<LoopbackPeer> peers;
             bool configured = false;
-            if (!PeerEndpoint(host, port, user, password, configured, err)) return false;
+            if (!LoopbackPeers(peers, configured, err)) return false;
             if (!configured) {
                 peer_omission = "BTX035_SCOPE_DENIED";
             } else {
@@ -1846,18 +1833,28 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
                 inner.pushKV("kinds", req["kinds"]);
                 inner.pushKV("after_cursor", req["after_cursor"]);
                 inner.pushKV("limit", req["limit"]);
-                std::string remote_json;
-                if (!LabCallLoopback(host, port, user, password, "lab.research_query", inner.write(), remote_json, err)) {
-                    return false;
+                bool any = false;
+                for (const LoopbackPeer& peer : peers) {
+                    std::string remote_json;
+                    std::string call_err;
+                    if (!LabCallLoopback(peer.host, peer.port, peer.user, peer.password, "lab.research_query", inner.write(), remote_json, call_err)) {
+                        if (call_err != "BTX035_TRANSPORT") return Fail(err, call_err.c_str());
+                        continue;
+                    }
+                    UniValue remote;
+                    if (!remote.read(remote_json) || !remote.isObject() || !remote.exists("record_ids") || !remote["record_ids"].isArray()) {
+                        return Fail(err, "BTX035_SCHEMA");
+                    }
+                    for (size_t i = 0; i < remote["record_ids"].size(); ++i) {
+                        if (!remote["record_ids"][i].isStr()) continue;
+                        const std::string remote_id = remote["record_ids"][i].get_str();
+                        if (hidden.count(remote_id)) continue;
+                        ids.push_back(remote_id);
+                    }
+                    any = true;
+                    ++queried_peers;
                 }
-                UniValue remote;
-                if (!remote.read(remote_json) || !remote.isObject() || !remote.exists("record_ids") || !remote["record_ids"].isArray()) {
-                    return Fail(err, "BTX035_SCHEMA");
-                }
-                for (size_t i = 0; i < remote["record_ids"].size(); ++i) {
-                    if (remote["record_ids"][i].isStr()) ids.push_back(remote["record_ids"][i].get_str());
-                }
-                queried_peers = 1;
+                if (!any) return Fail(err, "BTX035_TRANSPORT");
             }
         }
         if (method == "lab.agent_lineage") {
@@ -2024,35 +2021,81 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
             }
         }
         if (!found && !digest.empty() && resource.isObject() && resource.exists("repository_id") && resource["repository_id"].isStr()) {
-            std::string host;
-            std::string user;
-            std::string password;
-            uint16_t port = 0;
+            std::vector<LoopbackPeer> peers;
             bool configured = false;
-            if (!PeerEndpoint(host, port, user, password, configured, err)) return false;
+            if (!LoopbackPeers(peers, configured, err)) return false;
             if (configured) {
-                std::string manifest;
-                if (!PullExchangeLoopback(host, port, user, password, resource["repository_id"].get_str(), manifest, err)) {
-                    return false;
-                }
-                std::vector<ExchangeObject> objects;
-                if (!VerifyExchangeManifest(manifest, objects, err)) return false;
-                for (const ExchangeObject& object : objects) {
-                    if (object.kind == "piece" && static_cast<int64_t>(object.content.size()) > max_bytes) {
-                        return Fail(err, "BTX035_LIMIT_EXCEEDED");
+                bool pulled = false;
+                for (const LoopbackPeer& peer : peers) {
+                    std::vector<std::string> chunks;
+                    std::string piece_err;
+                    bool saw_piece = false;
+                    for (uint64_t index = 0; index < 4096; ++index) {
+                        UniValue resource_ref(UniValue::VOBJ);
+                        resource_ref.pushKV("kind", "MODEL");
+                        resource_ref.pushKV("digest48", digest);
+                        UniValue piece_req(UniValue::VOBJ);
+                        piece_req.pushKV("resource", resource_ref);
+                        piece_req.pushKV("manifest_id", digest);
+                        piece_req.pushKV("piece_index", std::to_string(index));
+                        piece_req.pushKV("maximum_bytes", std::to_string(max_bytes));
+                        std::string piece_json;
+                        if (!PeerRouteLoopback(peer.host, peer.port, peer.user, peer.password, "artifacts/piece", piece_req.write(), piece_json, piece_err)) {
+                            if (piece_err == "BTX035_NOT_FOUND") break;
+                            if (piece_err == "BTX035_TRANSPORT") break;
+                            return Fail(err, piece_err.c_str());
+                        }
+                        UniValue piece;
+                        if (!piece.read(piece_json) || !piece.isObject() || !piece["content_hex"].isStr()) return Fail(err, "BTX035_SCHEMA");
+                        std::vector<unsigned char> raw;
+                        if (!BytesFromHex(piece["content_hex"].get_str(), raw) || raw.empty()) return Fail(err, "BTX035_SCHEMA");
+                        chunks.emplace_back(raw.begin(), raw.end());
+                        saw_piece = true;
+                        if (raw.size() != 32) break;
                     }
-                }
-                for (const ExchangeObject& object : objects) {
-                    if (!AcceptModelObject(store, object, err)) return false;
-                }
-                if (ModelBytesMatch(store, digest, err)) {
-                    if (static_cast<int64_t>(store.models[digest].size()) > max_bytes) {
-                        return OpOut(store, result, id, "FAILED", "STOPPED_QUIESCENT");
+                    if (saw_piece) {
+                        std::string joined;
+                        if (!JoinModelPieces(chunks, joined, err)) return false;
+                        store.models[digest] = joined;
+                        store.model_pieces[digest] = std::move(chunks);
+                        if (!ModelBytesMatch(store, digest, err)) return false;
+                        if (static_cast<int64_t>(joined.size()) > max_bytes) {
+                            return OpOut(store, result, id, "FAILED", "STOPPED_QUIESCENT");
+                        }
+                        remember(joined);
+                        return OpOut(store, result, id, "COMPLETE", "STOPPED_QUIESCENT");
                     }
-                    remember(store.models[digest]);
-                    return OpOut(store, result, id, "COMPLETE", "STOPPED_QUIESCENT");
+                    if (!piece_err.empty() && piece_err != "BTX035_NOT_FOUND" && piece_err != "BTX035_TRANSPORT") {
+                        return Fail(err, piece_err.c_str());
+                    }
+                    std::string manifest;
+                    std::string call_err;
+                    if (!PullExchangeLoopback(peer.host, peer.port, peer.user, peer.password, resource["repository_id"].get_str(), manifest, call_err)) {
+                        if (call_err != "BTX035_TRANSPORT") return Fail(err, call_err.c_str());
+                        continue;
+                    }
+                    std::vector<ExchangeObject> objects;
+                    if (!VerifyExchangeManifest(manifest, objects, err)) return false;
+                    for (const ExchangeObject& object : objects) {
+                        if (object.kind == "piece" && static_cast<int64_t>(object.content.size()) > max_bytes) {
+                            return Fail(err, "BTX035_LIMIT_EXCEEDED");
+                        }
+                    }
+                    for (const ExchangeObject& object : objects) {
+                        if (!AcceptModelObject(store, object, err)) return false;
+                    }
+                    pulled = true;
+                    if (ModelBytesMatch(store, digest, err)) {
+                        if (static_cast<int64_t>(store.models[digest].size()) > max_bytes) {
+                            return OpOut(store, result, id, "FAILED", "STOPPED_QUIESCENT");
+                        }
+                        remember(store.models[digest]);
+                        return OpOut(store, result, id, "COMPLETE", "STOPPED_QUIESCENT");
+                    }
+                    if (err == "BTX035_ID_MISMATCH") return false;
+                    err.clear();
                 }
-                err.clear();
+                if (!pulled) return Fail(err, "BTX035_TRANSPORT");
             }
         }
         if (!found || static_cast<int64_t>(content.size()) > max_bytes) {
@@ -2219,6 +2262,27 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
         UniValue envelope;
         if (!LoadEnvelope(store, RequireStr(req, "update_id"), envelope, err)) return false;
         if (envelope["body"]["record_type"].get_str() != "GitRefUpdate") return Fail(err, "BTX035_RECORD_TYPE");
+        const UniValue& payload = envelope["body"]["payload"];
+        if (!payload.isObject()) return Fail(err, "BTX035_SCHEMA");
+        if (payload.exists("repository_id") && payload["repository_id"].isStr()) {
+            const std::string repository = payload["repository_id"].get_str();
+            const auto current = store.repo_commit.find(repository);
+            if (current != store.repo_commit.end()) {
+                const bool old_null = payload.exists("old_target") && payload["old_target"].isNull();
+                const bool old_str = payload.exists("old_target") && payload["old_target"].isStr();
+                if (old_str && payload["old_target"].get_str() != current->second) return Fail(err, "BTX035_STALE");
+                if (old_null) {
+                    const auto genesis = store.repo_genesis.find(repository);
+                    const bool at_genesis = genesis != store.repo_genesis.end() && current->second == genesis->second;
+                    const bool first = !store.repo_ref_published.count(repository);
+                    if (!at_genesis && !first) return Fail(err, "BTX035_STALE");
+                }
+            }
+            if (payload.exists("new_target") && payload["new_target"].isStr() && !payload["new_target"].get_str().empty()) {
+                store.repo_commit[repository] = payload["new_target"].get_str();
+            }
+            store.repo_ref_published.insert(repository);
+        }
         return Rec(result, RequireStr(req, "update_id"), "PUBLISHED");
     }
     if (method == "lab.git_push_authorize") {
@@ -2236,6 +2300,7 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
         const std::string genesis = HexN(RequireStr(req, "project_genesis_id"), 96) ? RequireStr(req, "project_genesis_id") : Id96("genesis|" + repo);
         store.repos.insert(repo);
         store.repo_commit[repo] = genesis;
+        store.repo_genesis[repo] = genesis;
         result.pushKV("repository_id", repo);
         result.pushKV("repository_genesis_id", genesis);
         return true;
@@ -2865,11 +2930,12 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
             gaps.push_back("BTX035_NOT_FOUND");
         } else {
             std::string check_err;
+            const bool retained = !train->second.state.state_hash.empty() && train->second.state.step > 0;
             const bool state_ok = IntegerTrainer::CheckState(train->second.state, check_err);
-            const bool path_ok = !train->second.intervals.empty() &&
+            const bool path_ok = retained && !train->second.intervals.empty() &&
                                  FullReplayCoverage(train->second.state.step, train->second.intervals.front().start_state,
                                                     train->second.state.state_hash, train->second.intervals);
-            complete = state_ok && path_ok;
+            complete = retained && state_ok && path_ok;
             if (!complete) gaps.push_back(check_err.empty() ? "BTX035_REPLAY" : check_err);
             else if (!train->second.author.empty()) accepted.push_back(train->second.author);
         }
@@ -2987,6 +3053,84 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
     return Fail(err, "BTX035_NOT_IMPLEMENTED");
 }
 
+class LabStoreView : public PeerView {
+    const Store& store;
+public:
+    explicit LabStoreView(const Store& in) : store(in) {}
+    bool Record(const std::string& id, PeerRecord& out) const override
+    {
+        out = PeerRecord{};
+        for (const ResearchObservation& observation : store.observations) {
+            if (observation.record_id == id && observation.is_private) {
+                out.exists = true;
+                out.is_private = true;
+                return true;
+            }
+        }
+        const auto record = store.records.find(id);
+        if (record != store.records.end()) {
+            out.exists = true;
+            out.body = record->second;
+            return true;
+        }
+        const auto model = store.models.find(id);
+        if (model != store.models.end()) {
+            out.exists = true;
+            out.body = model->second;
+            return true;
+        }
+        return false;
+    }
+    bool Piece(const std::string& model_digest, uint64_t index, std::string& bytes) const override
+    {
+        const auto found = store.model_pieces.find(model_digest);
+        if (found == store.model_pieces.end() || index >= found->second.size() || found->second[index].empty()) return false;
+        bytes = found->second[index];
+        return true;
+    }
+    bool Channel(const std::string& realm_id, const std::string& channel, int64_t& sequence, std::string& update_id) const override
+    {
+        const std::string key = realm_id + "\n" + channel;
+        sequence = store.rollout.ChannelSequence(key);
+        update_id = store.rollout.ChannelBody(key);
+        return sequence >= 0 && !update_id.empty();
+    }
+    bool Realm(const std::string& realm_id, std::string& policy_id, int& threshold) const override
+    {
+        const auto found = store.realms.find(realm_id);
+        if (found == store.realms.end()) return false;
+        policy_id = found->second;
+        threshold = store.rollout.Threshold(realm_id);
+        return true;
+    }
+    void PublicResearch(std::vector<std::string>& ids) const override
+    {
+        ids.clear();
+        for (const ResearchObservation& observation : store.observations) {
+            if (!observation.is_private && !observation.record_id.empty()) ids.push_back(observation.record_id);
+        }
+    }
+    bool Ticket(const std::string& ticket_id) const override
+    {
+        const auto found = store.fetch_tickets.find(ticket_id);
+        return found != store.fetch_tickets.end() && !found->second.consumed && NowMs() <= found->second.not_after_ms;
+    }
+    bool VerifySession(const std::string& message, const std::string& signature_hex) const override
+    {
+        std::vector<unsigned char> digest;
+        const std::vector<unsigned char> sig = ParseHex(signature_hex);
+        if (!BytesFromHex(message, digest) || sig.empty()) return false;
+        for (const auto& item : store.identity_pk) {
+            if (VerifyMlDsa44(Span<const unsigned char>{item.second.data(), item.second.size()},
+                              Span<const unsigned char>{digest.data(), digest.size()},
+                              Span<const unsigned char>{sig.data(), sig.size()})) {
+                return true;
+            }
+        }
+        return false;
+    }
+};
+
 const LabMethod* FindMethod(const std::string& method)
 {
     for (const LabMethod& item : kLabMethods) {
@@ -3008,6 +3152,13 @@ void ReloadLabFromDisk()
     LOCK(g_lab_mutex);
     WipeMemory();
     LoadDiskInto(State());
+}
+
+bool ServeLabPeer(const std::string& route, const std::string& request_json, std::string& response_json, std::string& err)
+{
+    LOCK(g_lab_mutex);
+    const LabStoreView view(State());
+    return DispatchPeerRoute(route, request_json, view, response_json, err);
 }
 
 bool DispatchLabApi(const std::string& method, const std::string& request_json, std::string& response_json, std::string& err)

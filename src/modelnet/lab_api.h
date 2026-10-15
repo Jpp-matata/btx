@@ -18,6 +18,12 @@ void ResetLabApi();
 /** Clear process-local lab state and load BTX035_LAB_DIR again when that variable is set. */
 void ReloadLabFromDisk();
 
+/**
+ * Serve one `/btx-model/3/` route from the lab store. `route` may be the full
+ * path or the name after the prefix. Failure leaves `response_json` empty.
+ */
+bool ServeLabPeer(const std::string& route, const std::string& request_json, std::string& response_json, std::string& err);
+
 } // namespace modelnet
 
 #endif // BITCOIN_MODELNET_LAB_API_H
