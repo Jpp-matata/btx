@@ -307,7 +307,7 @@ bool HandleRecordGet(const UniValue& root, const PeerView& view, std::string& re
     const RecordState state = LoadRecord(view, id, rec);
     if (state == RecordState::Missing) return Fail(response_json, err, "BTX035_NOT_FOUND");
     if (state == RecordState::Private) return Fail(response_json, err, "BTX035_SCOPE_DENIED");
-    if (manifest && rec.body.empty()) return Fail(response_json, err, "BTX035_NOT_FOUND");
+    if (manifest && rec.body.find("manifest") == std::string::npos) return Fail(response_json, err, "BTX035_RECORD_TYPE");
     UniValue out(UniValue::VOBJ);
     out.pushKV("record_id", id);
     out.pushKV("body", rec.body);
@@ -347,26 +347,40 @@ bool HandleAnnounce(const UniValue& root, const PeerView& view, std::string& res
 
 bool HandleResearch(const UniValue& root, const PeerView& view, std::string& response_json, std::string& err)
 {
-    if (!ExactKeys(root, {"scope"})) return Fail(response_json, err, "BTX035_SCHEMA");
-    if (!root["scope"].isStr()) return Fail(response_json, err, "BTX035_SCHEMA");
-    if (root["scope"].get_str() != "LOCAL") return Fail(response_json, err, "BTX035_SCOPE_DENIED");
+    if (!ExactKeys(root, {"scope", "topics", "kinds", "after_cursor", "limit"})) {
+        return Fail(response_json, err, "BTX035_SCHEMA");
+    }
+    if (!root["scope"].isStr() || root["scope"].get_str() != "LOCAL") return Fail(response_json, err, "BTX035_SCOPE_DENIED");
+    if (!root["topics"].isArray() || !root["kinds"].isArray()) return Fail(response_json, err, "BTX035_SCHEMA");
+    const UniValue& cursor = root["after_cursor"];
+    if (!(cursor.isNull() || cursor.isStr())) return Fail(response_json, err, "BTX035_SCHEMA");
+    int64_t limit = 0;
+    if (!ReadInt(root["limit"], limit) || limit < 1 || limit > 100) return Fail(response_json, err, "BTX035_SCHEMA");
     std::vector<std::string> ids;
     view.PublicResearch(ids);
     UniValue arr(UniValue::VARR);
-    for (const std::string& id : ids) arr.push_back(id);
+    for (const std::string& id : ids) {
+        if (static_cast<int64_t>(arr.size()) >= limit) break;
+        arr.push_back(id);
+    }
     UniValue out(UniValue::VOBJ);
     out.pushKV("record_ids", arr);
-    out.pushKV("complete", true);
+    out.pushKV("next_cursor", UniValue(UniValue::VNULL));
+    out.pushKV("complete", static_cast<int64_t>(ids.size()) <= limit);
     return Done(response_json, err, out);
 }
 
 bool HandlePoll(const UniValue& root, const PeerView& view, std::string& response_json, std::string& err)
 {
-    if (!ExactKeys(root, {"subscription_id", "after_sequence"})) return Fail(response_json, err, "BTX035_SCHEMA");
+    if (!ExactKeys(root, {"subscription_id", "after_sequence", "wait_ms"})) return Fail(response_json, err, "BTX035_SCHEMA");
     if (!root["subscription_id"].isStr() || !LowerHex(root["subscription_id"].get_str(), 96)) {
         return Fail(response_json, err, "BTX035_SCHEMA");
     }
     if (!root["after_sequence"].isStr() || !DecimalString(root["after_sequence"].get_str())) {
+        return Fail(response_json, err, "BTX035_SCHEMA");
+    }
+    uint64_t wait_ms = 0;
+    if (!root["wait_ms"].isStr() || !ParseU64(root["wait_ms"].get_str(), wait_ms) || wait_ms > 5000) {
         return Fail(response_json, err, "BTX035_SCHEMA");
     }
     const std::string id = root["subscription_id"].get_str();
@@ -398,9 +412,23 @@ bool HandleGit(const UniValue& root, const PeerView& view, std::string& response
         return Fail(response_json, err, "BTX035_SCHEMA");
     }
     if (!view.Ticket(root["ticket_id"].get_str())) return Fail(response_json, err, "BTX035_PERMIT");
+    UniValue frames(UniValue::VARR);
+    UniValue open(UniValue::VOBJ);
+    open.pushKV("type", "OPEN");
+    open.pushKV("service", service);
+    open.pushKV("resource_id", root["repository_id"].get_str());
+    frames.push_back(std::move(open));
+    UniValue end(UniValue::VOBJ);
+    end.pushKV("type", "END");
+    end.pushKV("byte_count", "0");
+    end.pushKV("result", "OK");
+    end.pushKV("physical_disposition", "STOPPED_QUIESCENT");
+    frames.push_back(std::move(end));
     UniValue out(UniValue::VOBJ);
     out.pushKV("opened", true);
     out.pushKV("service", service);
+    out.pushKV("frames", frames);
+    out.pushKV("pack", false);
     return Done(response_json, err, out);
 }
 
@@ -431,10 +459,27 @@ bool HandlePiece(const UniValue& root, const PeerView& view, std::string& respon
     std::string bytes;
     if (!view.Piece(resource["digest48"].get_str(), index, bytes)) return Fail(response_json, err, "BTX035_NOT_FOUND");
     if (LargerThan(bytes.size(), maximum_bytes)) return Fail(response_json, err, "BTX035_LIMIT_EXCEEDED");
+    const std::string hex = ToHex(bytes);
+    UniValue frames(UniValue::VARR);
+    UniValue open(UniValue::VOBJ);
+    open.pushKV("type", "OPEN");
+    open.pushKV("piece_index", piece_index);
+    frames.push_back(std::move(open));
+    UniValue data(UniValue::VOBJ);
+    data.pushKV("type", "DATA");
+    data.pushKV("content_hex", hex);
+    frames.push_back(std::move(data));
+    UniValue end(UniValue::VOBJ);
+    end.pushKV("type", "END");
+    end.pushKV("byte_count", std::to_string(bytes.size()));
+    end.pushKV("result", "OK");
+    end.pushKV("physical_disposition", "STOPPED_QUIESCENT");
+    frames.push_back(std::move(end));
     UniValue out(UniValue::VOBJ);
     out.pushKV("piece_index", piece_index);
     out.pushKV("byte_size", static_cast<uint64_t>(bytes.size()));
-    out.pushKV("content_hex", ToHex(bytes));
+    out.pushKV("content_hex", hex);
+    out.pushKV("frames", frames);
     return Done(response_json, err, out);
 }
 
@@ -449,8 +494,11 @@ bool HandleTrust(const UniValue& root, const PeerView& view, std::string& respon
     if (!view.Realm(root["realm_id"].get_str(), policy_id, threshold)) return Fail(response_json, err, "BTX035_NOT_FOUND");
     UniValue out(UniValue::VOBJ);
     out.pushKV("policy_id", policy_id);
+    out.pushKV("epoch", "0");
     out.pushKV("threshold", std::to_string(threshold));
     out.pushKV("public_connectivity", "DISABLED");
+    out.pushKV("revocation_age_ms", "0");
+    out.pushKV("authority_state", "LOCAL");
     return Done(response_json, err, out);
 }
 

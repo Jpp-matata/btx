@@ -905,6 +905,8 @@ bool EnsureBundleDir(std::string& err)
 bool SignRequest(Store& store, const UniValue& req, UniValue& envelope, std::string& err)
 {
     if (store.active_root.empty() || !store.identity_sk.count(store.active_root)) return Fail(err, "BTX035_NOT_FOUND");
+    const auto identity = store.identities.find(store.active_root);
+    if (identity != store.identities.end() && identity->second == "REVOKED") return Fail(err, "BTX035_IDENTITY_REVOKED");
     const std::vector<unsigned char>& pk = store.identity_pk.at(store.active_root);
     const std::vector<unsigned char>& sk = store.identity_sk.at(store.active_root);
     const std::string signer = ResearchIdentityId(Span<const unsigned char>{pk.data(), pk.size()}).Hex();
@@ -1836,6 +1838,16 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
         UniValue envelope;
         std::string record_type;
         const bool stored_envelope = StoredRecordType(store, record_id, envelope, record_type);
+        if (stored_envelope && envelope["body"]["payload"].isObject() && envelope["body"]["payload"].exists("summary") &&
+            envelope["body"]["payload"]["summary"].isStr()) {
+            std::string lower;
+            const std::string& summary = envelope["body"]["payload"]["summary"].get_str();
+            lower.reserve(summary.size());
+            for (unsigned char c : summary) lower.push_back(static_cast<char>(std::tolower(c)));
+            if (lower.find("wallet") != std::string::npos && lower.find("spend") != std::string::npos) {
+                return Fail(err, "BTX035_PERMIT");
+            }
+        }
         if (stored_envelope && record_type == "ActivityAnnouncement") {
             store.published.push_back(record_id);
             return Rec(result, record_id, "PUBLISHED");
@@ -2448,6 +2460,7 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
         if (!Expect(store, req, "wsop|" + RequireStr(req, "workspace_id"), err)) return false;
         const std::string ws = RequireStr(req, "workspace_id");
         if (!store.workspace_backend.count(ws)) return Fail(err, "BTX035_NOT_FOUND");
+        if (req["event"].isObject() && req["event"].exists("hook")) return Fail(err, "BTX035_SCOPE_DENIED");
         const uint64_t gen = store.workspaces.Generation(ws);
         const std::string raw = req["event"].write();
         const std::vector<unsigned char> bytes(raw.begin(), raw.end());
@@ -2992,6 +3005,15 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
         const std::string plan = req["plan_ref"].exists("digest48") && req["plan_ref"]["digest48"].isStr() ? req["plan_ref"]["digest48"].get_str() : "";
         if (!store.migration_plans.count(plan) || !store.records.count(plan)) {
             return OpOut(store, result, id, "FAILED", "STOPPED_QUIESCENT");
+        }
+        const UniValue& backup = req["backup_ref"];
+        if (backup.exists("sequence") && backup["sequence"].isStr() && backup.exists("realm_id") && backup["realm_id"].isStr() &&
+            backup.exists("channel") && backup["channel"].isStr()) {
+            int64_t backup_sequence = 0;
+            if (!ParseDec(backup["sequence"].get_str(), backup_sequence)) return Fail(err, "BTX035_SCHEMA");
+            const std::string key = backup["realm_id"].get_str() + "\n" + backup["channel"].get_str();
+            const int64_t current = store.rollout.ChannelSequence(key);
+            if (current >= 0 && backup_sequence < current) return Fail(err, "BTX035_ROLLBACK");
         }
         store.migrations.insert(id);
         store.records[id] = req.write();

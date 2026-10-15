@@ -357,4 +357,107 @@ BOOST_AUTO_TEST_CASE(peer_channel_missing_unknown)
     BOOST_CHECK_EQUAL(resp["state"].get_str(), "UNKNOWN");
 }
 
+BOOST_AUTO_TEST_CASE(peer_research_query_uses_the_lab_request)
+{
+    const std::string id(96, 'a');
+    FakeView view;
+    view.research_ids.push_back(id);
+    UniValue topics(UniValue::VARR);
+    UniValue kinds(UniValue::VARR);
+    UniValue req(UniValue::VOBJ);
+    req.pushKV("scope", "LOCAL");
+    req.pushKV("topics", topics);
+    req.pushKV("kinds", kinds);
+    req.pushKV("after_cursor", UniValue(UniValue::VNULL));
+    req.pushKV("limit", int64_t{10});
+    std::string response, err;
+    BOOST_REQUIRE(Call("research/query", req.write(), view, response, err));
+    UniValue resp;
+    BOOST_REQUIRE(resp.read(response));
+    BOOST_CHECK(resp["complete"].isTrue());
+    BOOST_CHECK_EQUAL(resp["record_ids"][0].get_str(), id);
+    req.pushKV("scope", "PEERS");
+    BOOST_CHECK(!Call("research/query", req.write(), view, response, err));
+    BOOST_CHECK_EQUAL(err, "BTX035_SCOPE_DENIED");
+}
+
+BOOST_AUTO_TEST_CASE(peer_git_tunnel_with_ticket_returns_end_frame)
+{
+    const std::string ticket(96, 'e');
+    FakeView view;
+    view.tickets.insert(ticket);
+    UniValue req(UniValue::VOBJ);
+    req.pushKV("repository_id", std::string(96, 'd'));
+    req.pushKV("service", "git-upload-pack");
+    req.pushKV("ticket_id", ticket);
+    req.pushKV("expected_ref_state", UniValue(UniValue::VNULL));
+    std::string response, err;
+    BOOST_REQUIRE(Call("git/tunnel", req.write(), view, response, err));
+    UniValue resp;
+    BOOST_REQUIRE(resp.read(response));
+    BOOST_CHECK(resp["pack"].isFalse());
+    BOOST_REQUIRE(resp["frames"].size() == 2);
+    BOOST_CHECK_EQUAL(resp["frames"][0]["type"].get_str(), "OPEN");
+    BOOST_CHECK_EQUAL(resp["frames"][1]["type"].get_str(), "END");
+    BOOST_CHECK_EQUAL(resp["frames"][1]["byte_count"].get_str(), "0");
+    BOOST_CHECK(response.find("PACK") == std::string::npos);
+}
+
+BOOST_AUTO_TEST_CASE(peer_piece_frames_end_after_the_bytes)
+{
+    const std::string manifest(96, 'a');
+    const std::string digest(96, 'b');
+    FakeView view;
+    view.records[manifest] = modelnet::PeerRecord{true, false, "manifest"};
+    view.pieces[std::make_pair(digest, uint64_t{0})] = std::string("\x0a\xff", 2);
+    UniValue resource(UniValue::VOBJ);
+    resource.pushKV("kind", "MODEL");
+    resource.pushKV("digest48", digest);
+    UniValue req(UniValue::VOBJ);
+    req.pushKV("resource", resource);
+    req.pushKV("manifest_id", manifest);
+    req.pushKV("piece_index", "0");
+    req.pushKV("maximum_bytes", "2");
+    std::string response, err;
+    BOOST_REQUIRE(Call("artifacts/piece", req.write(), view, response, err));
+    UniValue resp;
+    BOOST_REQUIRE(resp.read(response));
+    BOOST_REQUIRE(resp["frames"].size() == 3);
+    BOOST_CHECK_EQUAL(resp["frames"][0]["type"].get_str(), "OPEN");
+    BOOST_CHECK_EQUAL(resp["frames"][1]["type"].get_str(), "DATA");
+    BOOST_CHECK_EQUAL(resp["frames"][1]["content_hex"].get_str(), "0aff");
+    BOOST_CHECK_EQUAL(resp["frames"][2]["type"].get_str(), "END");
+    BOOST_CHECK_EQUAL(resp["frames"][2]["byte_count"].get_str(), "2");
+}
+
+BOOST_AUTO_TEST_CASE(peer_manifest_rejects_a_generic_record)
+{
+    const std::string id(96, 'a');
+    FakeView view;
+    view.records[id] = modelnet::PeerRecord{true, false, "notes"};
+    UniValue req(UniValue::VOBJ);
+    req.pushKV("record_id", id);
+    std::string response, err;
+    BOOST_CHECK(!Call("artifacts/manifest", req.write(), view, response, err));
+    BOOST_CHECK_EQUAL(err, "BTX035_RECORD_TYPE");
+    view.records[id].body = "v1|manifest|ok";
+    BOOST_REQUIRE(Call("artifacts/manifest", req.write(), view, response, err));
+}
+
+BOOST_AUTO_TEST_CASE(peer_trust_state_reports_connectivity_disabled)
+{
+    const std::string realm(96, 'a');
+    FakeView view;
+    view.realms[realm] = std::make_pair(std::string(96, 'b'), 2);
+    UniValue req(UniValue::VOBJ);
+    req.pushKV("realm_id", realm);
+    std::string response, err;
+    BOOST_REQUIRE(Call("trust/state", req.write(), view, response, err));
+    UniValue resp;
+    BOOST_REQUIRE(resp.read(response));
+    BOOST_CHECK_EQUAL(resp["threshold"].get_str(), "2");
+    BOOST_CHECK_EQUAL(resp["public_connectivity"].get_str(), "DISABLED");
+    BOOST_CHECK_EQUAL(resp["authority_state"].get_str(), "LOCAL");
+}
+
 BOOST_AUTO_TEST_SUITE_END()
