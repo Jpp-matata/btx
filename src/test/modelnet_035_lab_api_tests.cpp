@@ -861,7 +861,7 @@ BOOST_AUTO_TEST_CASE(lab_methods_keep_state_and_reject_bad_transitions)
         payload.pushKV("trust_attestation_ids", UniValue(UniValue::VARR));
         payload.pushKV("desired_closure_root", hex_b);
         payload.pushKV("policy_id", hex_c);
-        payload.pushKV("valid_until_ms", "10");
+        payload.pushKV("valid_until_ms", "4102444800000");
         payload.pushKV("rollback_of", UniValue());
         payload.pushKV("conflict_resolution_id", UniValue());
         UniValue sign(UniValue::VOBJ);

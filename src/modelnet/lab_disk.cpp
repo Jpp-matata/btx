@@ -94,6 +94,18 @@ bool ReadStringMap(const UniValue& obj, std::map<std::string, std::string>& out)
     return true;
 }
 
+bool ReadHexMap(const UniValue& obj, std::map<std::string, std::string>& out)
+{
+    if (!obj.isObject()) return false;
+    std::map<std::string, UniValue> items;
+    obj.getObjMap(items);
+    for (const auto& item : items) {
+        if (item.first.empty() || !item.second.isStr() || !HexEven(item.second.get_str())) return false;
+        out.emplace(item.first, item.second.get_str());
+    }
+    return true;
+}
+
 bool ReadStringSet(const UniValue& arr, std::set<std::string>& out)
 {
     if (!arr.isArray()) return false;
@@ -311,6 +323,72 @@ bool DecodeImage(const std::string& json, LabDiskImage& image)
     if (root.exists("fleet") && !ReadStringMap(root["fleet"], loaded.fleet)) return false;
     if (root.exists("endpoints") && !ReadStringMap(root["endpoints"], loaded.endpoints)) return false;
     if (root.exists("pause_epochs") && !ReadStringMap(root["pause_epochs"], loaded.pause_epochs)) return false;
+    if (root.exists("checkpoints") && !ReadStringMap(root["checkpoints"], loaded.checkpoints)) return false;
+    if (root.exists("migrations") && !ReadStringSet(root["migrations"], loaded.migrations)) return false;
+    if (root.exists("migration_plans") && !ReadStringSet(root["migration_plans"], loaded.migration_plans)) return false;
+    if (root.exists("operations")) {
+        if (!root["operations"].isObject()) return false;
+        std::map<std::string, UniValue> ops;
+        root["operations"].getObjMap(ops);
+        for (const auto& item : ops) {
+            if (item.first.size() != 96 || !HexEven(item.first) || !item.second.isObject()) return false;
+            LabDiskImage::OperationRow row;
+            if (!FieldStr(item.second, "state", row.state) || row.state.empty() ||
+                !FieldStr(item.second, "physical", row.physical) || row.physical.empty() ||
+                !FieldStr(item.second, "generation", row.generation) || row.generation.empty()) {
+                return false;
+            }
+            loaded.operations.emplace(item.first, std::move(row));
+        }
+    }
+    if (root.exists("generations")) {
+        if (!root["generations"].isArray()) return false;
+        for (size_t i = 0; i < root["generations"].size(); ++i) {
+            if (!root["generations"][i].isStr() || root["generations"][i].get_str().empty()) return false;
+            loaded.generations.push_back(root["generations"][i].get_str());
+        }
+    }
+    if (root.exists("active_generation") && !ReadOptionalString(root, "active_generation", loaded.active_generation)) return false;
+    if (root.exists("previous_generation") && !ReadOptionalString(root, "previous_generation", loaded.previous_generation)) return false;
+    if (root.exists("grants") && !ReadStringMap(root["grants"], loaded.grants)) return false;
+    if (root.exists("bindings") && !ReadStringMap(root["bindings"], loaded.bindings)) return false;
+    if (root.exists("workspaces")) {
+        if (!root["workspaces"].isObject()) return false;
+        std::map<std::string, UniValue> trees;
+        root["workspaces"].getObjMap(trees);
+        for (const auto& item : trees) {
+            if (item.first.empty() || !item.second.isObject()) return false;
+            LabDiskImage::WorkspaceRow row;
+            uint64_t generation = 0;
+            uint64_t next_publication = 0;
+            if (!FieldStr(item.second, "backend", row.backend) || row.backend.empty() ||
+                !FieldStr(item.second, "generation", row.generation) || !ParseU64(row.generation, generation) || generation == 0 ||
+                !FieldStr(item.second, "next_publication", row.next_publication) || !ParseU64(row.next_publication, next_publication) || next_publication == 0) {
+                return false;
+            }
+            if (!item.second.exists("live") || !ReadHexMap(item.second["live"], row.live)) return false;
+            if (item.second.exists("closed")) {
+                if (!item.second["closed"].isObject()) return false;
+                std::map<std::string, UniValue> closed;
+                item.second["closed"].getObjMap(closed);
+                for (const auto& gen : closed) {
+                    uint64_t closed_generation = 0;
+                    if (!ParseU64(gen.first, closed_generation) || closed_generation == 0 || !ReadHexMap(gen.second, row.closed[gen.first])) return false;
+                }
+            }
+            if (item.second.exists("publications")) {
+                if (!item.second["publications"].isArray()) return false;
+                for (size_t i = 0; i < item.second["publications"].size(); ++i) {
+                    uint64_t publication = 0;
+                    if (!item.second["publications"][i].isStr() || !ParseU64(item.second["publications"][i].get_str(), publication) || publication == 0) return false;
+                    row.publications.push_back(item.second["publications"][i].get_str());
+                }
+            }
+            if (item.second.exists("cancelled") && !ReadStringSet(item.second["cancelled"], row.cancelled)) return false;
+            if (item.second.exists("completed") && !ReadStringSet(item.second["completed"], row.completed)) return false;
+            loaded.workspaces.emplace(item.first, std::move(row));
+        }
+    }
     image = std::move(loaded);
     return true;
 }
@@ -418,6 +496,43 @@ std::string EncodeImage(const LabDiskImage& image)
     root.pushKV("fleet", StringMap(image.fleet));
     root.pushKV("endpoints", StringMap(image.endpoints));
     root.pushKV("pause_epochs", StringMap(image.pause_epochs));
+    root.pushKV("checkpoints", StringMap(image.checkpoints));
+    root.pushKV("migrations", StringSet(image.migrations));
+    root.pushKV("migration_plans", StringSet(image.migration_plans));
+    UniValue operations(UniValue::VOBJ);
+    for (const auto& item : image.operations) {
+        UniValue row(UniValue::VOBJ);
+        row.pushKV("state", item.second.state);
+        row.pushKV("physical", item.second.physical);
+        row.pushKV("generation", item.second.generation);
+        operations.pushKV(item.first, std::move(row));
+    }
+    root.pushKV("operations", operations);
+    UniValue generations(UniValue::VARR);
+    for (const std::string& name : image.generations) generations.push_back(name);
+    root.pushKV("generations", generations);
+    root.pushKV("active_generation", image.active_generation);
+    root.pushKV("previous_generation", image.previous_generation);
+    root.pushKV("grants", StringMap(image.grants));
+    root.pushKV("bindings", StringMap(image.bindings));
+    UniValue workspaces(UniValue::VOBJ);
+    for (const auto& item : image.workspaces) {
+        UniValue row(UniValue::VOBJ);
+        row.pushKV("backend", item.second.backend);
+        row.pushKV("generation", item.second.generation);
+        row.pushKV("live", StringMap(item.second.live));
+        UniValue closed(UniValue::VOBJ);
+        for (const auto& gen : item.second.closed) closed.pushKV(gen.first, StringMap(gen.second));
+        row.pushKV("closed", closed);
+        UniValue publications(UniValue::VARR);
+        for (const std::string& publication : item.second.publications) publications.push_back(publication);
+        row.pushKV("publications", publications);
+        row.pushKV("next_publication", item.second.next_publication);
+        row.pushKV("cancelled", StringSet(item.second.cancelled));
+        row.pushKV("completed", StringSet(item.second.completed));
+        workspaces.pushKV(item.first, std::move(row));
+    }
+    root.pushKV("workspaces", workspaces);
     return root.write();
 }
 

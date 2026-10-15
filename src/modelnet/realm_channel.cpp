@@ -795,6 +795,37 @@ std::vector<std::pair<std::string, std::string>> RealmRollout::SavedEndpoints() 
     return {m_endpoint_state.begin(), m_endpoint_state.end()};
 }
 
+std::vector<std::string> RealmRollout::StagedGenerations() const
+{
+    std::vector<std::pair<int64_t, std::string>> ordered;
+    ordered.reserve(m_generations.size());
+    for (const auto& item : m_generations) ordered.emplace_back(item.second.order, item.first);
+    std::sort(ordered.begin(), ordered.end());
+    std::vector<std::string> names;
+    names.reserve(ordered.size());
+    for (const auto& item : ordered) names.push_back(item.second);
+    return names;
+}
+
+bool RealmRollout::RestoreGenerations(const std::vector<std::string>& ordered, const std::string& active, const std::string& previous, std::string& err)
+{
+    for (const std::string& name : ordered) {
+        if (!StageGeneration(name, {}, err)) return false;
+    }
+    if (!active.empty() && m_generations.find(active) == m_generations.end()) {
+        err = "BTX035_POLICY";
+        return false;
+    }
+    if (!previous.empty() && m_generations.find(previous) == m_generations.end()) {
+        err = "BTX035_POLICY";
+        return false;
+    }
+    m_active_generation = active;
+    m_previous_generation = previous;
+    err.clear();
+    return true;
+}
+
 bool RealmRollout::WriteOfflineBundle(const std::filesystem::path& path, const std::string& realm, std::string& err) const
 {
     const auto it = m_realms.find(realm);

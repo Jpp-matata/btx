@@ -223,7 +223,7 @@ def channel_payload(realm_id: str, policy_id: str, digest: str, sequence: str, p
         "trust_attestation_ids": [],
         "desired_closure_root": digest,
         "policy_id": policy_id,
-        "valid_until_ms": "10",
+        "valid_until_ms": "4102444800000",
         "rollback_of": None,
         "conflict_resolution_id": None,
     }

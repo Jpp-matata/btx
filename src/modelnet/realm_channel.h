@@ -106,6 +106,12 @@ public:
     std::vector<std::pair<std::string, std::string>> SavedFleet() const;
     std::vector<std::pair<std::string, std::string>> SavedEndpoints() const;
 
+    /** Staged generation names in the order they were first staged. */
+    std::vector<std::string> StagedGenerations() const;
+
+    /** Reinstall staged names, then the active and previous pointers. */
+    bool RestoreGenerations(const std::vector<std::string>& ordered, const std::string& active, const std::string& previous, std::string& err);
+
     /** Write a deterministic text bundle for realm. The first line is BTX035-OFFLINE-1,
      *  then realm, threshold, pinned ids, revoked ids, channel sequence and body hash.
      *  A realm with no policy fails BTX035_REALM. An unwritable path fails BTX035_BUNDLE.

@@ -152,6 +152,36 @@ struct Store {
     std::vector<std::string> endpoint_receipts;
 };
 
+std::string HexBytes(const std::vector<unsigned char>& bytes)
+{
+    static const char* digits = "0123456789abcdef";
+    std::string out(bytes.size() * 2, '\0');
+    for (size_t i = 0; i < bytes.size(); ++i) {
+        out[i * 2] = digits[bytes[i] >> 4];
+        out[i * 2 + 1] = digits[bytes[i] & 0x0f];
+    }
+    return out;
+}
+
+bool BytesFromHex(const std::string& hex, std::vector<unsigned char>& out)
+{
+    if (hex.size() % 2 != 0) return false;
+    out.clear();
+    out.reserve(hex.size() / 2);
+    for (size_t i = 0; i < hex.size(); i += 2) {
+        auto nibble = [](char c) -> int {
+            if (c >= '0' && c <= '9') return c - '0';
+            if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+            return -1;
+        };
+        const int hi = nibble(hex[i]);
+        const int lo = nibble(hex[i + 1]);
+        if (hi < 0 || lo < 0) return false;
+        out.push_back(static_cast<unsigned char>((hi << 4) | lo));
+    }
+    return true;
+}
+
 void ImageFromStore(const Store& store, LabDiskImage& image)
 {
     image = LabDiskImage{};
@@ -199,6 +229,40 @@ void ImageFromStore(const Store& store, LabDiskImage& image)
     for (const auto& item : store.rollout.SavedFleet()) image.fleet.emplace(item.first, item.second);
     for (const auto& item : store.rollout.SavedEndpoints()) image.endpoints.emplace(item.first, item.second);
     for (const auto& item : store.pause_epoch) image.pause_epochs.emplace(item.first, std::to_string(item.second));
+    image.checkpoints = store.checkpoints;
+    image.migrations = store.migrations;
+    image.migration_plans = store.migration_plans;
+    for (const auto& item : store.operations) {
+        LabDiskImage::OperationRow row;
+        row.state = item.second.state;
+        row.physical = item.second.physical;
+        row.generation = std::to_string(item.second.generation);
+        image.operations.emplace(item.first, std::move(row));
+    }
+    image.generations = store.rollout.StagedGenerations();
+    image.active_generation = store.rollout.ActiveGeneration();
+    image.previous_generation = store.rollout.PreviousGeneration();
+    image.grants = store.grants;
+    image.bindings = store.bindings;
+    for (const std::string& name : store.workspaces.TreeNames()) {
+        WorkspaceBook::TreeImage tree;
+        if (!store.workspaces.ExportTree(name, tree)) continue;
+        LabDiskImage::WorkspaceRow row;
+        const auto backend = store.workspace_backend.find(name);
+        row.backend = backend == store.workspace_backend.end() ? "OPERATION_JOURNAL" : backend->second;
+        row.generation = std::to_string(tree.generation);
+        row.next_publication = std::to_string(tree.next_publication);
+        for (const auto& file : tree.live) row.live.emplace(file.first, HexBytes(file.second));
+        for (const auto& gen : tree.closed) {
+            std::map<std::string, std::string> files;
+            for (const auto& file : gen.second) files.emplace(file.first, HexBytes(file.second));
+            row.closed.emplace(std::to_string(gen.first), std::move(files));
+        }
+        for (uint64_t publication : tree.publication_ids) row.publications.push_back(std::to_string(publication));
+        row.cancelled = tree.cancelled;
+        row.completed = tree.completed;
+        image.workspaces.emplace(name, std::move(row));
+    }
     std::vector<LabDiskObject> model_rows;
     for (const auto& item : store.models) {
         LabDiskObject row;
@@ -344,6 +408,62 @@ void ImageToStore(const LabDiskImage& image, Store& store)
         int64_t epoch = 0;
         if (!ParseDec(item.second, epoch) || epoch < 0) continue;
         store.pause_epoch[item.first] = static_cast<uint64_t>(epoch);
+    }
+    store.checkpoints = image.checkpoints;
+    store.migrations = image.migrations;
+    store.migration_plans = image.migration_plans;
+    for (const auto& item : image.operations) {
+        int64_t generation = 0;
+        if (!ParseDec(item.second.generation, generation) || generation < 0) continue;
+        Operation op;
+        op.state = item.second.state;
+        op.physical = item.second.physical;
+        op.generation = static_cast<uint64_t>(generation);
+        store.operations.emplace(item.first, op);
+    }
+    if (!image.generations.empty() || !image.active_generation.empty() || !image.previous_generation.empty()) {
+        std::string restore_err;
+        store.rollout.RestoreGenerations(image.generations, image.active_generation, image.previous_generation, restore_err);
+    }
+    store.grants = image.grants;
+    store.bindings = image.bindings;
+    for (const auto& item : image.workspaces) {
+        int64_t generation = 0;
+        int64_t next_publication = 0;
+        if (!ParseDec(item.second.generation, generation) || generation <= 0 ||
+            !ParseDec(item.second.next_publication, next_publication) || next_publication <= 0) {
+            continue;
+        }
+        WorkspaceBook::TreeImage tree;
+        tree.generation = static_cast<uint64_t>(generation);
+        tree.next_publication = static_cast<uint64_t>(next_publication);
+        bool files_ok = true;
+        for (const auto& file : item.second.live) {
+            std::vector<unsigned char> bytes;
+            if (!BytesFromHex(file.second, bytes)) files_ok = false;
+            else tree.live.emplace(file.first, std::move(bytes));
+        }
+        for (const auto& gen : item.second.closed) {
+            int64_t closed_generation = 0;
+            if (!ParseDec(gen.first, closed_generation) || closed_generation <= 0) files_ok = false;
+            std::map<std::string, std::vector<unsigned char>> files;
+            for (const auto& file : gen.second) {
+                std::vector<unsigned char> bytes;
+                if (!BytesFromHex(file.second, bytes)) files_ok = false;
+                else files.emplace(file.first, std::move(bytes));
+            }
+            if (closed_generation > 0) tree.closed.emplace(static_cast<uint64_t>(closed_generation), std::move(files));
+        }
+        for (const std::string& publication : item.second.publications) {
+            int64_t id = 0;
+            if (!ParseDec(publication, id) || id <= 0) files_ok = false;
+            else tree.publication_ids.push_back(static_cast<uint64_t>(id));
+        }
+        tree.cancelled = item.second.cancelled;
+        tree.completed = item.second.completed;
+        std::string restore_err;
+        if (!files_ok || !store.workspaces.ImportTree(item.first, tree, restore_err)) continue;
+        store.workspace_backend[item.first] = item.second.backend;
     }
 }
 
@@ -632,6 +752,16 @@ bool HexN(const std::string& hex, size_t n)
     for (unsigned char c : hex) {
         if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))) return false;
     }
+    return true;
+}
+
+bool ChannelWindowOpen(const UniValue& payload, std::string& err)
+{
+    if (!payload.isObject() || !payload.exists("valid_until_ms") || !payload["valid_until_ms"].isStr()) return Fail(err, "BTX035_SCHEMA");
+    int64_t until = 0;
+    if (!ParseDec(payload["valid_until_ms"].get_str(), until)) return Fail(err, "BTX035_SCHEMA");
+    if (until <= NowMs()) return Fail(err, "BTX035_EXPIRED");
+    err.clear();
     return true;
 }
 
@@ -1908,6 +2038,11 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
                 std::vector<ExchangeObject> objects;
                 if (!VerifyExchangeManifest(manifest, objects, err)) return false;
                 for (const ExchangeObject& object : objects) {
+                    if (object.kind == "piece" && static_cast<int64_t>(object.content.size()) > max_bytes) {
+                        return Fail(err, "BTX035_LIMIT_EXCEEDED");
+                    }
+                }
+                for (const ExchangeObject& object : objects) {
                     if (!AcceptModelObject(store, object, err)) return false;
                 }
                 if (ModelBytesMatch(store, digest, err)) {
@@ -2062,8 +2197,22 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
     }
     if (method == "lab.git_attest") {
         if (!Expect(store, req, "attest|" + RequireStr(req, "snapshot_id"), err)) return false;
-        if (!store.snapshots.count(RequireStr(req, "snapshot_id"))) return Fail(err, "BTX035_NOT_FOUND");
-        return Rec(result, Id96("attest|" + RequireStr(req, "snapshot_id")), "ATTESTED");
+        const std::string snapshot = RequireStr(req, "snapshot_id");
+        if (!store.snapshots.count(snapshot)) return Fail(err, "BTX035_NOT_FOUND");
+        const std::string purpose = RequireStr(req, "purpose");
+        if (purpose.empty()) return Fail(err, "BTX035_SCHEMA");
+        std::string closure;
+        if (req.exists("build_closure_id") && req["build_closure_id"].isStr()) closure = req["build_closure_id"].get_str();
+        if (!closure.empty()) {
+            if (!HexN(closure, 96)) return Fail(err, "BTX035_SCHEMA");
+            std::string match_err;
+            const bool bytes_ok = ModelBytesMatch(store, closure, match_err);
+            if (!bytes_ok && match_err == "BTX035_ID_MISMATCH") return Fail(err, "BTX035_ID_MISMATCH");
+            if (!bytes_ok && !store.records.count(closure) && !store.snapshots.count(closure)) return Fail(err, "BTX035_NOT_FOUND");
+        }
+        const std::string attestation = Id96("attest|" + snapshot + "|" + purpose + "|" + closure);
+        store.records[attestation] = snapshot + "\n" + purpose + "\n" + closure;
+        return Rec(result, attestation, "ATTESTED");
     }
     if (method == "lab.git_publish_ref") {
         if (!Expect(store, req, "ref|" + RequireStr(req, "update_id"), err)) return false;
@@ -2329,13 +2478,15 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
         if (!Expect(store, req, "cp|" + RequireStr(req, "stream_id"), err)) return false;
         const std::string cp = Id96("cp|" + RequireStr(req, "stream_id") + "|" + RequireStr(req, "through_sequence"));
         store.checkpoints[cp] = RequireStr(req, "stream_id");
+        store.records["witness|" + cp] = req.write();
         return Rec(result, cp, "CHECKPOINT");
     }
     if (method == "lab.journal_proof") {
         const std::string cp = RequireStr(req, "checkpoint_id");
-        if (!store.checkpoints.count(cp)) return Fail(err, "BTX035_NOT_FOUND");
+        const auto checkpoint = store.checkpoints.find(cp);
+        if (checkpoint == store.checkpoints.end()) return Fail(err, "BTX035_NOT_FOUND");
         result.pushKV("proof_ref", RefOf("POLICY_BUNDLE", cp));
-        result.pushKV("event_ref", UniValue());
+        result.pushKV("event_ref", RefOf("POLICY_BUNDLE", checkpoint->second));
         return true;
     }
     if (method == "lab.journal_witness") {
@@ -2424,6 +2575,7 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
         }
         int64_t sequence = 0;
         if (!ParseDec(payload["sequence"].get_str(), sequence)) return Fail(err, "BTX035_SCHEMA");
+        if (!ChannelWindowOpen(payload, err)) return false;
         const std::string key = payload["realm_id"].get_str() + "\n" + payload["channel"].get_str();
         if (!store.rollout.PublishChannel(key, sequence, RequireStr(req, "update_id"), err)) return false;
         return Rec(result, RequireStr(req, "update_id"), "PUBLISHED");
@@ -2475,8 +2627,11 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
             !payload["realm_id"].isStr() || !payload["channel"].isStr()) {
             return Fail(err, "BTX035_SCHEMA");
         }
-        const int64_t current = store.rollout.ChannelSequence(payload["realm_id"].get_str() + "\n" + payload["channel"].get_str());
+        if (!ChannelWindowOpen(payload, err)) return false;
+        const std::string key = payload["realm_id"].get_str() + "\n" + payload["channel"].get_str();
+        const int64_t current = store.rollout.ChannelSequence(key);
         if (current < 0 || sequence <= current) return Fail(err, "BTX035_ROLLBACK");
+        if (!store.rollout.PublishChannel(key, sequence, update_id, err)) return false;
         store.plans[plan] = "ROLLED_BACK";
         return OpOut(store, result, id, "COMPLETE", "STOPPED_QUIESCENT");
     }
@@ -2521,6 +2676,8 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
         result.pushKV("observed_ms", "0");
         result.pushKV("freshness_limit_ms", "10000");
         result.pushKV("pause_epoch", std::to_string(store.pause_epoch[plan]));
+        result.pushKV("active_generation", store.rollout.ActiveGeneration());
+        result.pushKV("previous_generation", store.rollout.PreviousGeneration());
         result.pushKV("endpoint_query_method", "lab.rollout_endpoints");
         return true;
     }
@@ -2542,6 +2699,19 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
             const std::string ring = payload["ring_id"].get_str();
             const std::string rollout_id = payload["rollout_id"].get_str();
             if (state == "ACTIVE") {
+                UniValue channel_env;
+                std::string channel_err;
+                const std::string update_id = payload["channel_update_id"].isStr() ? payload["channel_update_id"].get_str() : "";
+                if (!LoadEnvelope(store, update_id, channel_env, channel_err) || !channel_env["body"]["record_type"].isStr() ||
+                    channel_env["body"]["record_type"].get_str() != "ChannelUpdate") {
+                    return Fail(err, "BTX035_NOT_FOUND");
+                }
+                if (!ChannelWindowOpen(channel_env["body"]["payload"], err)) {
+                    std::string observe_err;
+                    store.rollout.Observe(device, "UNKNOWN", observe_err);
+                    store.rollout.ObserveEndpoint(device, "UNKNOWN", observe_err);
+                    return false;
+                }
                 const std::string closure = payload["observed_closure_root"].isStr() ? payload["observed_closure_root"].get_str() : "";
                 if (!ModelBytesMatch(store, closure, err)) {
                     std::string observe_err;
@@ -2552,6 +2722,10 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
                 if (!store.rollout.Observe(device, "HEALTHY", err)) return false;
                 if (!store.rollout.ObserveEndpoint(device, "ACTIVE", err)) return false;
                 store.verified_rings[rollout_id].insert(ring);
+                if (!store.rollout.StageGeneration(rollout_id, {}, err)) return false;
+                if (store.verified_rings[rollout_id].size() >= 2) {
+                    if (!store.rollout.ActivateGeneration(rollout_id, true, true, err)) return false;
+                }
                 if (store.plans.count(rollout_id)) {
                     store.plans[rollout_id] = store.verified_rings[rollout_id].size() >= 2 ? "ACTIVE" : "CANARY";
                 }
@@ -2649,16 +2823,21 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
     }
     if (method == "lab.capsule_resolve") {
         const std::string capsule = RequireStr(req, "capsule_id");
+        int64_t max_bytes = 0;
+        if (!ParseDec(RequireStr(req, "max_bytes"), max_bytes) || max_bytes < 0) return Fail(err, "BTX035_SCHEMA");
         result.pushKV("plan_id", Id96("plan|" + capsule));
+        std::string retained;
+        if (store.models.count(capsule)) retained = store.models[capsule];
+        else if (store.records.count(capsule)) retained = store.records[capsule];
         UniValue missing(UniValue::VARR);
-        if (!store.records.count(capsule)) {
+        if (retained.empty() || static_cast<int64_t>(retained.size()) > max_bytes) {
             UniValue ref = RefOf("RECORD", HexN(capsule, 96) ? capsule : Id96(capsule));
             ref.pushKV("record_type", "ResearchCapsule");
             missing.push_back(ref);
         }
         result.pushKV("missing_refs", missing);
         result.pushKV("untrusted_refs", UniValue(UniValue::VARR));
-        result.pushKV("estimated_bytes", "0");
+        result.pushKV("estimated_bytes", std::to_string(retained.size()));
         return true;
     }
     if (method == "lab.state_get") {

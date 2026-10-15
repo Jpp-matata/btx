@@ -184,6 +184,47 @@ bool WorkspaceBook::Complete(const std::string& name, const std::string& op_id, 
     return true;
 }
 
+std::vector<std::string> WorkspaceBook::TreeNames() const
+{
+    std::vector<std::string> names;
+    names.reserve(m_trees.size());
+    for (const auto& item : m_trees) names.push_back(item.first);
+    return names;
+}
+
+bool WorkspaceBook::ExportTree(const std::string& name, TreeImage& out) const
+{
+    const Tree* tree = Find(name);
+    if (tree == nullptr) return false;
+    out.generation = tree->generation;
+    out.live = tree->live;
+    out.closed = tree->closed;
+    out.publication_ids = tree->publication_ids;
+    out.next_publication = tree->next_publication;
+    out.cancelled = tree->cancelled;
+    out.completed = tree->completed;
+    return true;
+}
+
+bool WorkspaceBook::ImportTree(const std::string& name, const TreeImage& image, std::string& err)
+{
+    err.clear();
+    if (name.empty() || m_trees.find(name) != m_trees.end() || image.generation == 0 || image.next_publication == 0) {
+        err = "BTX035_WORKSPACE";
+        return false;
+    }
+    Tree tree;
+    tree.generation = image.generation;
+    tree.live = image.live;
+    tree.closed = image.closed;
+    tree.publication_ids = image.publication_ids;
+    tree.next_publication = image.next_publication;
+    tree.cancelled = image.cancelled;
+    tree.completed = image.completed;
+    m_trees.emplace(name, std::move(tree));
+    return true;
+}
+
 uint64_t WorkspaceBook::Generation(const std::string& name) const
 {
     const Tree* tree = Find(name);

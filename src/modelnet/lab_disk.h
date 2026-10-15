@@ -60,6 +60,31 @@ struct LabDiskImage {
     std::map<std::string, std::string> fleet;
     std::map<std::string, std::string> endpoints;
     std::map<std::string, std::string> pause_epochs;
+    std::map<std::string, std::string> checkpoints;
+    std::set<std::string> migrations;
+    std::set<std::string> migration_plans;
+    struct OperationRow {
+        std::string state;
+        std::string physical;
+        std::string generation;
+    };
+    std::map<std::string, OperationRow> operations;
+    std::vector<std::string> generations;
+    std::string active_generation;
+    std::string previous_generation;
+    std::map<std::string, std::string> grants;
+    std::map<std::string, std::string> bindings;
+    struct WorkspaceRow {
+        std::string backend;
+        std::string generation{"1"};
+        std::map<std::string, std::string> live;
+        std::map<std::string, std::map<std::string, std::string>> closed;
+        std::vector<std::string> publications;
+        std::string next_publication{"1"};
+        std::set<std::string> cancelled;
+        std::set<std::string> completed;
+    };
+    std::map<std::string, WorkspaceRow> workspaces;
 };
 
 /** BTX035_LAB_DIR, or empty when unset. No relative or home fallback. */

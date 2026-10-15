@@ -36,6 +36,20 @@ public:
     bool Complete(const std::string& name, const std::string& op_id, uint64_t generation, const std::string& path,
                   const std::vector<unsigned char>& bytes, std::string& err);
 
+    struct TreeImage {
+        uint64_t generation{1};
+        std::map<std::string, std::vector<unsigned char>> live;
+        std::map<uint64_t, std::map<std::string, std::vector<unsigned char>>> closed;
+        std::vector<uint64_t> publication_ids;
+        uint64_t next_publication{1};
+        std::set<std::string> cancelled;
+        std::set<std::string> completed;
+    };
+
+    std::vector<std::string> TreeNames() const;
+    bool ExportTree(const std::string& name, TreeImage& out) const;
+    bool ImportTree(const std::string& name, const TreeImage& image, std::string& err);
+
     uint64_t Generation(const std::string& name) const;
     bool Read(const std::string& name, const std::string& path, std::vector<unsigned char>& bytes) const;
     std::vector<uint64_t> PublicationIds(const std::string& name) const;
