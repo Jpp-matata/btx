@@ -223,8 +223,8 @@ def main() -> int:
 
         attestations = []
         for idem, checks in (
-            ("wan-promo-attest-0001", {"closure": "checked"}),
-            ("wan-promo-attest-0002", {"policy": "checked"}),
+            ("wan-promo-attest-0001", {"closure": "checked", "realm_id": destination_id}),
+            ("wan-promo-attest-0002", {"policy": "checked", "realm_id": destination_id}),
         ):
             attested = lab(datadir, port, "lab.promotion_attest", {
                 "promotion_id": promotion_id,
@@ -237,6 +237,20 @@ def main() -> int:
             if len(attestation_id) != 96:
                 raise RuntimeError(json.dumps(attested))
             attestations.append(attestation_id)
+        if len(attestations) != 2 or attestations[0] == attestations[1]:
+            raise RuntimeError("the two attestations were not distinct")
+        wrong = rpc_fail(
+            datadir, port, "lab035", "lab.promotion_attest",
+            json.dumps({
+                "promotion_id": promotion_id,
+                "checks_ref": {"closure": "checked", "realm_id": source_id},
+                "valid_until_ms": "10",
+                "idempotency_key": "wan-promo-wrong-realm1",
+                "expected_state": None,
+            }),
+        )
+        if "BTX035_REALM" not in wrong:
+            raise RuntimeError(wrong.strip())
 
         verified = lab(datadir, port, "lab.promotion_verify", {
             "promotion_id": promotion_id,
@@ -306,6 +320,18 @@ def main() -> int:
         stop_node(ingress[1], ingress[2], ingress[3])
 
         _mname, mdir, mport, _mproc = mirror_a
+        expired = rpc_fail(
+            mdir, mport, "lab035", "lab.bundle_import",
+            json.dumps({
+                "local_source": BUNDLE_NAME,
+                "destination_realm_id": destination_id,
+                "minimum_policy_epoch": "1",
+                "idempotency_key": "wan-bundle-import-old1",
+                "expected_state": None,
+            }),
+        )
+        if "BTX035_POLICY" not in expired:
+            raise RuntimeError(expired.strip())
         imported = lab(mdir, mport, "lab.bundle_import", {
             "local_source": BUNDLE_NAME,
             "destination_realm_id": destination_id,

@@ -931,6 +931,7 @@ BOOST_AUTO_TEST_CASE(model_pieces_survive_reload_and_need_two_roots)
     const std::string promotion = prepared_promo["record_id"].get_str();
     UniValue checks(UniValue::VOBJ);
     checks.pushKV("closure", "checked");
+    checks.pushKV("realm_id", destination_id);
     UniValue attest(UniValue::VOBJ);
     attest.pushKV("promotion_id", promotion);
     attest.pushKV("checks_ref", checks);
@@ -945,6 +946,14 @@ BOOST_AUTO_TEST_CASE(model_pieces_survive_reload_and_need_two_roots)
     attest.pushKV("idempotency_key", "idempotency-piece-att-2");
     BOOST_REQUIRE(LabCall("lab.promotion_attest", attest, attested, err));
     const std::string pin_b = attested["record_id"].get_str();
+    BOOST_CHECK(pin_a != pin_b);
+    UniValue wrong(UniValue::VOBJ);
+    wrong.pushKV("closure", "checked");
+    wrong.pushKV("realm_id", source_id);
+    attest.pushKV("checks_ref", wrong);
+    attest.pushKV("idempotency_key", "idempotency-piece-att-x");
+    BOOST_CHECK(!LabCall("lab.promotion_attest", attest, attested, err));
+    BOOST_CHECK_EQUAL(err, "BTX035_REALM");
     UniValue pins(UniValue::VARR);
     pins.push_back(pin_a);
     pins.push_back(pin_b);
@@ -956,6 +965,16 @@ BOOST_AUTO_TEST_CASE(model_pieces_survive_reload_and_need_two_roots)
     BOOST_REQUIRE(LabCall("lab.promotion_verify", verify, verified, err));
     BOOST_CHECK_EQUAL(verified["state"].get_str(), "COMPLETE");
     BOOST_CHECK_EQUAL(verified["threshold"].get_str(), "2");
+    UniValue repeated(UniValue::VARR);
+    repeated.push_back(pin_a);
+    repeated.push_back(pin_a);
+    UniValue again(UniValue::VOBJ);
+    again.pushKV("promotion_id", promotion);
+    again.pushKV("attestation_ids", repeated);
+    again.pushKV("policy_id", policy_id);
+    UniValue duplicated;
+    BOOST_REQUIRE(LabCall("lab.promotion_verify", again, duplicated, err));
+    BOOST_CHECK_EQUAL(duplicated["state"].get_str(), "FAILED");
 
     UniValue revoke_checks(UniValue::VOBJ);
     revoke_checks.pushKV("revoke_attestor", pin_a);
@@ -1029,7 +1048,7 @@ BOOST_AUTO_TEST_CASE(model_pieces_survive_reload_and_need_two_roots)
     BOOST_REQUIRE(LabCall("lab.rollout_status", roll_status, status, err));
     BOOST_CHECK_EQUAL(status["state"].get_str(), "STAGED");
 
-    auto receipt = [&](const char* device, const char* ring, const char* state, const char* idem) {
+    auto receipt = [&](const char* device, const char* ring, const char* state, const char* idem, const UniValue& authorization) {
         UniValue payload(UniValue::VOBJ);
         payload.pushKV("rollout_id", plan_id);
         payload.pushKV("channel_update_id", update_0);
@@ -1044,7 +1063,7 @@ BOOST_AUTO_TEST_CASE(model_pieces_survive_reload_and_need_two_roots)
         payload.pushKV("receipt_sequence", "1");
         payload.pushKV("previous_receipt_id", Nullable());
         payload.pushKV("controller_pause_epoch", "0");
-        payload.pushKV("activation_authorization_id", Nullable());
+        payload.pushKV("activation_authorization_id", authorization);
         payload.pushKV("observer_key_id", Nullable());
         const std::string receipt_id = SignAndStore("DeploymentReceipt", payload, idem);
         UniValue observe(UniValue::VOBJ);
@@ -1056,16 +1075,28 @@ BOOST_AUTO_TEST_CASE(model_pieces_survive_reload_and_need_two_roots)
         BOOST_CHECK_EQUAL(observed["state"].get_str(), "OBSERVED");
         return observed;
     };
-    UniValue first = receipt("device-a", "canary", "ACTIVE", "idem-piece-rec-a");
+    UniValue approval(UniValue::VOBJ);
+    approval.pushKV("proposal_id", plan_id);
+    approval.pushKV("policy_id", policy_id);
+    approval.pushKV("decision", "APPROVE");
+    approval.pushKV("decision_context", plan_id);
+    const std::string authorization = SignAndStore("GovernanceApproval", approval, "idem-piece-owner-auth");
+    UniValue auth_id(authorization);
+    UniValue first = receipt("device-a", "canary", "ACTIVE", "idem-piece-rec-a", Nullable());
     BOOST_CHECK_EQUAL(first["endpoint_state"].get_str(), "ACTIVE");
     BOOST_REQUIRE(LabCall("lab.rollout_status", roll_status, status, err));
     BOOST_CHECK_EQUAL(status["state"].get_str(), "CANARY");
-    UniValue second = receipt("device-b", "rest", "ACTIVE", "idem-piece-rec-b");
+    UniValue held = receipt("device-b", "rest", "ACTIVE", "idem-piece-rec-hold", Nullable());
+    BOOST_CHECK_EQUAL(held["endpoint_state"].get_str(), "ACTIVE");
+    BOOST_REQUIRE(LabCall("lab.rollout_status", roll_status, status, err));
+    BOOST_CHECK_EQUAL(status["state"].get_str(), "CANARY");
+    BOOST_CHECK(status["active_generation"].get_str().empty());
+    UniValue second = receipt("device-b", "rest", "ACTIVE", "idem-piece-rec-b", auth_id);
     BOOST_CHECK_EQUAL(second["endpoint_state"].get_str(), "ACTIVE");
     BOOST_REQUIRE(LabCall("lab.rollout_status", roll_status, status, err));
     BOOST_CHECK_EQUAL(status["state"].get_str(), "ACTIVE");
     BOOST_CHECK_EQUAL(status["active_generation"].get_str(), plan_id);
-    UniValue offline = receipt("device-c", "rest", "UNKNOWN", "idem-piece-rec-c");
+    UniValue offline = receipt("device-c", "rest", "UNKNOWN", "idem-piece-rec-c", Nullable());
     BOOST_CHECK_EQUAL(offline["endpoint_state"].get_str(), "UNKNOWN");
     BOOST_REQUIRE(LabCall("lab.rollout_status", roll_status, status, err));
     BOOST_CHECK(std::stoi(status["counts"]["unknown"].get_str()) >= 1);

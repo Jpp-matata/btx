@@ -879,6 +879,21 @@ bool LoadEnvelope(Store& store, const std::string& id, UniValue& envelope, std::
     return true;
 }
 
+bool OwnerActivation(Store& store, const UniValue& payload, const std::string& rollout_id)
+{
+    if (!payload["activation_authorization_id"].isStr()) return false;
+    const std::string auth = payload["activation_authorization_id"].get_str();
+    if (!HexN(auth, 96)) return false;
+    UniValue envelope;
+    std::string load_err;
+    if (!LoadEnvelope(store, auth, envelope, load_err)) return false;
+    const UniValue& body = envelope["body"];
+    if (!body["record_type"].isStr() || body["record_type"].get_str() != "GovernanceApproval") return false;
+    const UniValue& approval = body["payload"];
+    return approval.isObject() && approval["decision"].isStr() && approval["decision"].get_str() == "APPROVE" &&
+           approval["decision_context"].isStr() && approval["decision_context"].get_str() == rollout_id;
+}
+
 fs::path BundleDir()
 {
     if (const char* env = std::getenv("BTX035_BUNDLE_DIR")) return fs::path(env);
@@ -2194,13 +2209,16 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
                     if (saw_piece) {
                         std::string joined;
                         if (!JoinModelPieces(chunks, joined, err)) return false;
+                        std::string got;
+                        const std::vector<unsigned char> raw_joined(joined.begin(), joined.end());
+                        if (!GitObjectDigest("model", Span<const unsigned char>{raw_joined.data(), raw_joined.size()}, got, err)) return false;
+                        if (got != digest) return Fail(err, "BTX035_ID_MISMATCH");
                         store.models[digest] = joined;
                         store.model_pieces[digest] = std::move(chunks);
-                        if (!ModelBytesMatch(store, digest, err)) return false;
                         if (static_cast<int64_t>(joined.size()) > max_bytes) {
                             return OpOut(store, result, id, "FAILED", "STOPPED_QUIESCENT");
                         }
-                        remember(joined);
+                        remember(store.models[digest]);
                         return OpOut(store, result, id, "COMPLETE", "STOPPED_QUIESCENT");
                     }
                     if (!piece_err.empty() && piece_err != "BTX035_NOT_FOUND" && piece_err != "BTX035_TRANSPORT") {
@@ -2272,13 +2290,19 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
         if (method == "lab.promotion_verify") {
             bool ready = store.records.count(RequireStr(req, "promotion_id")) != 0 && req["attestation_ids"].isArray() && !req["attestation_ids"].empty();
             const std::string promotion_id = RequireStr(req, "promotion_id");
+            std::set<std::string> unique_pins;
             if (ready) {
                 for (size_t i = 0; i < req["attestation_ids"].size(); ++i) {
                     if (!req["attestation_ids"][i].isStr()) {
                         ready = false;
                         continue;
                     }
-                    const auto record = store.records.find(req["attestation_ids"][i].get_str());
+                    const std::string pin = req["attestation_ids"][i].get_str();
+                    if (!unique_pins.insert(pin).second) {
+                        ready = false;
+                        continue;
+                    }
+                    const auto record = store.records.find(pin);
                     if (record == store.records.end()) {
                         ready = false;
                         continue;
@@ -2297,10 +2321,7 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
                 UniValue stored;
                 if (stored.read(store.records[RequireStr(req, "promotion_id")]) && stored.isObject() &&
                     stored.exists("destination_realm_id") && stored["destination_realm_id"].isStr()) {
-                    std::vector<std::string> pins;
-                    for (size_t i = 0; i < req["attestation_ids"].size(); ++i) {
-                        pins.push_back(req["attestation_ids"][i].get_str());
-                    }
+                    std::vector<std::string> pins(unique_pins.begin(), unique_pins.end());
                     if (!store.rollout.SetPolicy(stored["destination_realm_id"].get_str(), static_cast<int>(pins.size()), pins, err)) {
                         return false;
                     }
@@ -2750,9 +2771,17 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
         const std::string promotion = RequireStr(req, "promotion_id");
         if (!store.records.count(promotion)) return Fail(err, "BTX035_NOT_FOUND");
         if (!req["checks_ref"].isObject() || req["checks_ref"].getKeys().empty()) return Fail(err, "BTX035_SCHEMA");
-        if (req["checks_ref"].exists("revoke_attestor") && req["checks_ref"]["revoke_attestor"].isStr() &&
-            req["checks_ref"].exists("realm_id") && req["checks_ref"]["realm_id"].isStr()) {
-            const std::string realm = req["checks_ref"]["realm_id"].get_str();
+        UniValue prepared;
+        if (!prepared.read(store.records[promotion]) || !prepared.isObject() || !prepared["destination_realm_id"].isStr()) {
+            return Fail(err, "BTX035_SCHEMA");
+        }
+        const std::string destination = prepared["destination_realm_id"].get_str();
+        if (!req["checks_ref"].exists("realm_id") || !req["checks_ref"]["realm_id"].isStr() ||
+            req["checks_ref"]["realm_id"].get_str() != destination) {
+            return Fail(err, "BTX035_REALM");
+        }
+        if (req["checks_ref"].exists("revoke_attestor") && req["checks_ref"]["revoke_attestor"].isStr()) {
+            const std::string realm = destination;
             const std::string attestor = req["checks_ref"]["revoke_attestor"].get_str();
             const int before = store.rollout.Threshold(realm);
             if (before < 1) return Fail(err, "BTX035_REALM");
@@ -2761,7 +2790,9 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
             result.pushKV("threshold", std::to_string(before));
             return Rec(result, Id96("revoke|" + realm + "|" + attestor), "REVOKED");
         }
-        const std::string attestation = Id96("patt|" + promotion);
+        const std::string idem = RequireStr(req, "idempotency_key");
+        if (idem.size() < 16) return Fail(err, "BTX035_SCHEMA");
+        const std::string attestation = Id96("patt|" + promotion + "|" + idem);
         store.records[attestation] = req.write();
         return Rec(result, attestation, "ATTESTED");
     }
@@ -2927,11 +2958,13 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
                 if (!store.rollout.ObserveEndpoint(device, "ACTIVE", err)) return false;
                 store.verified_rings[rollout_id].insert(ring);
                 if (!store.rollout.StageGeneration(rollout_id, {}, err)) return false;
-                if (store.verified_rings[rollout_id].size() >= 2) {
+                const bool owner_ok = OwnerActivation(store, payload, rollout_id);
+                if (store.verified_rings[rollout_id].size() >= 2 && owner_ok) {
                     if (!store.rollout.ActivateGeneration(rollout_id, true, true, err)) return false;
                 }
                 if (store.plans.count(rollout_id)) {
-                    store.plans[rollout_id] = store.verified_rings[rollout_id].size() >= 2 ? "ACTIVE" : "CANARY";
+                    const bool active = store.verified_rings[rollout_id].size() >= 2 && owner_ok;
+                    store.plans[rollout_id] = active ? "ACTIVE" : "CANARY";
                 }
             } else if (state == "UNKNOWN") {
                 if (!store.rollout.Observe(device, "UNKNOWN", err)) return false;

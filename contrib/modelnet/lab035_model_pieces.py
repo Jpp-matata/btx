@@ -230,7 +230,7 @@ def channel_payload(realm_id: str, policy_id: str, digest: str, sequence: str, p
     }
 
 
-def receipt_payload(plan_id: str, update_id: str, digest: str, device: str, ring: str, state: str) -> dict:
+def receipt_payload(plan_id: str, update_id: str, digest: str, device: str, ring: str, state: str, authorization) -> dict:
     return {
         "rollout_id": plan_id,
         "channel_update_id": update_id,
@@ -245,7 +245,7 @@ def receipt_payload(plan_id: str, update_id: str, digest: str, device: str, ring
         "receipt_sequence": "1",
         "previous_receipt_id": None,
         "controller_pause_epoch": "0",
-        "activation_authorization_id": None,
+        "activation_authorization_id": authorization,
         "observer_key_id": None,
     }
 
@@ -446,8 +446,8 @@ def main() -> int:
         promotion_id = require_state(prepared, "PREPARED").get("record_id", "")
         pins = []
         for idem, checks in (
-            ("reader-promo-attest-01", {"closure": "checked"}),
-            ("reader-promo-attest-02", {"policy": "checked"}),
+            ("reader-promo-attest-01", {"closure": "checked", "realm_id": destination_id}),
+            ("reader-promo-attest-02", {"policy": "checked", "realm_id": destination_id}),
         ):
             attested = lab(reader_dir, reader_port, "lab.promotion_attest", {
                 "promotion_id": promotion_id,
@@ -457,6 +457,17 @@ def main() -> int:
                 "expected_state": None,
             })
             pins.append(require_state(attested, "ATTESTED").get("record_id"))
+        if len(pins) != 2 or pins[0] == pins[1] or any(not isinstance(pin, str) or len(pin) != 96 for pin in pins):
+            fail({"error": "the two attestations were not distinct", "pins": pins})
+        wrong = invoke(reader_dir, reader_port, "lab035", "lab.promotion_attest", json.dumps({
+            "promotion_id": promotion_id,
+            "checks_ref": {"closure": "checked", "realm_id": source_id},
+            "valid_until_ms": "10",
+            "idempotency_key": "reader-promo-wrong-realm",
+            "expected_state": None,
+        }))
+        if "BTX035_REALM" not in ((wrong.stdout or "") + (wrong.stderr or "")):
+            fail({"error": "wrong-realm attestation was accepted", "body": (wrong.stdout or "") + (wrong.stderr or "")})
         verified = lab(reader_dir, reader_port, "lab.promotion_verify", {
             "promotion_id": promotion_id,
             "attestation_ids": pins,
@@ -508,10 +519,10 @@ def main() -> int:
         if result_of(staged).get("state") != "STAGED":
             fail(staged)
 
-        def observe(device: str, ring: str, state: str, idem: str) -> None:
+        def observe(device: str, ring: str, state: str, idem: str, authorization) -> None:
             receipt_id = sign_and_import(
                 reader_dir, reader_port, destination_id, "DeploymentReceipt",
-                receipt_payload(plan_id, update_0, digest, device, ring, state),
+                receipt_payload(plan_id, update_0, digest, device, ring, state, authorization),
                 idem,
             )
             observed = lab(reader_dir, reader_port, "lab.deployment_observe", {
@@ -521,15 +532,25 @@ def main() -> int:
             })
             require_state(observed, "OBSERVED")
 
-        observe("device-a", "canary", "ACTIVE", "reader-receipt-a-0001")
+        authorization = sign_and_import(reader_dir, reader_port, destination_id, "GovernanceApproval", {
+            "proposal_id": plan_id,
+            "policy_id": policy_id,
+            "decision": "APPROVE",
+            "decision_context": plan_id,
+        }, "reader-owner-approval01")
+        observe("device-a", "canary", "ACTIVE", "reader-receipt-a-0001", None)
         canary = lab(reader_dir, reader_port, "lab.rollout_status", {"plan_id": plan_id})
         if result_of(canary).get("state") != "CANARY":
             fail(canary)
-        observe("device-b", "rest", "ACTIVE", "reader-receipt-b-0001")
+        observe("device-b", "rest", "ACTIVE", "reader-receipt-hold001", None)
+        held = lab(reader_dir, reader_port, "lab.rollout_status", {"plan_id": plan_id})
+        if result_of(held).get("state") != "CANARY" or result_of(held).get("active_generation"):
+            fail(held)
+        observe("device-b", "rest", "ACTIVE", "reader-receipt-b-0001", authorization)
         active = lab(reader_dir, reader_port, "lab.rollout_status", {"plan_id": plan_id})
-        if result_of(active).get("state") != "ACTIVE":
+        if result_of(active).get("state") != "ACTIVE" or result_of(active).get("active_generation") != plan_id:
             fail(active)
-        observe("device-c", "rest", "UNKNOWN", "reader-receipt-c-0001")
+        observe("device-c", "rest", "UNKNOWN", "reader-receipt-c-0001", None)
         unknown = result_of(lab(reader_dir, reader_port, "lab.rollout_status", {"plan_id": plan_id}))
         counts = unknown.get("counts")
         if unknown.get("state") != "ACTIVE" or not isinstance(counts, dict) or str(counts.get("unknown")) in ("0", "None", None):
