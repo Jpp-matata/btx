@@ -61,7 +61,8 @@ def start(datadir: Path) -> subprocess.Popen:
             str(BTXD), "-regtest", f"-datadir={datadir}", f"-port={P2P_PORT}",
             f"-rpcport={RPC_PORT}", "-rpcbind=127.0.0.1", "-rpcallowip=127.0.0.1",
             f"-rpcuser={RPC_USER}", f"-rpcpassword={RPC_PASSWORD}",
-            "-bind=127.0.0.1", "-listen=1", "-server=1", "-dnsseed=0", "-fixedseeds=0", "-daemon=0",
+            "-bind=127.0.0.1", "-listen=1", "-server=1", "-dnsseed=0", "-fixedseeds=0",
+            "-listenonion=0", "-daemon=0", "-nomodelnet",
         ],
         stdout=log, stderr=subprocess.STDOUT,
     )

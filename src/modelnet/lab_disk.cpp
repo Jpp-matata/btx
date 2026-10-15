@@ -245,6 +245,45 @@ bool ReadTrains(const UniValue& obj, std::map<std::string, IntegerState>& out, s
     return true;
 }
 
+bool ReadLaunch(const UniValue& obj, std::map<std::string, LaunchCheckpoint>& out, std::map<std::string, std::string>& authors)
+{
+    if (!obj.isObject()) return false;
+    std::map<std::string, UniValue> items;
+    obj.getObjMap(items);
+    for (const auto& item : items) {
+        if (item.first.size() != 96 || !HexEven(item.first) || !item.second.isObject()) return false;
+        const UniValue& row = item.second;
+        LaunchCheckpoint state;
+        std::string step;
+        std::string cursor;
+        std::string inherited_step;
+        std::string hits;
+        std::string miss;
+        std::string author;
+        if (!FieldStr(row, "step", step) || !FieldStr(row, "cursor", cursor) || !FieldStr(row, "rng", state.rng) ||
+            !FieldStr(row, "optimizer", state.optimizer) || !FieldStr(row, "weight_hash", state.weight_hash) ||
+            !FieldStr(row, "state_hash", state.state_hash) || !FieldStr(row, "inherited_step", inherited_step) ||
+            !FieldStr(row, "hits", hits) || !FieldStr(row, "miss_mass", miss) ||
+            !ReadOptionalString(row, "inherited_state", state.inherited_state) ||
+            !ReadOptionalString(row, "author", author)) {
+            return false;
+        }
+        if (!ParseU64(step, state.step) || !ParseU64(cursor, state.cursor) || !ParseU64(inherited_step, state.inherited_step) ||
+            !ParseI64(hits, state.hits) || !ParseI64(miss, state.miss_mass)) {
+            return false;
+        }
+        if (state.step == 0 || state.step > 4096 || state.state_hash.size() != 96 || state.weight_hash.size() != 96 ||
+            !HexEven(state.state_hash) || !HexEven(state.weight_hash)) {
+            return false;
+        }
+        if (!state.inherited_state.empty() && (state.inherited_state.size() != 96 || !HexEven(state.inherited_state))) return false;
+        if (!author.empty() && (author.size() != 96 || !HexEven(author))) return false;
+        out.emplace(item.first, std::move(state));
+        if (!author.empty()) authors.emplace(item.first, author);
+    }
+    return true;
+}
+
 bool DecodeImage(const std::string& json, LabDiskImage& image)
 {
     UniValue root;
@@ -271,6 +310,7 @@ bool DecodeImage(const std::string& json, LabDiskImage& image)
         }
     }
     if (!root.exists("trains") || !ReadTrains(root["trains"], loaded.trains, loaded.train_authors)) return false;
+    if (root.exists("launch_trains") && !ReadLaunch(root["launch_trains"], loaded.launch_trains, loaded.launch_authors)) return false;
     if (root.exists("rollout")) {
         if (!root["rollout"].isArray()) return false;
         for (size_t i = 0; i < root["rollout"].size(); ++i) {
@@ -474,6 +514,24 @@ std::string EncodeImage(const LabDiskImage& image)
         trains.pushKV(item.first, std::move(row));
     }
     root.pushKV("trains", trains);
+    UniValue launch(UniValue::VOBJ);
+    for (const auto& item : image.launch_trains) {
+        UniValue row(UniValue::VOBJ);
+        row.pushKV("step", std::to_string(item.second.step));
+        row.pushKV("cursor", std::to_string(item.second.cursor));
+        row.pushKV("rng", item.second.rng);
+        row.pushKV("optimizer", item.second.optimizer);
+        row.pushKV("weight_hash", item.second.weight_hash);
+        row.pushKV("state_hash", item.second.state_hash);
+        row.pushKV("inherited_state", item.second.inherited_state);
+        row.pushKV("inherited_step", std::to_string(item.second.inherited_step));
+        row.pushKV("hits", std::to_string(item.second.hits));
+        row.pushKV("miss_mass", std::to_string(item.second.miss_mass));
+        const auto author = image.launch_authors.find(item.first);
+        if (author != image.launch_authors.end() && !author->second.empty()) row.pushKV("author", author->second);
+        launch.pushKV(item.first, std::move(row));
+    }
+    root.pushKV("launch_trains", launch);
     UniValue rollout(UniValue::VARR);
     for (const LabDiskImage::RolloutRow& saved : image.rollout) {
         UniValue row(UniValue::VOBJ);

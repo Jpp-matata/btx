@@ -808,7 +808,7 @@ BOOST_AUTO_TEST_CASE(model_pieces_survive_reload_and_need_two_roots)
     BOOST_CHECK(fs::exists(dir.path / "pieces"));
     UniValue capsule(UniValue::VOBJ);
     capsule.pushKV("capsule_id", digest);
-    capsule.pushKV("purpose", "model");
+    capsule.pushKV("purpose", "REPLAY");
     capsule.pushKV("max_bytes", "1000000");
     UniValue resolved;
     BOOST_REQUIRE(LabCall("lab.capsule_resolve", capsule, resolved, err));

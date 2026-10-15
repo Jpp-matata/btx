@@ -595,6 +595,7 @@ if(WITH_MODELNET)
     modelnet_035_workspace_git_tests.cpp
     modelnet_035_discovery_tests.cpp
     modelnet_035_training_tests.cpp
+    modelnet_035_launch_tests.cpp
     modelnet_035_complete_tests.cpp
     modelnet_035_disk_tests.cpp
     modelnet_035_ancestry_tests.cpp

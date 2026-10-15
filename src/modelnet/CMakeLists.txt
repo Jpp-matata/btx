@@ -75,6 +75,7 @@ add_library(bitcoin_modelnet STATIC
   lab_exchange.cpp
   lab_peer.cpp
   training_integer.cpp
+  training_launch.cpp
   research_views.cpp
   guard_machine.cpp
   lab_journey.cpp

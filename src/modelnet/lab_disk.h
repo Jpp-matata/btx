@@ -7,6 +7,7 @@
 
 #include <modelnet/research_views.h>
 #include <modelnet/training_integer.h>
+#include <modelnet/training_launch.h>
 #include <util/fs.h>
 
 #include <map>
@@ -46,6 +47,12 @@ struct LabDiskImage {
     std::map<std::string, IntegerState> trains;
     /** Trajectory id to the public identity that ran it. Absent for an older file. */
     std::map<std::string, std::string> train_authors;
+    /**
+     * Launch-decoder checkpoints. Absent on a file written before this field.
+     * The integer `trains` map does not carry these rows.
+     */
+    std::map<std::string, LaunchCheckpoint> launch_trains;
+    std::map<std::string, std::string> launch_authors;
     /** Channel and policy rows. Absent on a file written before this field. */
     struct RolloutRow {
         std::string key;

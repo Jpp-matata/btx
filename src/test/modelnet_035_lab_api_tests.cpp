@@ -316,7 +316,7 @@ BOOST_AUTO_TEST_CASE(every_lab_method_is_implemented)
     }
     {
         std::string response, err;
-        const bool ok = modelnet::DispatchLab035("lab.capsule_resolve", R"json({"capsule_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "purpose": "p", "max_bytes": "1"})json", response, err);
+        const bool ok = modelnet::DispatchLab035("lab.capsule_resolve", R"json({"capsule_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "purpose": "INSPECT", "max_bytes": "1"})json", response, err);
         BOOST_CHECK_MESSAGE(err != "BTX035_NOT_IMPLEMENTED", "lab.capsule_resolve was not implemented");
         if (ok) {
             UniValue parsed;

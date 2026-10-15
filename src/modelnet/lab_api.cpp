@@ -21,6 +21,7 @@
 #include <modelnet/research_graph.h>
 #include <modelnet/research_views.h>
 #include <modelnet/training_integer.h>
+#include <modelnet/training_launch.h>
 #include <modelnet/workspace_journal.h>
 #include <crypto/sha384.h>
 #include <span.h>
@@ -84,7 +85,9 @@ struct IssuedPermit {
 };
 
 struct TrainKept {
+    std::string profile;
     IntegerState state;
+    LaunchCheckpoint launch;
     std::vector<Interval> intervals;
     std::string author;
 };
@@ -217,6 +220,11 @@ void ImageFromStore(const Store& store, LabDiskImage& image)
         image.identity_pk.emplace(item.first, HexStr(item.second));
     }
     for (const auto& item : store.trains) {
+        if (item.second.profile == LAUNCH_PROFILE) {
+            image.launch_trains.emplace(item.first, item.second.launch);
+            if (!item.second.author.empty()) image.launch_authors.emplace(item.first, item.second.author);
+            continue;
+        }
         image.trains.emplace(item.first, item.second.state);
         if (!item.second.author.empty()) image.train_authors.emplace(item.first, item.second.author);
     }
@@ -303,6 +311,33 @@ TrainKept MaterializeTrain(const IntegerState& state)
     return kept;
 }
 
+TrainKept MaterializeLaunch(const LaunchCheckpoint& checkpoint)
+{
+    TrainKept kept;
+    kept.profile = LAUNCH_PROFILE;
+    kept.launch = checkpoint;
+    kept.state.step = checkpoint.step;
+    kept.state.cursor = checkpoint.cursor;
+    kept.state.state_hash = checkpoint.state_hash;
+    std::string err;
+    LaunchTrainer trainer;
+    if (!trainer.Run(checkpoint.step, err)) return kept;
+    const LaunchCheckpoint& got = trainer.Checkpoint();
+    if (got.state_hash != checkpoint.state_hash || got.weight_hash != checkpoint.weight_hash || got.cursor != checkpoint.cursor) {
+        return kept;
+    }
+    kept.intervals = trainer.Intervals();
+    kept.launch.hits = got.hits;
+    kept.launch.miss_mass = got.miss_mass;
+    return kept;
+}
+
+bool TrainMatches(const TrainKept& kept, std::string& err)
+{
+    if (kept.profile == LAUNCH_PROFILE) return LaunchTrainer::CheckState(kept.launch, err);
+    return IntegerTrainer::CheckState(kept.state, err);
+}
+
 void RestorePublished(Store& store)
 {
     store.published.clear();
@@ -351,6 +386,15 @@ void ImageToStore(const LabDiskImage& image, Store& store)
         if (author == image.train_authors.end() || author->second.empty()) continue;
         item.second.author = author->second;
         for (Interval& interval : item.second.intervals) interval.ancestry = item.second.author;
+    }
+    for (const auto& item : image.launch_trains) {
+        TrainKept kept = MaterializeLaunch(item.second);
+        const auto author = image.launch_authors.find(item.first);
+        if (author != image.launch_authors.end() && !author->second.empty()) {
+            kept.author = author->second;
+            for (Interval& interval : kept.intervals) interval.ancestry = kept.author;
+        }
+        store.trains.insert_or_assign(item.first, std::move(kept));
     }
     store.models.clear();
     store.model_pieces.clear();
@@ -1155,7 +1199,11 @@ bool AppendTrains(const std::map<std::string, TrainKept>& trains, std::vector<Ex
     for (const auto& item : trains) {
         ExchangeObject object;
         object.kind = "train";
-        if (!EncodeTrainLine(item.first, item.second.state, object.content, err)) return false;
+        if (item.second.profile == LAUNCH_PROFILE) {
+            if (!EncodeLaunchLine(item.first, item.second.launch, object.content, err)) return false;
+        } else if (!EncodeTrainLine(item.first, item.second.state, object.content, err)) {
+            return false;
+        }
         const std::vector<unsigned char> bytes(object.content.begin(), object.content.end());
         if (!GitObjectDigest("train", Span<const unsigned char>{bytes.data(), bytes.size()}, object.digest, err)) return false;
         objects.push_back(std::move(object));
@@ -1193,15 +1241,27 @@ bool ApplyReplayAuthors(Store& store, const std::vector<ExchangeObject>& objects
     return true;
 }
 
-bool CollectTrains(const std::vector<ExchangeObject>& objects, std::map<std::string, IntegerState>& out, std::string& err)
+bool CollectTrains(const std::vector<ExchangeObject>& objects, std::map<std::string, IntegerState>& out,
+                  std::map<std::string, LaunchCheckpoint>& launch_out, std::string& err)
 {
     out.clear();
+    launch_out.clear();
     for (const ExchangeObject& object : objects) {
         if (object.kind != "train") continue;
         std::string trajectory_id;
+        if (object.content.rfind("v2|", 0) == 0) {
+            LaunchCheckpoint state;
+            if (!DecodeLaunchLine(object.content, trajectory_id, state, err)) return false;
+            if (out.count(trajectory_id) != 0 || !launch_out.emplace(trajectory_id, std::move(state)).second) {
+                return Fail(err, "BTX035_SCHEMA");
+            }
+            continue;
+        }
         IntegerState state;
         if (!DecodeTrainLine(object.content, trajectory_id, state, err)) return false;
-        if (!out.emplace(trajectory_id, std::move(state)).second) return Fail(err, "BTX035_SCHEMA");
+        if (!out.emplace(trajectory_id, std::move(state)).second || launch_out.count(trajectory_id) != 0) {
+            return Fail(err, "BTX035_SCHEMA");
+        }
     }
     err.clear();
     return true;
@@ -1212,6 +1272,25 @@ void RestoreTrains(Store& store, const std::map<std::string, IntegerState>& trai
     for (const auto& item : trains) {
         store.trains[item.first] = MaterializeTrain(item.second);
     }
+}
+
+void RestoreLaunch(Store& store, const std::map<std::string, LaunchCheckpoint>& trains)
+{
+    for (const auto& item : trains) {
+        store.trains[item.first] = MaterializeLaunch(item.second);
+    }
+}
+
+bool AcceptBlob(Store& store, const ExchangeObject& object, std::string& err)
+{
+    if (object.kind != "blob") return true;
+    std::string digest;
+    const std::vector<unsigned char> raw(object.content.begin(), object.content.end());
+    if (!GitObjectDigest("blob", Span<const unsigned char>{raw.data(), raw.size()}, digest, err)) return false;
+    if (digest != object.digest) return Fail(err, "BTX035_ID_MISMATCH");
+    store.records[digest] = object.content;
+    err.clear();
+    return true;
 }
 
 bool EncodePieceLine(const std::string& digest, size_t index, const std::string& chunk, std::string& line, std::string& err)
@@ -1961,6 +2040,53 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
             return OpOut(store, result, id, "FAILED", "STOPPED_QUIESCENT");
         }
         const std::string recipe = RequireStr(req, "recipe_id");
+        if (recipe == LAUNCH_PROFILE) {
+            LaunchTrainer trainer;
+            const std::string capsule = RequireStr(req, "input_capsule_id");
+            const auto prior = store.trains.find(capsule);
+            if (prior != store.trains.end() && prior->second.profile == LAUNCH_PROFILE) {
+                if (!trainer.Resume(prior->second.launch, err)) return false;
+                if (!trainer.Run(LAUNCH_CONTINUE_STEPS, err)) return false;
+            } else if (!trainer.Run(LAUNCH_STEPS, err)) {
+                return false;
+            }
+            TrainKept kept;
+            kept.profile = LAUNCH_PROFILE;
+            kept.launch = trainer.Checkpoint();
+            kept.intervals = trainer.Intervals();
+            kept.state.step = kept.launch.step;
+            kept.state.cursor = kept.launch.cursor;
+            kept.state.state_hash = kept.launch.state_hash;
+            kept.author = store.active_root;
+            for (Interval& interval : kept.intervals) interval.ancestry = kept.author;
+            store.trains[id] = kept;
+            store.records[id] = kept.launch.state_hash;
+            std::string bytes;
+            if (!EncodeLaunchArtifact(kept.launch, trainer.Weights(), bytes, err)) return false;
+            std::string digest;
+            const std::vector<unsigned char> raw(bytes.begin(), bytes.end());
+            if (!GitObjectDigest("model", Span<const unsigned char>{raw.data(), raw.size()}, digest, err)) return false;
+            std::vector<std::string> pieces;
+            if (!SplitModelPieces(bytes, pieces, err)) return false;
+            store.models[digest] = bytes;
+            store.model_pieces[digest] = std::move(pieces);
+            if (!ModelBytesMatch(store, digest, err)) return false;
+            std::string dataset;
+            std::string tokenizer;
+            if (!LaunchDatasetDigest(dataset, err) || !LaunchTokenizerDigest(tokenizer, err)) return false;
+            store.records[dataset] = LaunchCorpusBytes();
+            store.records[tokenizer] = LaunchTokenizerBytes();
+            const std::string initial = kept.intervals.empty() ? std::string() : kept.intervals.front().start_state;
+            result.pushKV("artifact_digest", digest);
+            result.pushKV("state_hash", kept.launch.state_hash);
+            result.pushKV("previous_state", kept.launch.inherited_state.empty() ? initial : kept.launch.inherited_state);
+            result.pushKV("next_byte_hits", std::to_string(kept.launch.hits));
+            result.pushKV("miss_mass", std::to_string(kept.launch.miss_mass));
+            result.pushKV("tokenizer_digest", tokenizer);
+            result.pushKV("dataset_digest", dataset);
+            result.pushKV("profile", LAUNCH_PROFILE);
+            return OpOut(store, result, id, "COMPLETE", "STOPPED_QUIESCENT");
+        }
         if (recipe != INTEGER_PROFILE && recipe != INTEGER_MODEL_PROFILE) return Fail(err, "BTX035_PROFILE");
         IntegerTrainer trainer;
         if (!trainer.Run(IntegerDataset().size(), err)) return false;
@@ -2396,7 +2522,7 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
                 continue;
             }
             std::string check_err;
-            if (!IntegerTrainer::CheckState(train->second.state, check_err)) hash_ok = false;
+            if (!TrainMatches(train->second, check_err)) hash_ok = false;
             if (start_state.empty() && !train->second.intervals.empty()) start_state = train->second.intervals.front().start_state;
             if (!train->second.intervals.empty()) final_state = train->second.intervals.back().end_state;
             if (train->second.state.step > total) total = train->second.state.step;
@@ -2888,6 +3014,10 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
     }
     if (method == "lab.capsule_resolve") {
         const std::string capsule = RequireStr(req, "capsule_id");
+        const std::string purpose = RequireStr(req, "purpose");
+        if (!HexN(capsule, 96) || (purpose != "INSPECT" && purpose != "REPLAY" && purpose != "EXTEND" && purpose != "DEPLOY")) {
+            return Fail(err, "BTX035_SCHEMA");
+        }
         int64_t max_bytes = 0;
         if (!ParseDec(RequireStr(req, "max_bytes"), max_bytes) || max_bytes < 0) return Fail(err, "BTX035_SCHEMA");
         result.pushKV("plan_id", Id96("plan|" + capsule));
@@ -2931,7 +3061,7 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
         } else {
             std::string check_err;
             const bool retained = !train->second.state.state_hash.empty() && train->second.state.step > 0;
-            const bool state_ok = IntegerTrainer::CheckState(train->second.state, check_err);
+            const bool state_ok = TrainMatches(train->second, check_err);
             const bool path_ok = retained && !train->second.intervals.empty() &&
                                  FullReplayCoverage(train->second.state.step, train->second.intervals.front().start_state,
                                                     train->second.state.state_hash, train->second.intervals);
@@ -2962,7 +3092,7 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
         std::vector<ExchangeObject> exported;
         for (const ExchangeObject& object : it->second) {
             if (object.kind == "research" || object.kind == "train" || object.kind == "lineage" || object.kind == "model" ||
-                object.kind == "piece" || object.kind == "replay") {
+                object.kind == "piece" || object.kind == "replay" || object.kind == "blob") {
                 continue;
             }
             exported.push_back(object);
@@ -2970,6 +3100,22 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
         if (!AppendPublicResearch(store.observations, exported, err)) return false;
         if (!AppendTrains(store.trains, exported, err)) return false;
         if (!AppendModels(store, exported, err)) return false;
+        {
+            std::string dataset;
+            std::string tokenizer;
+            if (!LaunchDatasetDigest(dataset, err) || !LaunchTokenizerDigest(tokenizer, err)) return false;
+            for (const std::string& blob_id : {dataset, tokenizer}) {
+                const auto found = store.records.find(blob_id);
+                if (found == store.records.end()) continue;
+                ExchangeObject object;
+                object.kind = "blob";
+                object.content = found->second;
+                const std::vector<unsigned char> raw(object.content.begin(), object.content.end());
+                if (!GitObjectDigest("blob", Span<const unsigned char>{raw.data(), raw.size()}, object.digest, err)) return false;
+                if (object.digest != blob_id) return Fail(err, "BTX035_ID_MISMATCH");
+                exported.push_back(std::move(object));
+            }
+        }
         if (!AppendLineage(store.observations, exported, err)) return false;
         if (ticketed) {
             const auto auth = store.fetch_tickets.find(req["fetch_ticket"].get_str());
@@ -2992,7 +3138,8 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
         std::vector<ResearchObservation> observed;
         if (!CollectResearch(objects, observed, err)) return false;
         std::map<std::string, IntegerState> trains;
-        if (!CollectTrains(objects, trains, err)) return false;
+        std::map<std::string, LaunchCheckpoint> launch_trains;
+        if (!CollectTrains(objects, trains, launch_trains, err)) return false;
         if (!AttachLineage(objects, observed, err)) return false;
         const std::string repo = Id96(RequireStr(req, "manifest"));
         store.repos.insert(repo);
@@ -3001,10 +3148,14 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
         store.observations = std::move(observed);
         RestorePublished(store);
         RestoreTrains(store, trains);
+        RestoreLaunch(store, launch_trains);
         if (!ApplyReplayAuthors(store, objects, err)) return false;
         for (const ExchangeObject& object : objects) {
             if (object.kind != "model" && object.kind != "piece") continue;
             if (!AcceptModelObject(store, object, err)) return false;
+        }
+        for (const ExchangeObject& object : objects) {
+            if (!AcceptBlob(store, object, err)) return false;
         }
         for (const ExchangeObject& object : objects) {
             if (object.kind != "model") continue;
@@ -3029,12 +3180,16 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
         std::vector<ResearchObservation> observed;
         if (!CollectResearch(objects, observed, err)) return false;
         std::map<std::string, IntegerState> trains;
-        if (!CollectTrains(objects, trains, err)) return false;
+        std::map<std::string, LaunchCheckpoint> launch_trains;
+        if (!CollectTrains(objects, trains, launch_trains, err)) return false;
         if (!AttachLineage(objects, observed, err)) return false;
         const std::string repo = RequireStr(req, "repository_id");
         for (const ExchangeObject& object : objects) {
             if (object.kind != "model" && object.kind != "piece") continue;
             if (!AcceptModelObject(store, object, err)) return false;
+        }
+        for (const ExchangeObject& object : objects) {
+            if (!AcceptBlob(store, object, err)) return false;
         }
         for (const ExchangeObject& object : objects) {
             if (object.kind != "model") continue;
@@ -3045,6 +3200,7 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
         store.observations = std::move(observed);
         RestorePublished(store);
         RestoreTrains(store, trains);
+        RestoreLaunch(store, launch_trains);
         if (!ApplyReplayAuthors(store, store.repo_objects[repo], err)) return false;
         result.pushKV("manifest", manifest);
         result.pushKV("repository_id", repo);

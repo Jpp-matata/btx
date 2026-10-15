@@ -91,7 +91,8 @@ def start(name: str, rpcport: int, p2pport: int) -> tuple[str, Path, int, subpro
             str(BTXD), "-regtest", f"-datadir={datadir}", f"-port={p2pport}",
             f"-rpcport={rpcport}", "-rpcbind=127.0.0.1", "-rpcallowip=127.0.0.1",
             f"-rpcuser={RPC_USER}", f"-rpcpassword={RPC_PASSWORD}",
-            "-bind=127.0.0.1", "-listen=1", "-server=1", "-dnsseed=0", "-fixedseeds=0", "-daemon=0",
+            "-bind=127.0.0.1", "-listen=1", "-server=1", "-dnsseed=0", "-fixedseeds=0",
+            "-listenonion=0", "-daemon=0", "-nomodelnet",
         ],
         stdout=log, stderr=subprocess.STDOUT, env=env,
     )
