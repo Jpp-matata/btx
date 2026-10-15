@@ -636,6 +636,7 @@ BTX_BASE_SCRIPTS = [
     'rpc_getfinalityinfo.py',
     'feature_matmul_trusted_mirror_follow_forward.py',
     'feature_matmul_trusted_mirror_snapshot_backfill.py',
+    'feature_matmul_trusted_mirror_no_attestation_peer.py',
     'feature_matmul_unrequested_followed_persist.py',
     'rpc_getfinalityinfo_pq_pin_warnings.py',
     'p2p_matmul_handoff_budget_retain.py',
