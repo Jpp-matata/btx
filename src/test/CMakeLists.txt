@@ -26,6 +26,8 @@ add_executable(test_btx
   blockencodings_tests.cpp
   blockfilter_index_tests.cpp
   blockfilter_tests.cpp
+  lightwatch_tests.cpp
+  ../lightwatch.cpp
   cfilter_race_tests.cpp
   blockmanager_tests.cpp
   bloom_tests.cpp

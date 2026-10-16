@@ -40,3 +40,13 @@ When `height` is negative, the wallet has not processed `height`, or a scan is r
 ## Scope
 
 Shielded notes this wallet cannot open are omitted. Another person's shielded balance is not watched. Balance watch does not sign and does not spend.
+
+## Lightweight client
+
+`btx-cli lightwatch` is a separate watch. It stores this wallet's public descriptors and the outputs those descriptors can see. It does not store the chain. The node it talks to must be started with `-blockfilterindex=1`.
+
+`lightwatch sync` asks for each block's basic compact filter. A block is downloaded only when the filter matches a watched script. The filter header must chain from the previous header. A break stops the walk. A filter that has not been checked stays unknown.
+
+`lightwatch balance` and `lightwatch balanceat <height>` print an amount only when the walk has reached that height. Otherwise they fail with `BTX_BALANCE_NOT_READY` and include no amount. `amount` is the spendable total. `immature` is coinbase that the walk has already seen and that is not yet spendable. `lightwatch status` reports ready, the cursor, blocks behind, the descriptors, and the blocks that were downloaded because a filter matched.
+
+`lightwatch init` refuses a descriptor that contains a private key, and it refuses a descriptor that does not expand to any script without one. A public descriptor that still needs a seed is in that second group. Watch `addr(...)` or a public-key descriptor instead. `lightwatch sendraw <hex>` relays an already signed transaction through the node and does not sign. Shielded notes are omitted. Coins created before `start_height` are outside the watch, so a balance at a lower height is not ready. Ranged descriptors are expanded for the first 200 indexes.

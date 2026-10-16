@@ -632,6 +632,7 @@ add_library(bitcoin_common STATIC EXCLUDE_FROM_ALL
   init/common.cpp
   kernel/chainparams.cpp
   key.cpp
+  blockfilter.cpp
   key_io.cpp
   merkleblock.cpp
   matmul/field.cpp
@@ -1945,7 +1946,6 @@ add_library(bitcoin_node STATIC EXCLUDE_FROM_ALL
   banman.cpp
   bip324.cpp
   blockencodings.cpp
-  blockfilter.cpp
   consensus/tx_verify.cpp
   dandelion.cpp
   deploymentstatus.cpp
@@ -2144,6 +2144,7 @@ endif()
 
 add_library(bitcoin_cli STATIC EXCLUDE_FROM_ALL
   compat/stdin.cpp
+  lightwatch.cpp
   rpc/client.cpp
 )
 target_link_libraries(bitcoin_cli
