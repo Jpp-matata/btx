@@ -9,12 +9,14 @@
 #include <modelnet/research_rpc.h>
 #include <modelnet/research_views.h>
 #include <modelnet/training_integer.h>
+#include <span.h>
 #include <univalue.h>
 #include <test/util/setup_common.h>
 
 #include <boost/test/unit_test.hpp>
 
 #include <string>
+#include <vector>
 
 BOOST_FIXTURE_TEST_SUITE(modelnet_035_complete_tests, BasicTestingSetup)
 
@@ -126,6 +128,41 @@ BOOST_AUTO_TEST_CASE(exchange_rejects_a_replaced_blob)
     BOOST_CHECK_EQUAL(err, "BTX035_ID_MISMATCH");
     BOOST_CHECK(!PullExchangeLoopback("10.0.0.8", 1, "u", "p", "repo", manifest, err));
     BOOST_CHECK_EQUAL(err, "BTX035_SCOPE_DENIED");
+}
+
+BOOST_AUTO_TEST_CASE(exchange_manifest_refuses_too_many_or_too_large_objects)
+{
+    using namespace modelnet;
+    const auto blob = [](const std::string& content) {
+        ExchangeObject object;
+        object.kind = "blob";
+        object.content = content;
+        std::string digest_err;
+        const std::vector<unsigned char> bytes(content.begin(), content.end());
+        BOOST_REQUIRE(GitObjectDigest("blob", Span<const unsigned char>{bytes.data(), bytes.size()}, object.digest, digest_err));
+        return object;
+    };
+    std::string err;
+    std::string manifest;
+    std::vector<ExchangeObject> verified;
+    BOOST_REQUIRE(WriteExchangeManifest({blob("a"), blob("b"), blob("c")}, manifest, err));
+    BOOST_CHECK(VerifyExchangeManifest(manifest, verified, err));
+    BOOST_CHECK_EQUAL(verified.size(), 3U);
+
+    // Small caps passed in, so the count check needs only three objects.
+    BOOST_CHECK(VerifyExchangeManifest(manifest, verified, err, 3, 1));
+    BOOST_CHECK(!VerifyExchangeManifest(manifest, verified, err, 2, 1));
+    BOOST_CHECK_EQUAL(err, "BTX035_LIMIT_EXCEEDED");
+    BOOST_REQUIRE(WriteExchangeManifest({blob("ab")}, manifest, err));
+    BOOST_CHECK(!VerifyExchangeManifest(manifest, verified, err, 3, 1));
+    BOOST_CHECK_EQUAL(err, "BTX035_LIMIT_EXCEEDED");
+
+    // The default object cap, at and one byte past MAX_EXCHANGE_OBJECT_BYTES.
+    BOOST_REQUIRE(WriteExchangeManifest({blob(std::string(MAX_EXCHANGE_OBJECT_BYTES, 'x'))}, manifest, err));
+    BOOST_CHECK(VerifyExchangeManifest(manifest, verified, err));
+    BOOST_REQUIRE(WriteExchangeManifest({blob(std::string(MAX_EXCHANGE_OBJECT_BYTES + 1, 'x'))}, manifest, err));
+    BOOST_CHECK(!VerifyExchangeManifest(manifest, verified, err));
+    BOOST_CHECK_EQUAL(err, "BTX035_LIMIT_EXCEEDED");
 }
 
 BOOST_AUTO_TEST_CASE(guard_permit_is_one_use_and_thirty_seconds)
