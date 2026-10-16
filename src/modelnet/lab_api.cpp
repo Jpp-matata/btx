@@ -347,6 +347,40 @@ void RestorePublished(Store& store)
     }
 }
 
+/** Decimal piece index below MODEL_MAX_PIECES. The loop stops at the bound, so a long index cannot wrap. */
+bool ParsePieceIndex(const std::string& text, size_t& index, std::string& err)
+{
+    if (text.empty()) return Fail(err, "BTX035_SCHEMA");
+    for (char c : text) {
+        if (c < '0' || c > '9') return Fail(err, "BTX035_SCHEMA");
+    }
+    index = 0;
+    for (char c : text) {
+        index = index * 10 + static_cast<size_t>(c - '0');
+        if (index >= MODEL_MAX_PIECES) return Fail(err, "BTX035_LIMIT_EXCEEDED");
+    }
+    err.clear();
+    return true;
+}
+
+/** Store one piece. Pieces arrive in index order, so an index past the next free slot is a gap. */
+bool PutModelPiece(std::map<std::string, std::vector<std::string>>& model_pieces, const std::string& digest, size_t index,
+                   std::string chunk, std::string& err)
+{
+    if (index >= MODEL_MAX_PIECES) return Fail(err, "BTX035_LIMIT_EXCEEDED");
+    const auto found = model_pieces.find(digest);
+    const size_t have = found == model_pieces.end() ? 0 : found->second.size();
+    if (index > have) return Fail(err, "BTX035_GAP");
+    std::vector<std::string>& pieces = found == model_pieces.end() ? model_pieces[digest] : found->second;
+    if (index == have) {
+        pieces.push_back(std::move(chunk));
+    } else {
+        pieces[index] = std::move(chunk);
+    }
+    err.clear();
+    return true;
+}
+
 void ImageToStore(const LabDiskImage& image, Store& store)
 {
     store.records = image.records;
@@ -413,25 +447,17 @@ void ImageToStore(const LabDiskImage& image, Store& store)
                     size_t index = 0;
                     std::string chunk;
                     std::string piece_err;
+                    // A row past the cap or after a gap is skipped, like any other bad row.
                     if (!DecodePieceLine(object.content, digest, index, chunk, piece_err)) continue;
-                    auto& pieces = store.model_pieces[digest];
-                    if (pieces.size() <= index) pieces.resize(index + 1);
-                    pieces[index] = std::move(chunk);
+                    (void)PutModelPiece(store.model_pieces, digest, index, std::move(chunk), piece_err);
                     continue;
                 }
                 const auto colon = object.content.find(':');
                 if (colon == std::string::npos) continue;
                 size_t index = 0;
-                const std::string index_text = object.content.substr(0, colon);
-                bool index_ok = !index_text.empty();
-                for (char c : index_text) {
-                    if (c < '0' || c > '9') index_ok = false;
-                }
-                if (!index_ok) continue;
-                for (char c : index_text) index = index * 10 + static_cast<size_t>(c - '0');
-                auto& pieces = store.model_pieces[object.digest];
-                if (pieces.size() <= index) pieces.resize(index + 1);
-                pieces[index] = object.content.substr(colon + 1);
+                std::string index_err;
+                if (!ParsePieceIndex(object.content.substr(0, colon), index, index_err)) continue;
+                (void)PutModelPiece(store.model_pieces, object.digest, index, object.content.substr(colon + 1), index_err);
             }
         }
     }
@@ -1331,11 +1357,7 @@ bool DecodePieceLine(const std::string& line, std::string& digest, size_t& index
     if (!HexN(digest, 96)) return Fail(err, "BTX035_SCHEMA");
     const std::string index_text = line.substr(p2 + 1, p3 - p2 - 1);
     if (index_text.empty() || (index_text.size() > 1 && index_text[0] == '0')) return Fail(err, "BTX035_SCHEMA");
-    index = 0;
-    for (char c : index_text) {
-        if (c < '0' || c > '9') return Fail(err, "BTX035_SCHEMA");
-        index = index * 10 + static_cast<size_t>(c - '0');
-    }
+    if (!ParsePieceIndex(index_text, index, err)) return false;
     const std::vector<unsigned char> raw = ParseHex(line.substr(p3 + 1));
     if (raw.empty()) return Fail(err, "BTX035_SCHEMA");
     chunk.assign(raw.begin(), raw.end());
@@ -1406,10 +1428,7 @@ bool AcceptModelObject(Store& store, const ExchangeObject& object, std::string& 
     const std::vector<unsigned char> bytes(object.content.begin(), object.content.end());
     if (!GitObjectDigest("piece", Span<const unsigned char>{bytes.data(), bytes.size()}, piece_digest, err)) return false;
     if (piece_digest != object.digest) return Fail(err, "BTX035_ID_MISMATCH");
-    auto& pieces = store.model_pieces[digest];
-    if (pieces.size() <= index) pieces.resize(index + 1);
-    pieces[index] = std::move(chunk);
-    return true;
+    return PutModelPiece(store.model_pieces, digest, index, std::move(chunk), err);
 }
 
 bool CollectResearch(const std::vector<ExchangeObject>& objects, std::vector<ResearchObservation>& out, std::string& err)
@@ -2183,7 +2202,7 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
                     std::vector<std::string> chunks;
                     std::string piece_err;
                     bool saw_piece = false;
-                    for (uint64_t index = 0; index < 4096; ++index) {
+                    for (uint64_t index = 0; index < MODEL_MAX_PIECES; ++index) {
                         UniValue resource_ref(UniValue::VOBJ);
                         resource_ref.pushKV("kind", "MODEL");
                         resource_ref.pushKV("digest48", digest);
