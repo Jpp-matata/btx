@@ -38,6 +38,7 @@
 #include <filesystem>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <string>
@@ -879,6 +880,16 @@ bool ParseDec(const std::string& s, int64_t& out)
         n = n * 10 + (c - '0');
     }
     out = n;
+    return true;
+}
+
+/** A JSON number read as an int. A fraction, an exponent or a value outside int is false; this never throws. */
+bool ReadIntParam(const UniValue& value, int& out)
+{
+    if (!value.isNum()) return false;
+    const std::optional<int> parsed = ToIntegral<int>(value.getValStr());
+    if (!parsed) return false;
+    out = *parsed;
     return true;
 }
 
@@ -1943,7 +1954,7 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
         std::vector<std::string> ids;
         if (!SortResearchView(view, store.observations, true, ids, err)) return false;
         int limit = 100;
-        if (req.exists("limit") && req["limit"].isNum()) limit = req["limit"].getInt<int>();
+        if (req.exists("limit") && req["limit"].isNum() && !ReadIntParam(req["limit"], limit)) return Fail(err, "BTX035_SCHEMA");
         if (limit < 1) limit = 1;
         if (static_cast<int>(ids.size()) > limit) ids.resize(static_cast<size_t>(limit));
         QueryOut(result, ids, method + req.write());
@@ -2038,7 +2049,9 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
             }
         }
         int max_records = 0;
-        if (req.exists("max_records") && req["max_records"].isNum()) max_records = req["max_records"].getInt<int>();
+        if (req.exists("max_records") && req["max_records"].isNum() && !ReadIntParam(req["max_records"], max_records)) {
+            return Fail(err, "BTX035_SCHEMA");
+        }
         std::map<std::string, ContributionLink> links;
         LinksFromObservations(store.observations, links);
         std::set<std::string> seen;
@@ -2073,7 +2086,7 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
     if (method == "lab.source_query") {
         const std::string query = RequireStr(req, "query");
         int limit = 0;
-        if (req.exists("limit") && req["limit"].isNum()) limit = req["limit"].getInt<int>();
+        if (req.exists("limit") && req["limit"].isNum() && !ReadIntParam(req["limit"], limit)) return Fail(err, "BTX035_SCHEMA");
         if (limit < 0) return Fail(err, "BTX035_SCHEMA");
         std::set<std::string> wanted;
         if (req["snapshot_ids"].isArray()) {
@@ -3280,8 +3293,8 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
     }
     if (method == "lab.snapshot_pull") {
         if (!Expect(store, req, "snappull|" + RequireStr(req, "idempotency_key"), err)) return false;
-        if (!req.exists("port") || !req["port"].isNum()) return Fail(err, "BTX035_SCHEMA");
-        const int port_num = req["port"].getInt<int>();
+        int port_num = 0;
+        if (!req.exists("port") || !ReadIntParam(req["port"], port_num)) return Fail(err, "BTX035_SCHEMA");
         if (port_num <= 0 || port_num > 65535) return Fail(err, "BTX035_SCHEMA");
         std::string manifest;
         if (!PullExchangeLoopback(RequireStr(req, "host"), static_cast<uint16_t>(port_num), RequireStr(req, "rpc_user"),
