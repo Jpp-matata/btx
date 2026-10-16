@@ -641,6 +641,29 @@ bool Fail(std::string& err, const char* code)
     return false;
 }
 
+bool SignedModelTrustAttestation(const UniValue& attestation, const std::string& promotion_id, const std::string& destination)
+{
+    if (!attestation.exists("body") || !attestation["body"].isObject() ||
+        !attestation.exists("signature_hex")) {
+        return false;
+    }
+    const UniValue& body = attestation["body"];
+    if (!body.exists("record_type") || !body["record_type"].isStr() ||
+        body["record_type"].get_str() != "ModelTrustAttestation" ||
+        !body.exists("payload") || !body["payload"].isObject()) {
+        return false;
+    }
+    const UniValue& payload = body["payload"];
+    if (!payload.exists("promotion_id") || !payload["promotion_id"].isStr() ||
+        payload["promotion_id"].get_str() != promotion_id ||
+        !payload.exists("destination_realm_id") || !payload["destination_realm_id"].isStr() ||
+        payload["destination_realm_id"].get_str() != destination) {
+        return false;
+    }
+    std::string verify_err;
+    return VerifySignedEnvelopeV11(attestation, verify_err);
+}
+
 std::string Id96(const std::string& material)
 {
     CSHA384 hasher;
@@ -2290,6 +2313,15 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
         if (method == "lab.promotion_verify") {
             bool ready = store.records.count(RequireStr(req, "promotion_id")) != 0 && req["attestation_ids"].isArray() && !req["attestation_ids"].empty();
             const std::string promotion_id = RequireStr(req, "promotion_id");
+            std::string destination_realm;
+            {
+                UniValue prepared;
+                const auto prepared_record = store.records.find(promotion_id);
+                if (prepared_record != store.records.end() && prepared.read(prepared_record->second) && prepared.isObject() &&
+                    prepared.exists("destination_realm_id") && prepared["destination_realm_id"].isStr()) {
+                    destination_realm = prepared["destination_realm_id"].get_str();
+                }
+            }
             std::set<std::string> unique_pins;
             if (ready) {
                 for (size_t i = 0; i < req["attestation_ids"].size(); ++i) {
@@ -2308,11 +2340,17 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
                         continue;
                     }
                     UniValue attestation;
-                    if (!attestation.read(record->second) || !attestation.isObject() ||
-                        !attestation.exists("promotion_id") || !attestation["promotion_id"].isStr() ||
-                        attestation["promotion_id"].get_str() != promotion_id) {
+                    if (!attestation.read(record->second) || !attestation.isObject()) {
                         ready = false;
+                        continue;
                     }
+                    bool matches = false;
+                    if (attestation.exists("promotion_id") && attestation["promotion_id"].isStr()) {
+                        matches = attestation["promotion_id"].get_str() == promotion_id;
+                    } else if (!destination_realm.empty()) {
+                        matches = SignedModelTrustAttestation(attestation, promotion_id, destination_realm);
+                    }
+                    if (!matches) ready = false;
                 }
             }
             state = ready ? "COMPLETE" : "FAILED";

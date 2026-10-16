@@ -8,6 +8,7 @@
 #include <span.h>
 #include <univalue.h>
 
+#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -328,7 +329,9 @@ bool PullExchangeLoopback(const std::string& host, uint16_t port, const std::str
     if (repository_id.empty()) return Fail(err, "BTX035_SCOPE_DENIED");
     UniValue inner(UniValue::VOBJ);
     inner.pushKV("repository_id", repository_id);
-    inner.pushKV("idempotency_key", "peer-snapshot-pull");
+    const auto now = std::chrono::steady_clock::now().time_since_epoch();
+    const auto nonce = std::chrono::duration_cast<std::chrono::nanoseconds>(now).count();
+    inner.pushKV("idempotency_key", "peer-snapshot-" + std::to_string(nonce));
     inner.pushKV("expected_state", UniValue());
     std::string result_json;
     if (!LabCallLoopback(host, port, rpc_user, rpc_password, "lab.snapshot_export", inner.write(), result_json, err)) {
