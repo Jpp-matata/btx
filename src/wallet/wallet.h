@@ -1208,6 +1208,12 @@ public:
     bool HasEncryptionKeys() const override;
     bool HaveCryptedKeys() const;
 
+    /** Get last block processed height. Returns -1 when no block has been processed. */
+    int GetLastBlockProcessedHeight() const EXCLUSIVE_LOCKS_REQUIRED(cs_wallet)
+    {
+        AssertLockHeld(cs_wallet);
+        return m_last_block_processed_height;
+    }
     /** Get last block processed height */
     int GetLastBlockHeight() const EXCLUSIVE_LOCKS_REQUIRED(cs_wallet)
     {
