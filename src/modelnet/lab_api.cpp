@@ -1232,6 +1232,7 @@ bool DecodeTrainLine(const std::string& line, std::string& trajectory_id, Intege
         !UnescapeResearchField(parts[8], hash) || !HexN(hash, 96)) {
         return Fail(err, "BTX035_SCHEMA");
     }
+    if (state.step > INTEGER_MAX_STEPS) return Fail(err, "BTX035_LIMIT_EXCEEDED");
     state.state_hash = std::move(hash);
     err.clear();
     return true;

@@ -50,6 +50,33 @@ BOOST_AUTO_TEST_CASE(integer_profile_replays_and_rejects_a_changed_cursor)
     BOOST_CHECK_EQUAL(resumed.State().state_hash, published.state_hash);
 }
 
+BOOST_AUTO_TEST_CASE(integer_trainer_refuses_steps_past_the_cap)
+{
+    using namespace modelnet;
+    std::string err;
+    IntegerTrainer over;
+    BOOST_CHECK(!over.Run(INTEGER_MAX_STEPS + 1, err));
+    BOOST_CHECK_EQUAL(err, "BTX035_LIMIT_EXCEEDED");
+    BOOST_CHECK_EQUAL(over.State().step, uint64_t{0});
+    BOOST_CHECK(over.Intervals().empty());
+
+    IntegerTrainer at_cap;
+    BOOST_REQUIRE(at_cap.Run(INTEGER_MAX_STEPS, err));
+    BOOST_CHECK_EQUAL(at_cap.State().step, INTEGER_MAX_STEPS);
+    BOOST_CHECK(IntegerTrainer::CheckState(at_cap.State(), err));
+
+    // The cap counts the steps already taken.
+    BOOST_CHECK(!at_cap.Run(1, err));
+    BOOST_CHECK_EQUAL(err, "BTX035_LIMIT_EXCEEDED");
+    BOOST_CHECK_EQUAL(at_cap.State().step, INTEGER_MAX_STEPS);
+
+    // A published state past the cap is refused before any replay.
+    IntegerState published = at_cap.State();
+    published.step = INTEGER_MAX_STEPS + 1;
+    BOOST_CHECK(!IntegerTrainer::CheckState(published, err));
+    BOOST_CHECK_EQUAL(err, "BTX035_LIMIT_EXCEEDED");
+}
+
 BOOST_AUTO_TEST_CASE(research_views_keep_negatives_and_drop_private_rows)
 {
     using namespace modelnet;

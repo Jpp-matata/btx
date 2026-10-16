@@ -1329,6 +1329,26 @@ std::string PeerPiece(const std::string& manifest_id, const std::string& model_d
     return err;
 }
 
+std::string IntegerTrainLine(const std::string& trajectory_id, const modelnet::IntegerState& state)
+{
+    return "v1|" + trajectory_id + "|" + util::ToString(state.weight) + "|" + util::ToString(state.bias) + "|" +
+           util::ToString(state.momentum_w) + "|" + util::ToString(state.momentum_b) + "|" +
+           util::ToString(state.cursor) + "|" + util::ToString(state.step) + "|" + state.state_hash;
+}
+
+/** True when lab.audit_coverage finds a complete replay path. `first_gap` is its first gap code. */
+bool AuditComplete(const std::string& trajectory_id, std::string& first_gap)
+{
+    UniValue req(UniValue::VOBJ);
+    req.pushKV("trajectory_id", trajectory_id);
+    req.pushKV("policy_id", std::string(96, 'e'));
+    UniValue coverage;
+    std::string err;
+    BOOST_REQUIRE(LabCall("lab.audit_coverage", req, coverage, err));
+    first_gap = coverage["gaps"].empty() ? std::string() : coverage["gaps"][0].get_str();
+    return coverage["complete_path"].isTrue();
+}
+
 } // namespace
 
 BOOST_AUTO_TEST_CASE(piece_index_past_the_cap_or_after_a_gap_is_refused)
@@ -1388,6 +1408,60 @@ BOOST_AUTO_TEST_CASE(piece_index_past_the_cap_or_after_a_gap_is_refused)
     BOOST_CHECK_EQUAL(PeerPiece(blob.digest, model_c, cap), "BTX035_NOT_FOUND");
     BOOST_CHECK_EQUAL(PeerPiece(blob.digest, model_d, "0"), "OK");
     BOOST_CHECK_EQUAL(PeerPiece(blob.digest, model_d, "2"), "BTX035_NOT_FOUND");
+
+    modelnet::ResetLabApi();
+}
+
+BOOST_AUTO_TEST_CASE(integer_train_record_past_the_step_cap_is_refused)
+{
+    BOOST_REQUIRE(!m_path_root.empty());
+    ::unsetenv("BTX035_LAB_DIR");
+    ::unsetenv("BTX_GUARD_PORT");
+    modelnet::ResetLabApi();
+    using modelnet::INTEGER_MAX_STEPS;
+
+    std::string err;
+    std::string gap;
+    modelnet::IntegerTrainer at_cap;
+    BOOST_REQUIRE(at_cap.Run(INTEGER_MAX_STEPS, err));
+    const std::string cap_id(96, '5');
+    BOOST_CHECK(ImportObjects({DigestedObject("train", IntegerTrainLine(cap_id, at_cap.State()))}, "idempotency-bound-train-cap", err));
+    BOOST_CHECK(AuditComplete(cap_id, gap));
+
+    // One step past the cap is refused while the line is decoded, before any replay.
+    modelnet::IntegerState over = at_cap.State();
+    over.step = INTEGER_MAX_STEPS + 1;
+    over.cursor = INTEGER_MAX_STEPS + 1;
+    const std::string over_id(96, '6');
+    BOOST_CHECK(!ImportObjects({DigestedObject("train", IntegerTrainLine(over_id, over))}, "idempotency-bound-train-over", err));
+    BOOST_CHECK_EQUAL(err, "BTX035_LIMIT_EXCEEDED");
+    BOOST_CHECK(!AuditComplete(over_id, gap));
+    BOOST_CHECK_EQUAL(gap, "BTX035_NOT_FOUND");
+
+    // lab.json with a train step past the cap is refused as a whole, as ReadLaunch does past 4096.
+    TempTree dir{m_path_root / "btx035-lab-disk" / "train-bounds"};
+    LabDirEnv env(dir.path);
+    modelnet::ResetLabApi();
+    modelnet::IntegerTrainer lab_run;
+    BOOST_REQUIRE(lab_run.Run(modelnet::IntegerDataset().size(), err));
+    const std::string disk_id(96, '7');
+    BOOST_REQUIRE(ImportObjects({DigestedObject("train", IntegerTrainLine(disk_id, lab_run.State()))}, "idempotency-bound-train-disk", err));
+    modelnet::ReloadLabFromDisk();
+    BOOST_CHECK(AuditComplete(disk_id, gap));
+
+    UniValue disk = ReadLabJson(dir.path);
+    BOOST_REQUIRE(disk["trains"].isObject());
+    BOOST_REQUIRE(disk["trains"].exists(disk_id));
+    UniValue trains = disk["trains"];
+    UniValue row = trains[disk_id];
+    BOOST_CHECK_EQUAL(row["step"].get_str(), "8");
+    row.pushKV("step", util::ToString(INTEGER_MAX_STEPS + 1));
+    trains.pushKV(disk_id, row);
+    disk.pushKV("trains", trains);
+    WriteLabJson(dir.path, disk);
+    modelnet::ReloadLabFromDisk();
+    BOOST_CHECK(!AuditComplete(disk_id, gap));
+    BOOST_CHECK_EQUAL(gap, "BTX035_NOT_FOUND");
 
     modelnet::ResetLabApi();
 }
