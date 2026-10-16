@@ -56,6 +56,13 @@ const std::vector<IntegerExample>& IntegerDataset();
 /** SHA-384 of the canonical state line. */
 std::string IntegerStateHash(const IntegerState& state);
 
+/**
+ * Most steps one integer trainer runs, counting the steps of a resumed
+ * checkpoint. A lab run is IntegerDataset().size() == 8 steps; the cap
+ * matches LaunchTrainer's 4096.
+ */
+inline constexpr uint64_t INTEGER_MAX_STEPS = 4096;
+
 class IntegerTrainer {
 public:
     IntegerTrainer() = default;
@@ -66,7 +73,10 @@ public:
     /** One committed step. The first call starts from the zero state. */
     bool Step(std::string& err);
 
-    /** Run exactly `steps` updates from the current state. */
+    /**
+     * Run exactly `steps` updates from the current state. A total past
+     * INTEGER_MAX_STEPS is BTX035_LIMIT_EXCEEDED and runs nothing.
+     */
     bool Run(uint64_t steps, std::string& err);
 
     /**
@@ -82,7 +92,8 @@ public:
     /**
      * Recompute `published.step` updates. A cursor that is not the recomputed
      * cursor is BTX035_RNG. A weight, bias, or momentum mismatch is
-     * BTX035_ID_MISMATCH. An empty hash is BTX035_ID_MISMATCH.
+     * BTX035_ID_MISMATCH. An empty hash is BTX035_ID_MISMATCH. A step past
+     * INTEGER_MAX_STEPS is BTX035_LIMIT_EXCEEDED before any replay.
      */
     static bool CheckState(const IntegerState& published, std::string& err);
 
