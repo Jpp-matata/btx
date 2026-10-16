@@ -7,10 +7,12 @@
 #include <modelnet/lab_api.h>
 #include <modelnet/lab_exchange.h>
 #include <modelnet/research_rpc.h>
+#include <modelnet/training_integer.h>
 #include <span.h>
 #include <test/util/setup_common.h>
 #include <univalue.h>
 #include <util/fs.h>
+#include <util/string.h>
 
 #include <boost/test/unit_test.hpp>
 
@@ -19,6 +21,7 @@
 #include <sstream>
 #include <string>
 #include <system_error>
+#include <vector>
 
 BOOST_FIXTURE_TEST_SUITE(modelnet_035_disk_tests, BasicTestingSetup)
 
@@ -1250,6 +1253,142 @@ BOOST_AUTO_TEST_CASE(model_pieces_survive_reload_and_need_two_roots)
     ::unsetenv("BTX035_LAB_PEER");
     ::unsetenv("BTX035_LAB_PEER_USER");
     ::unsetenv("BTX035_LAB_PEER_PASSWORD");
+    modelnet::ResetLabApi();
+}
+
+namespace {
+
+modelnet::ExchangeObject DigestedObject(const std::string& kind, const std::string& content)
+{
+    modelnet::ExchangeObject object;
+    object.kind = kind;
+    object.content = content;
+    std::string err;
+    const std::vector<unsigned char> bytes(content.begin(), content.end());
+    BOOST_REQUIRE(modelnet::GitObjectDigest(kind, Span<const unsigned char>{bytes.data(), bytes.size()}, object.digest, err));
+    return object;
+}
+
+modelnet::ExchangeObject PieceObject(const std::string& model_digest, const std::string& index, const std::string& hex)
+{
+    return DigestedObject("piece", "v1|" + model_digest + "|" + index + "|" + hex);
+}
+
+bool ImportObjects(const std::vector<modelnet::ExchangeObject>& objects, const std::string& idem, std::string& err)
+{
+    std::string manifest;
+    BOOST_REQUIRE(modelnet::WriteExchangeManifest(objects, manifest, err));
+    UniValue import(UniValue::VOBJ);
+    import.pushKV("manifest", manifest);
+    import.pushKV("idempotency_key", idem);
+    import.pushKV("expected_state", UniValue());
+    UniValue imported;
+    return LabCall("lab.snapshot_import", import, imported, err);
+}
+
+UniValue DiskRow(const std::string& kind, const std::string& digest, const std::string& content)
+{
+    UniValue row(UniValue::VOBJ);
+    row.pushKV("kind", kind);
+    row.pushKV("digest", digest);
+    row.pushKV("content", content);
+    return row;
+}
+
+UniValue ReadLabJson(const fs::path& dir)
+{
+    std::ifstream input(PathToString(dir / "lab.json"));
+    std::stringstream buffer;
+    buffer << input.rdbuf();
+    UniValue disk;
+    BOOST_REQUIRE(disk.read(buffer.str()));
+    return disk;
+}
+
+void WriteLabJson(const fs::path& dir, const UniValue& disk)
+{
+    std::ofstream output(PathToString(dir / "lab.json"), std::ios::binary | std::ios::trunc);
+    output << disk.write();
+    BOOST_REQUIRE(output.good());
+}
+
+/** Ask the loopback peer route for one stored piece. Returns "OK" or the error code. */
+std::string PeerPiece(const std::string& manifest_id, const std::string& model_digest, const std::string& index)
+{
+    UniValue resource(UniValue::VOBJ);
+    resource.pushKV("kind", "MODEL");
+    resource.pushKV("digest48", model_digest);
+    UniValue req(UniValue::VOBJ);
+    req.pushKV("resource", resource);
+    req.pushKV("manifest_id", manifest_id);
+    req.pushKV("piece_index", index);
+    req.pushKV("maximum_bytes", "64");
+    std::string response;
+    std::string err;
+    if (modelnet::ServeLabPeer("artifacts/piece", req.write(), response, err)) return "OK";
+    return err;
+}
+
+} // namespace
+
+BOOST_AUTO_TEST_CASE(piece_index_past_the_cap_or_after_a_gap_is_refused)
+{
+    BOOST_REQUIRE(!m_path_root.empty());
+    ::unsetenv("BTX035_LAB_DIR");
+    ::unsetenv("BTX_GUARD_PORT");
+    modelnet::ResetLabApi();
+
+    const std::string last = util::ToString(modelnet::MODEL_MAX_PIECES - 1);
+    const std::string cap = util::ToString(modelnet::MODEL_MAX_PIECES);
+    const std::string cap_plus_one = util::ToString(modelnet::MODEL_MAX_PIECES + 1);
+    const std::string model_a(96, '1');
+    const std::string model_b(96, '2');
+    const std::string model_c(96, '3');
+    const std::string model_d(96, '4');
+    std::string err;
+
+    // Pieces in index order still import.
+    BOOST_CHECK(ImportObjects({PieceObject(model_a, "0", "aa"), PieceObject(model_a, "1", "bb")}, "idempotency-bound-piece-ok", err));
+    BOOST_CHECK(err.empty());
+
+    // An index at or past MODEL_MAX_PIECES is refused before anything is stored.
+    BOOST_CHECK(!ImportObjects({PieceObject(model_b, cap, "aa")}, "idempotency-bound-piece-cap", err));
+    BOOST_CHECK_EQUAL(err, "BTX035_LIMIT_EXCEEDED");
+    BOOST_CHECK(!ImportObjects({PieceObject(model_b, cap_plus_one, "aa")}, "idempotency-bound-piece-cap-1", err));
+    BOOST_CHECK_EQUAL(err, "BTX035_LIMIT_EXCEEDED");
+
+    // The last valid index passes the cap, and is then refused as a gap on an empty model.
+    BOOST_CHECK(!ImportObjects({PieceObject(model_c, last, "aa")}, "idempotency-bound-piece-last", err));
+    BOOST_CHECK_EQUAL(err, "BTX035_GAP");
+    BOOST_CHECK(!ImportObjects({PieceObject(model_c, "0", "aa"), PieceObject(model_c, "2", "cc")}, "idempotency-bound-piece-gap", err));
+    BOOST_CHECK_EQUAL(err, "BTX035_GAP");
+
+    // The reload path skips the same rows from lab.json.
+    TempTree dir{m_path_root / "btx035-lab-disk" / "piece-bounds"};
+    LabDirEnv env(dir.path);
+    modelnet::ResetLabApi();
+    const modelnet::ExchangeObject blob = DigestedObject("blob", "piece bounds manifest\n");
+    BOOST_REQUIRE(ImportObjects({blob, PieceObject(model_a, "0", "aa")}, "idempotency-bound-piece-disk", err));
+    UniValue disk = ReadLabJson(dir.path);
+    BOOST_REQUIRE(disk["repo_objects"].isObject());
+    UniValue repos = disk["repo_objects"];
+    const modelnet::ExchangeObject over_cap = PieceObject(model_b, cap, "aa");
+    UniValue rows(UniValue::VARR);
+    rows.push_back(DiskRow("piece", over_cap.digest, over_cap.content));
+    rows.push_back(DiskRow("piece", model_c, cap + ":c"));
+    rows.push_back(DiskRow("piece", model_d, "0:d"));
+    rows.push_back(DiskRow("piece", model_d, "2:e"));
+    repos.pushKV("model-bytes", rows);
+    disk.pushKV("repo_objects", repos);
+    WriteLabJson(dir.path, disk);
+
+    modelnet::ReloadLabFromDisk();
+    BOOST_CHECK_EQUAL(PeerPiece(blob.digest, model_a, "0"), "OK");
+    BOOST_CHECK_EQUAL(PeerPiece(blob.digest, model_b, cap), "BTX035_NOT_FOUND");
+    BOOST_CHECK_EQUAL(PeerPiece(blob.digest, model_c, cap), "BTX035_NOT_FOUND");
+    BOOST_CHECK_EQUAL(PeerPiece(blob.digest, model_d, "0"), "OK");
+    BOOST_CHECK_EQUAL(PeerPiece(blob.digest, model_d, "2"), "BTX035_NOT_FOUND");
+
     modelnet::ResetLabApi();
 }
 

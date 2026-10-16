@@ -7,6 +7,7 @@
 
 #include <modelnet/training_evidence.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -95,6 +96,13 @@ private:
  * A peer rehashes these bytes. The line is not a model-quality claim.
  */
 bool EncodeModelArtifact(const IntegerState& state, std::string& bytes, std::string& err);
+
+/**
+ * Most pieces one model may have; valid indexes are 0 to MODEL_MAX_PIECES - 1.
+ * At 32 bytes a piece this is 128 KiB. The lab's own model artifacts are one
+ * line of a few hundred bytes, and lab.artifact_acquire stops at this count.
+ */
+inline constexpr size_t MODEL_MAX_PIECES = 4096;
 
 /** Split into 32-byte chunks. The last chunk may be shorter. */
 bool SplitModelPieces(const std::string& bytes, std::vector<std::string>& pieces, std::string& err);
