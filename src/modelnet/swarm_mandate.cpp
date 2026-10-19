@@ -6,11 +6,18 @@
 
 #include <univalue.h>
 
+#include <charconv>
 #include <fstream>
 #include <iterator>
+#include <limits>
+#include <system_error>
+#include <utility>
 
 namespace modelnet {
 namespace {
+
+constexpr int64_t kInflightAtoms = 0;
+const char* const kAutomaticSpendAtoms = "0";
 
 bool EnsureDir(const fs::path& modeldir, fs::path& swarm_dir, std::string& err)
 {
@@ -37,6 +44,10 @@ bool WriteAtomic(const fs::path& final_path, const std::string& body, std::strin
             return false;
         }
         file << body;
+        if (!file) {
+            err = "WRITE";
+            return false;
+        }
     }
     std::error_code ec;
     fs::rename(tmp, final_path, ec);
@@ -56,10 +67,107 @@ bool ReadRaw(const fs::path& path, std::string& raw)
     return true;
 }
 
-bool SameIdentity(const SwarmMandate& a, const SwarmMandate& b)
+bool ParseInt(const UniValue& value, int64_t& out)
 {
-    return a.mandate_id == b.mandate_id && a.pool_id == b.pool_id && a.actor == b.actor && a.recipients == b.recipients &&
-           a.ceiling == b.ceiling && a.expiry_height == b.expiry_height && a.nonce == b.nonce;
+    if (!value.isNum()) return false;
+    const std::string& text = value.getValStr();
+    if (text.empty()) return false;
+    int64_t parsed = 0;
+    const char* const first = text.data();
+    const char* const last = text.data() + text.size();
+    const std::from_chars_result result = std::from_chars(first, last, parsed);
+    if (result.ec != std::errc{} || result.ptr != last) return false;
+    out = parsed;
+    return true;
+}
+
+bool HasForbiddenSpend(const UniValue& obj, std::string& err)
+{
+    if (obj.exists("spend")) {
+        err = "SPEND";
+        return true;
+    }
+    for (const char* key : {"automatic_spend", "automatic_spend_atoms"}) {
+        if (!obj.exists(key)) continue;
+        const UniValue& value = obj[key];
+        if (value.isStr()) {
+            if (value.get_str() == kAutomaticSpendAtoms) continue;
+            err = "SPEND";
+            return true;
+        }
+        int64_t atoms = 0;
+        if (!value.isNum() || !ParseInt(value, atoms) || atoms != 0) {
+            err = "SPEND";
+            return true;
+        }
+    }
+    return false;
+}
+
+bool AddNonNegative(int64_t& acc, int64_t part)
+{
+    if (part < 0 || acc > std::numeric_limits<int64_t>::max() - part) return false;
+    acc += part;
+    return true;
+}
+
+bool CollateralAccepts(int64_t collateral, int64_t exit_reserve, int64_t fee_reserve)
+{
+    if (collateral <= 0 || exit_reserve < 0 || fee_reserve < 0) return false;
+    if (exit_reserve >= collateral) return false;
+    return fee_reserve < collateral - exit_reserve;
+}
+
+bool RecipientListed(const std::vector<std::string>& recipients, const std::string& recipient)
+{
+    for (const std::string& allowed : recipients) {
+        if (allowed == recipient) return true;
+    }
+    return false;
+}
+
+bool AuthorizationFields(const SwarmMandate& mandate)
+{
+    if (mandate.mandate_id.empty() || mandate.pool_id.empty() || mandate.actor.empty() || mandate.nonce.empty()) return false;
+    if (mandate.ceiling <= 0 || mandate.expiry_height <= 0 || mandate.recipients.empty()) return false;
+    for (const std::string& recipient : mandate.recipients) {
+        if (recipient.empty()) return false;
+    }
+    return true;
+}
+
+bool SameAuthorization(const SwarmMandate& stored, const SwarmMandate& incoming)
+{
+    return stored.pool_id == incoming.pool_id && stored.actor == incoming.actor && stored.recipients == incoming.recipients &&
+           stored.ceiling == incoming.ceiling && stored.expiry_height == incoming.expiry_height && stored.nonce == incoming.nonce;
+}
+
+SwarmConservation ConservationOf(int64_t collateral, int64_t exit_reserve, int64_t fee_reserve, int64_t inflight, int64_t assigned)
+{
+    SwarmConservation out;
+    out.collateral = collateral;
+    out.exit_reserve = exit_reserve;
+    out.fee_reserve = fee_reserve;
+    out.inflight = inflight;
+    out.assigned = assigned;
+    if (!CollateralAccepts(collateral, exit_reserve, fee_reserve) || inflight < 0 || assigned < 0) return out;
+    int64_t left = collateral;
+    const int64_t parts[] = {exit_reserve, fee_reserve, inflight, assigned};
+    for (const int64_t part : parts) {
+        if (part > left) {
+            out.available = left - part;
+            return out;
+        }
+        left -= part;
+    }
+    out.available = left;
+    int64_t sum = 0;
+    if (!AddNonNegative(sum, out.available) || !AddNonNegative(sum, out.inflight) || !AddNonNegative(sum, out.assigned) ||
+        !AddNonNegative(sum, out.exit_reserve) || !AddNonNegative(sum, out.fee_reserve)) {
+        return out;
+    }
+    out.ok = out.available >= 0 && sum == out.collateral;
+    return out;
 }
 
 } // namespace
@@ -70,7 +178,7 @@ bool SwarmMandateBook::Open(int64_t collateral, int64_t exit_reserve, int64_t fe
         err = "REOPEN";
         return false;
     }
-    if (collateral <= 0 || exit_reserve < 0 || fee_reserve < 0 || exit_reserve + fee_reserve >= collateral) {
+    if (!CollateralAccepts(collateral, exit_reserve, fee_reserve)) {
         err = "COLLATERAL";
         return false;
     }
@@ -86,17 +194,21 @@ bool SwarmMandateBook::Open(int64_t collateral, int64_t exit_reserve, int64_t fe
 
 bool SwarmMandateBook::Grant(const SwarmMandate& mandate, std::string& err)
 {
-    if (!m_open || mandate.mandate_id.empty() || mandate.pool_id.empty() || mandate.actor.empty() || mandate.nonce.empty() ||
-        mandate.recipients.empty() || mandate.ceiling <= 0 || mandate.expiry_height <= 0) {
+    if (!m_open) {
+        err = "NOT_OPEN";
+        return false;
+    }
+    if (!AuthorizationFields(mandate)) {
         err = "MANDATE";
         return false;
     }
     const auto it = m_mandates.find(mandate.mandate_id);
     if (it != m_mandates.end()) {
-        if (!SameIdentity(it->second, mandate)) {
+        if (!SameAuthorization(it->second, mandate)) {
             err = "CONFLICT";
             return false;
         }
+        // Same authorization cap. Spent is unchanged. Revocation stays.
         err.clear();
         return true;
     }
@@ -110,8 +222,12 @@ bool SwarmMandateBook::Grant(const SwarmMandate& mandate, std::string& err)
 
 bool SwarmMandateBook::Revoke(const std::string& mandate_id, std::string& err)
 {
+    if (!m_open) {
+        err = "NOT_OPEN";
+        return false;
+    }
     const auto it = m_mandates.find(mandate_id);
-    if (!m_open || it == m_mandates.end()) {
+    if (it == m_mandates.end()) {
         err = "MANDATE";
         return false;
     }
@@ -123,8 +239,8 @@ bool SwarmMandateBook::Revoke(const std::string& mandate_id, std::string& err)
 bool SwarmMandateBook::Reserve(const std::string& mandate_id, const std::string& work_id, const std::string& recipient,
                                int64_t atoms, int64_t height, std::string& err)
 {
-    if (!m_open || work_id.empty()) {
-        err = "WORK";
+    if (!m_open) {
+        err = "NOT_OPEN";
         return false;
     }
     const auto it = m_mandates.find(mandate_id);
@@ -140,16 +256,16 @@ bool SwarmMandateBook::Reserve(const std::string& mandate_id, const std::string&
         err = "EXPIRED";
         return false;
     }
-    bool listed = false;
-    for (const std::string& allowed : it->second.recipients) {
-        if (allowed == recipient) listed = true;
-    }
-    if (!listed) {
+    if (!RecipientListed(it->second.recipients, recipient)) {
         err = "RECIPIENT";
         return false;
     }
     if (atoms <= 0) {
         err = "AMOUNT";
+        return false;
+    }
+    if (work_id.empty()) {
+        err = "WORK";
         return false;
     }
     const auto work = m_work.find(work_id);
@@ -161,12 +277,12 @@ bool SwarmMandateBook::Reserve(const std::string& mandate_id, const std::string&
         err = "CONFLICT";
         return false;
     }
-    if (it->second.spent > it->second.ceiling - atoms) {
+    if (it->second.spent < 0 || it->second.spent > it->second.ceiling || atoms > it->second.ceiling - it->second.spent) {
         err = "CEILING";
         return false;
     }
     const SwarmConservation now = Conserved();
-    if (atoms > now.available) {
+    if (!now.ok || atoms > now.available) {
         err = "CONSERVATION";
         return false;
     }
@@ -178,15 +294,13 @@ bool SwarmMandateBook::Reserve(const std::string& mandate_id, const std::string&
 
 SwarmConservation SwarmMandateBook::Conserved() const
 {
-    SwarmConservation out;
-    out.collateral = m_collateral;
-    out.exit_reserve = m_exit;
-    out.fee_reserve = m_fee;
-    out.inflight = 0;
-    for (const auto& item : m_mandates) out.assigned += item.second.spent;
-    out.available = m_collateral - m_exit - m_fee - out.inflight - out.assigned;
-    out.ok = m_open && out.available >= 0 &&
-             out.available + out.inflight + out.assigned + out.exit_reserve + out.fee_reserve == m_collateral;
+    if (!m_open) return {};
+    int64_t assigned = 0;
+    for (const auto& item : m_mandates) {
+        if (!AddNonNegative(assigned, item.second.spent)) return {};
+    }
+    SwarmConservation out = ConservationOf(m_collateral, m_exit, m_fee, kInflightAtoms, assigned);
+    out.ok = out.ok && out.inflight == kInflightAtoms;
     return out;
 }
 
@@ -194,6 +308,11 @@ bool SwarmMandateBook::Persist(const fs::path& modeldir, std::string& err)
 {
     if (!m_open) {
         err = "NOT_OPEN";
+        return false;
+    }
+    const SwarmConservation now = Conserved();
+    if (!now.ok) {
+        err = "CONSERVATION";
         return false;
     }
     fs::path swarm_dir;
@@ -215,63 +334,164 @@ bool SwarmMandateBook::Persist(const fs::path& modeldir, std::string& err)
         row.pushKV("spent", mandate.spent);
         mandates.push_back(std::move(row));
     }
-    UniValue work(UniValue::VARR);
+    UniValue works(UniValue::VARR);
     for (const auto& item : m_work) {
         UniValue row(UniValue::VOBJ);
         row.pushKV("atoms", item.second.atoms);
         row.pushKV("mandate_id", item.second.mandate_id);
         row.pushKV("recipient", item.second.recipient);
         row.pushKV("work_id", item.first);
-        work.push_back(std::move(row));
+        works.push_back(std::move(row));
     }
     UniValue out(UniValue::VOBJ);
-    out.pushKV("automatic_spend_atoms", "0");
+    out.pushKV("assigned", now.assigned);
+    out.pushKV("automatic_spend_atoms", kAutomaticSpendAtoms);
+    out.pushKV("available", now.available);
     out.pushKV("collateral", m_collateral);
     out.pushKV("exit_reserve", m_exit);
     out.pushKV("fee_reserve", m_fee);
+    out.pushKV("inflight", kInflightAtoms);
     out.pushKV("mandates", mandates);
-    out.pushKV("work", work);
+    out.pushKV("ok", now.ok);
+    out.pushKV("works", works);
     return WriteAtomic(swarm_dir / "mandates.json", out.write(0, 0) + "\n", err);
 }
 
 bool SwarmMandateBook::Load(const fs::path& modeldir, std::string& err)
 {
-    std::string raw;
-    UniValue root;
-    if (!ReadRaw(modeldir / "swarm" / "mandates.json", raw) || !root.read(raw) || !root.isObject()) {
-        err = "MANDATE_READ";
+    if (modeldir.empty()) {
+        err = "MODELDIR";
         return false;
     }
-    if (root.exists("automatic_spend_atoms") && root["automatic_spend_atoms"].get_str() != "0") {
+    const fs::path path = modeldir / "swarm" / "mandates.json";
+    std::string raw;
+    UniValue root;
+    if (!ReadRaw(path, raw) || !root.read(raw) || !root.isObject()) {
+        err = "LOAD";
+        return false;
+    }
+    if (HasForbiddenSpend(root, err)) return false;
+    if (!root.exists("assigned") || !root.exists("automatic_spend_atoms") || !root.exists("available") ||
+        !root.exists("collateral") || !root.exists("exit_reserve") || !root.exists("fee_reserve") || !root.exists("inflight") ||
+        !root.exists("mandates") || !root.exists("ok") || !root.exists("works") || !root["automatic_spend_atoms"].isStr() ||
+        !root["ok"].isBool() || !root["mandates"].isArray() || !root["works"].isArray()) {
+        err = "LOAD";
+        return false;
+    }
+    if (root["automatic_spend_atoms"].get_str() != kAutomaticSpendAtoms) {
         err = "SPEND";
         return false;
     }
-    m_collateral = root["collateral"].getInt<int64_t>();
-    m_exit = root["exit_reserve"].getInt<int64_t>();
-    m_fee = root["fee_reserve"].getInt<int64_t>();
-    m_mandates.clear();
-    m_work.clear();
+    int64_t assigned = 0;
+    int64_t available = 0;
+    int64_t collateral = 0;
+    int64_t exit_reserve = 0;
+    int64_t fee_reserve = 0;
+    int64_t inflight = 0;
+    if (!ParseInt(root["assigned"], assigned) || !ParseInt(root["available"], available) || !ParseInt(root["collateral"], collateral) ||
+        !ParseInt(root["exit_reserve"], exit_reserve) || !ParseInt(root["fee_reserve"], fee_reserve) ||
+        !ParseInt(root["inflight"], inflight) || inflight != kInflightAtoms) {
+        err = "LOAD";
+        return false;
+    }
+    std::map<std::string, SwarmMandate> mandates;
     for (const UniValue& item : root["mandates"].getValues()) {
+        if (!item.isObject() || HasForbiddenSpend(item, err)) {
+            if (err != "SPEND") err = "LOAD";
+            return false;
+        }
+        if (!item.exists("actor") || !item.exists("ceiling") || !item.exists("expiry_height") || !item.exists("mandate_id") ||
+            !item.exists("nonce") || !item.exists("pool_id") || !item.exists("recipients") || !item.exists("revoked") ||
+            !item.exists("spent") || !item["actor"].isStr() || !item["mandate_id"].isStr() || !item["nonce"].isStr() ||
+            !item["pool_id"].isStr() || !item["recipients"].isArray() || !item["revoked"].isBool()) {
+            err = "LOAD";
+            return false;
+        }
         SwarmMandate mandate;
         mandate.actor = item["actor"].get_str();
-        mandate.ceiling = item["ceiling"].getInt<int64_t>();
-        mandate.expiry_height = item["expiry_height"].getInt<int64_t>();
         mandate.mandate_id = item["mandate_id"].get_str();
         mandate.nonce = item["nonce"].get_str();
         mandate.pool_id = item["pool_id"].get_str();
         mandate.revoked = item["revoked"].get_bool();
-        mandate.spent = item["spent"].getInt<int64_t>();
-        for (const UniValue& recipient : item["recipients"].getValues()) mandate.recipients.push_back(recipient.get_str());
-        m_mandates.emplace(mandate.mandate_id, std::move(mandate));
+        if (!ParseInt(item["ceiling"], mandate.ceiling) || !ParseInt(item["expiry_height"], mandate.expiry_height) ||
+            !ParseInt(item["spent"], mandate.spent)) {
+            err = "LOAD";
+            return false;
+        }
+        for (const UniValue& recipient : item["recipients"].getValues()) {
+            if (!recipient.isStr()) {
+                err = "LOAD";
+                return false;
+            }
+            mandate.recipients.push_back(recipient.get_str());
+        }
+        if (!AuthorizationFields(mandate) || mandate.spent < 0 || mandate.spent > mandate.ceiling) {
+            err = "LOAD";
+            return false;
+        }
+        if (!mandates.emplace(mandate.mandate_id, std::move(mandate)).second) {
+            err = "LOAD";
+            return false;
+        }
     }
-    for (const UniValue& item : root["work"].getValues()) {
+    std::map<std::string, Work> works;
+    std::map<std::string, int64_t> spent_from_works;
+    for (const UniValue& item : root["works"].getValues()) {
+        if (!item.isObject() || HasForbiddenSpend(item, err)) {
+            if (err != "SPEND") err = "LOAD";
+            return false;
+        }
+        if (!item.exists("atoms") || !item.exists("mandate_id") || !item.exists("recipient") || !item.exists("work_id") ||
+            !item["mandate_id"].isStr() || !item["recipient"].isStr() || !item["work_id"].isStr()) {
+            err = "LOAD";
+            return false;
+        }
         Work row;
-        row.atoms = item["atoms"].getInt<int64_t>();
         row.mandate_id = item["mandate_id"].get_str();
         row.recipient = item["recipient"].get_str();
-        m_work.emplace(item["work_id"].get_str(), std::move(row));
+        const std::string work_id = item["work_id"].get_str();
+        if (work_id.empty() || row.recipient.empty() || !ParseInt(item["atoms"], row.atoms) || row.atoms <= 0) {
+            err = "LOAD";
+            return false;
+        }
+        const auto mit = mandates.find(row.mandate_id);
+        if (mit == mandates.end() || !RecipientListed(mit->second.recipients, row.recipient)) {
+            err = "LOAD";
+            return false;
+        }
+        int64_t& tally = spent_from_works[row.mandate_id];
+        if (!AddNonNegative(tally, row.atoms) || tally > mit->second.ceiling) {
+            err = "LOAD";
+            return false;
+        }
+        if (!works.emplace(work_id, std::move(row)).second) {
+            err = "LOAD";
+            return false;
+        }
+    }
+    int64_t spent_sum = 0;
+    for (const auto& item : mandates) {
+        const int64_t tally = spent_from_works.count(item.first) ? spent_from_works[item.first] : 0;
+        if (tally != item.second.spent || !AddNonNegative(spent_sum, item.second.spent)) {
+            err = "LOAD";
+            return false;
+        }
+    }
+    if (spent_sum != assigned) {
+        err = "LOAD";
+        return false;
+    }
+    const SwarmConservation rebuilt = ConservationOf(collateral, exit_reserve, fee_reserve, inflight, assigned);
+    if (!rebuilt.ok || rebuilt.available != available || root["ok"].get_bool() != rebuilt.ok) {
+        err = "LOAD";
+        return false;
     }
     m_open = true;
+    m_collateral = collateral;
+    m_exit = exit_reserve;
+    m_fee = fee_reserve;
+    m_mandates = std::move(mandates);
+    m_work = std::move(works);
     err.clear();
     return true;
 }

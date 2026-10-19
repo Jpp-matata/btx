@@ -36,7 +36,11 @@ struct SwarmConservation {
     bool ok{false};
 };
 
-/** Authorization caps and a conservation identity. No spend key and no broadcast. */
+/**
+ * Local authorization caps. A mandate ceiling is not a second copy of the coins.
+ * Reserve moves atoms into assigned. Inflight stays 0 because this book creates
+ * no HTLC. automatic_spend_atoms is the string "0". No spend key and no broadcast.
+ */
 class SwarmMandateBook {
 public:
     bool Open(int64_t collateral, int64_t exit_reserve, int64_t fee_reserve, std::string& err);

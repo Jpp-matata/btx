@@ -252,11 +252,12 @@ bool SwarmAttemptBook::Load(const fs::path& modeldir, std::string& err)
         return false;
     }
     std::string raw;
-    std::vector<SwarmAttempt> rows;
-    if (!ReadRaw(modeldir / "swarm" / "attempts.json", raw) || !ParseAttempts(raw, rows, err)) {
-        if (err.empty()) err = "READ";
+    if (!ReadRaw(modeldir / "swarm" / "attempts.json", raw)) {
+        err = "READ";
         return false;
     }
+    std::vector<SwarmAttempt> rows;
+    if (!ParseAttempts(raw, rows, err)) return false;
     m_rows = std::move(rows);
     err.clear();
     return true;
