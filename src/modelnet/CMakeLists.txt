@@ -19,6 +19,19 @@ add_library(bitcoin_modelnet STATIC
   store.cpp
   piece_store.cpp
   swarm.cpp
+  swarm_observer.cpp
+  swarm_codec.cpp
+  swarm_lifecycle.cpp
+  swarm_execution.cpp
+  swarm_evolution.cpp
+  swarm_economy.cpp
+  swarm_channel.cpp
+  swarm_membership.cpp
+  swarm_records.cpp
+  swarm_frontier.cpp
+  swarm_paymesh.cpp
+  swarm_close.cpp
+  swarm_node.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
@@ -176,6 +189,8 @@ target_link_libraries(bitcoin_modelnet
     OpenSSL::SSL
     OpenSSL::Crypto
     Threads::Threads
+  PRIVATE
+    bitcoin_consensus
 )
 target_include_directories(bitcoin_modelnet
   PUBLIC

@@ -600,6 +600,13 @@ if(WITH_MODELNET)
     modelnet_035_launch_tests.cpp
     modelnet_035_complete_tests.cpp
     modelnet_035_disk_tests.cpp
+    swarm_observer_tests.cpp
+    swarm_mesh_tests.cpp
+    swarm_records_tests.cpp
+    swarm_frontier_tests.cpp
+    swarm_paymesh_tests.cpp
+    swarm_close_tests.cpp
+    swarm_node_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp

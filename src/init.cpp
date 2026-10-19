@@ -124,6 +124,7 @@
 #include <modelnet/policy.h>
 #include <modelnet/profile.h>
 #include <modelnet/supervisor.h>
+#include <modelnet/swarm_observer.h>
 #endif
 
 #include <algorithm>
@@ -365,6 +366,7 @@ void Shutdown(NodeContext& node)
     Assert(node.args);
 
 #ifdef ENABLE_MODELNET
+    modelnet::StopSwarmObserver();
     if (g_model_helper) {
         LogPrintf("Shutdown: stopping owned btx-modeld helper\n");
         g_model_helper->Stop();
@@ -4387,6 +4389,9 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
         if (!helper_err.empty()) {
             LogPrintf("model helper: %s (monetary node continues)\n", helper_err);
         }
+        // Observer subscriptions and the mesh refresh live in this process.
+        // A missing catalog does nothing. The Python sidecar is not started.
+        modelnet::StartSwarmObserver(hcfg.modeldir);
     } else {
         LogPrintf("model network disabled (-modelnet=0); monetary node continues\n");
     }

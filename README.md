@@ -19,6 +19,20 @@ fetch, `.btx` / `btx://` retrieve, checkout, optional GPU **load**, and
 has compute; the Native Model Network delivers models to it. Inference is
 **local after acquire**. BTX is not a remote inference marketplace.
 
+ModelNet starts with `btxd`. No second program and no extra startup flag is
+required. A byte-verified complete model joins its lineage in this process.
+The same process selects a small-world neighborhood and, when the operator
+has not written a device file, offers two useful roles: seeding models whose
+catalog row says they are public, and CPU evaluation. It does not assume a
+GPU, so it does not train. It does not read private prompts. `automatic_spend_atoms`
+stays `"0"` until an operator wallet signs a bounded mandate. The scheduler
+never holds a spend key. The reference package under `contrib/swarm` is not
+launched. Lineage records, evaluation boards, promotion heads, and payment
+templates are part of the same process. A download license is not a training
+grant and is not a redistribution grant. An open-license local run is not
+taxed, and attaching a revenue manifest to a model file creates no obligation.
+A profit-share instrument is refused. Nothing in this path broadcasts.
+
 Two markets sit on the model plane:
 
 - **Release campaigns** pay to open an existing private model into the
