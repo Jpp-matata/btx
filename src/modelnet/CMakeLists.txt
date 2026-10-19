@@ -43,6 +43,7 @@ add_library(bitcoin_modelnet STATIC
   swarm_attempt.cpp
   swarm_fabric.cpp
   swarm_follow.cpp
+  swarm_opening.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
