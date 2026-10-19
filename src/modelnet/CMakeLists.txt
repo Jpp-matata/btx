@@ -39,6 +39,10 @@ add_library(bitcoin_modelnet STATIC
   swarm_timescale.cpp
   swarm_raftlog.cpp
   swarm_piece.cpp
+  swarm_mandate.cpp
+  swarm_attempt.cpp
+  swarm_fabric.cpp
+  swarm_follow.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
