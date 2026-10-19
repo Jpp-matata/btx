@@ -3,6 +3,7 @@
 // file COPYING or https://opensource.org/license/mit/.
 
 #include <modelnet/swarm_lifecycle.h>
+#include <modelnet/swarm_live.h>
 #include <modelnet/swarm_node.h>
 #include <modelnet/swarm_observer.h>
 
@@ -283,6 +284,10 @@ void StartSwarmObserver(const fs::path& modeldir)
                     std::string join_err;
                     if (!SwarmIntegrateCatalog(modeldir, join_err)) {
                         LogPrintf("swarm join: %s (monetary node continues)\n", join_err);
+                    }
+                    std::string live_err;
+                    if (!SwarmPublishLive(modeldir, live_err)) {
+                        LogPrintf("swarm live: %s (monetary node continues)\n", live_err);
                     }
                 }
             } catch (const std::exception& e) {

@@ -32,6 +32,9 @@ add_library(bitcoin_modelnet STATIC
   swarm_paymesh.cpp
   swarm_close.cpp
   swarm_node.cpp
+  swarm_clearing.cpp
+  swarm_liquidity.cpp
+  swarm_live.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp

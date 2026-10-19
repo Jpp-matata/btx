@@ -607,6 +607,9 @@ if(WITH_MODELNET)
     swarm_paymesh_tests.cpp
     swarm_close_tests.cpp
     swarm_node_tests.cpp
+    swarm_clearing_tests.cpp
+    swarm_liquidity_tests.cpp
+    swarm_live_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp
