@@ -17,8 +17,10 @@ extern "C" {
 #include <atomic>
 #include <chrono>
 #include <cstddef>
+#include <limits>
 #include <set>
 #include <stdexcept>
+#include <string>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -101,6 +103,54 @@ ExactReplayPqAttestation MustSignPq(
     auto attestation{SignStatementMlDsa44(statement, sk, pk)};
     BOOST_REQUIRE(attestation.has_value());
     return *attestation;
+}
+
+//! The high-S twin (n - s) of a strict-DER low-S signature. Same ECDSA
+//! signature for a lax verifier; the attestation layer must refuse it.
+std::vector<unsigned char> ToHighS(const std::vector<unsigned char>& sig)
+{
+    static constexpr std::array<unsigned char, 32> ORDER{
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFE,
+        0xBA, 0xAE, 0xDC, 0xE6, 0xAF, 0x48, 0xA0, 0x3B,
+        0xBF, 0xD2, 0x5E, 0x8C, 0xD0, 0x36, 0x41, 0x41};
+    BOOST_REQUIRE(sig.size() >= 8 && sig[0] == 0x30 && sig[2] == 0x02);
+    const size_t len_r{sig[3]};
+    const std::vector<unsigned char> r(sig.begin() + 4, sig.begin() + 4 + len_r);
+    BOOST_REQUIRE(sig[4 + len_r] == 0x02);
+    const size_t len_s{sig[5 + len_r]};
+    std::vector<unsigned char> low(sig.begin() + 6 + len_r,
+                                   sig.begin() + 6 + len_r + len_s);
+    while (low.size() > 32 && low.front() == 0) low.erase(low.begin());
+    BOOST_REQUIRE(low.size() <= 32);
+    std::array<unsigned char, 32> s{};
+    std::copy(low.begin(), low.end(), s.begin() + (32 - low.size()));
+    std::vector<unsigned char> high(32);
+    int borrow{0};
+    for (int i = 31; i >= 0; --i) {
+        int v{int{ORDER[i]} - int{s[i]} - borrow};
+        borrow = v < 0 ? 1 : 0;
+        high[i] = static_cast<unsigned char>(v + 256 * borrow);
+    }
+    while (high.size() > 1 && high[0] == 0 && !(high[1] & 0x80)) {
+        high.erase(high.begin());
+    }
+    if (high[0] & 0x80) high.insert(high.begin(), 0);
+    std::vector<unsigned char> out{0x30, 0x00, 0x02,
+                                   static_cast<unsigned char>(r.size())};
+    out.insert(out.end(), r.begin(), r.end());
+    out.push_back(0x02);
+    out.push_back(static_cast<unsigned char>(high.size()));
+    out.insert(out.end(), high.begin(), high.end());
+    out[1] = static_cast<unsigned char>(out.size() - 2);
+    return out;
+}
+
+std::set<CPubKey> Signers(const std::vector<ExactReplayAttestation>& atts)
+{
+    std::set<CPubKey> out;
+    for (const auto& attestation : atts) out.insert(attestation.signer);
+    return out;
 }
 
 } // namespace
@@ -1460,6 +1510,237 @@ BOOST_AUTO_TEST_CASE(pq_pin_rejects_empty_and_wrong_size)
     ok.trusted_pq_signers.push_back(pq_pk);
     ok.threshold = 1;
     BOOST_CHECK_NO_THROW(AttestationStore{ok});
+}
+
+BOOST_AUTO_TEST_CASE(heard_for_serve_filters_hash_and_height)
+{
+    const auto pin{MakeKeys(1)};
+    const auto open{MakeKeys(5)};
+    const uint256 chain{TestHash(0xe1)};
+    const uint256 block{TestHash(0xe2)};
+    const uint256 other{TestHash(0xe3)};
+    const uint256 lower{TestHash(0xd0)};
+    auto config{MakeConfig(chain, pin, /*threshold=*/1)};
+    config.open_attestors = true;
+    AttestationStore store{config};
+
+    const auto wanted{MustSign(MakeStatement(chain, block, 60), open[0])};
+    BOOST_REQUIRE(store.Add(wanted, block, 60) == AddResult::Heard);
+    BOOST_REQUIRE(store.Add(MustSign(MakeStatement(chain, other, 60), open[1]),
+                            other, 60) == AddResult::Heard);
+    BOOST_REQUIRE(store.Add(MustSign(MakeStatement(chain, block, 61), open[2]),
+                            block, 61) == AddResult::Heard);
+    // Neighbours that sort just before (block, 60) in the directory.
+    BOOST_REQUIRE(store.Add(MustSign(MakeStatement(chain, lower, 60), open[3]),
+                            lower, 60) == AddResult::Heard);
+    BOOST_REQUIRE(store.Add(MustSign(MakeStatement(chain, block, 59), open[4]),
+                            block, 59) == AddResult::Heard);
+
+    const auto served{store.GetHeardForServe(block, 60, 16, 0)};
+    BOOST_REQUIRE_EQUAL(served.size(), 1U);
+    BOOST_CHECK(served[0] == wanted);
+    BOOST_CHECK(store.GetHeardForServe(block, 60, 0, 0).empty());
+    BOOST_CHECK(store.GetHeardForServe(TestHash(0xe4), 60, 16, 0).empty());
+    BOOST_CHECK(store.GetHeardForServe(block, 62, 16, 0).empty());
+    // Same answer as the full-directory reader, for every stored block.
+    for (const auto& [hash, height] : std::vector<std::pair<uint256, int32_t>>{
+             {block, 60}, {other, 60}, {block, 61}, {lower, 60}, {block, 59}}) {
+        BOOST_CHECK(store.GetHeardForServe(hash, height, 16, 0) ==
+                    store.GetHeard(hash, height));
+        BOOST_CHECK_EQUAL(store.GetHeardForServe(hash, height, 16, 0).size(), 1U);
+    }
+    // Read-only directory: nothing moves into quorum or out of the store.
+    const StoreStats stats{store.GetStats()};
+    BOOST_CHECK_EQUAL(stats.heard_attestations, 5U);
+    BOOST_CHECK_EQUAL(stats.accepted, 0U);
+    BOOST_CHECK(!store.HasQuorum(block, 60));
+    BOOST_CHECK(store.AdmittedOpenSigners().empty());
+}
+
+BOOST_AUTO_TEST_CASE(heard_for_serve_caps_and_rotates)
+{
+    const auto pin{MakeKeys(1)};
+    const auto open{MakeKeys(10)};
+    const uint256 chain{TestHash(0xe5)};
+    const uint256 block{TestHash(0xe6)};
+    auto config{MakeConfig(chain, pin, /*threshold=*/1)};
+    config.open_attestors = true;
+    AttestationStore store{config};
+    for (const auto& key : open) {
+        BOOST_REQUIRE(store.Add(MustSign(MakeStatement(chain, block, 70), key),
+                                block, 70) == AddResult::Heard);
+    }
+    // Directory order is signer bytes, which a flooder can grind; the
+    // rotation makes repeated answers walk the whole set.
+    const auto all{store.GetHeard(block, 70)};
+    BOOST_REQUIRE_EQUAL(all.size(), 10U);
+
+    const auto first{store.GetHeardForServe(block, 70, 4, 0)};
+    const auto second{store.GetHeardForServe(block, 70, 4, 4)};
+    const auto third{store.GetHeardForServe(block, 70, 4, 8)};
+    BOOST_REQUIRE_EQUAL(first.size(), 4U);
+    BOOST_REQUIRE_EQUAL(second.size(), 4U);
+    BOOST_REQUIRE_EQUAL(third.size(), 4U);
+    for (size_t i = 0; i < 4; ++i) {
+        BOOST_CHECK(first[i] == all[i]);
+        BOOST_CHECK(second[i] == all[4 + i]);
+        BOOST_CHECK(third[i] == all[(8 + i) % all.size()]);
+    }
+    std::set<CPubKey> walked{Signers(first)};
+    for (const auto& signer : Signers(second)) walked.insert(signer);
+    for (const auto& signer : Signers(third)) walked.insert(signer);
+    BOOST_CHECK(walked == Signers(all));
+
+    // The cursor is a free-running uint32_t; wrap is harmless.
+    const auto wrapped{store.GetHeardForServe(
+        block, 70, 4, std::numeric_limits<uint32_t>::max())};
+    BOOST_REQUIRE_EQUAL(wrapped.size(), 4U);
+    BOOST_CHECK(wrapped[0] ==
+                all[std::numeric_limits<uint32_t>::max() % all.size()]);
+    // Fewer heard keys than the cap: each is served once per answer.
+    BOOST_CHECK_EQUAL(store.GetHeardForServe(block, 70, 16, 3).size(), 10U);
+    BOOST_CHECK_EQUAL(Signers(store.GetHeardForServe(block, 70, 16, 3)).size(),
+                      10U);
+}
+
+BOOST_AUTO_TEST_CASE(heard_for_serve_skips_local_and_blocked)
+{
+    const auto pin{MakeKeys(1)};
+    const auto local{MakeKeys(1)};
+    const auto open{MakeKeys(3)};
+    const uint256 chain{TestHash(0xe7)};
+    const uint256 block{TestHash(0xe8)};
+    const uint256 twin{TestHash(0xe9)};
+    auto config{MakeConfig(chain, pin, /*threshold=*/1)};
+    config.open_attestors = true;
+    // Open attestors with a pin that already has M keys: the local key is
+    // not seeded into the pin and signs as an open key.
+    config.local_signer = local[0];
+    AttestationStore store{config};
+    BOOST_REQUIRE(!store.IsPinnedSigner(local[0].GetPubKey()));
+
+    BOOST_REQUIRE(store.SignLocal(block, 80) == AddResult::Heard);
+    for (const auto& key : open) {
+        BOOST_REQUIRE(store.Add(MustSign(MakeStatement(chain, block, 80), key),
+                                block, 80) == AddResult::Heard);
+    }
+    BOOST_REQUIRE_EQUAL(store.GetHeard(block, 80).size(), 4U);
+    auto served{Signers(store.GetHeardForServe(block, 80, 16, 0))};
+    BOOST_CHECK_EQUAL(served.size(), 3U);
+    BOOST_CHECK_EQUAL(served.count(local[0].GetPubKey()), 0U);
+
+    // Runtime blocklist: never served, and not re-admitted on a replay.
+    BOOST_REQUIRE(store.AddBlocklistedSigner(open[0].GetPubKey()) ==
+                  BlocklistResult::Blocked);
+    BOOST_CHECK(store.Add(MustSign(MakeStatement(chain, block, 80), open[0]),
+                          block, 80) == AddResult::BlocklistedSigner);
+    served = Signers(store.GetHeardForServe(block, 80, 16, 0));
+    BOOST_CHECK_EQUAL(served.count(open[0].GetPubKey()), 0U);
+    BOOST_CHECK_EQUAL(served.size(), 2U);
+
+    // Equivocation freezes the key and drops it from the directory.
+    BOOST_CHECK(store.Add(MustSign(MakeStatement(chain, twin, 80), open[1]),
+                          twin, 80) == AddResult::Equivocation);
+    BOOST_REQUIRE(store.IsFrozenOpenSigner(open[1].GetPubKey()));
+    served = Signers(store.GetHeardForServe(block, 80, 16, 0));
+    BOOST_CHECK_EQUAL(served.count(open[1].GetPubKey()), 0U);
+    BOOST_CHECK(Signers(store.GetHeardForServe(twin, 80, 16, 0)).empty());
+    BOOST_CHECK(served == std::set<CPubKey>{open[2].GetPubKey()});
+}
+
+BOOST_AUTO_TEST_CASE(heard_for_serve_never_holds_invalid)
+{
+    const auto pin{MakeKeys(1)};
+    const auto open{MakeKeys(1)};
+    const uint256 chain{TestHash(0xea)};
+    const uint256 block{TestHash(0xeb)};
+    auto config{MakeConfig(chain, pin, /*threshold=*/1)};
+    config.open_attestors = true;
+    AttestationStore store{config};
+    const auto statement{MakeStatement(chain, block, 90)};
+    const auto valid{MustSign(statement, open[0])};
+
+    std::vector<std::pair<std::string, ExactReplayAttestation>> bad;
+    auto high_s{valid};
+    high_s.signature = ToHighS(valid.signature);
+    BOOST_REQUIRE(!CPubKey::CheckLowS(high_s.signature));
+    // Same signature to a lax verifier; refused for its encoding only.
+    BOOST_REQUIRE(open[0].GetPubKey().Verify(StatementHash(statement),
+                                             high_s.signature));
+    bad.emplace_back("high-S", high_s);
+    auto padded{valid};
+    padded.signature.insert(padded.signature.begin() + 4, 0);
+    ++padded.signature[1];
+    ++padded.signature[3];
+    bad.emplace_back("non-strict DER", padded);
+    bad.emplace_back("wrong chain_id",
+                     MustSign(MakeStatement(TestHash(0xec), block, 90),
+                              open[0]));
+    auto wrong_context{statement};
+    wrong_context.replay_authority_context = TestHash(0xed);
+    bad.emplace_back("wrong context", MustSign(wrong_context, open[0]));
+    auto uncompressed{valid};
+    CPubKey full{open[0].GetPubKey()};
+    BOOST_REQUIRE(full.Decompress());
+    uncompressed.signer = full;
+    bad.emplace_back("non-canonical key", uncompressed);
+
+    for (const auto& [label, attestation] : bad) {
+        const AddResult result{store.Add(attestation, block, 90)};
+        BOOST_CHECK_MESSAGE(result != AddResult::Heard,
+                            label << " was heard: " << AddResultName(result));
+    }
+    BOOST_CHECK_EQUAL(store.GetStats().heard_attestations, 0U);
+    BOOST_CHECK(store.GetHeardForServe(block, 90, 16, 0).empty());
+
+    // Control: the untouched statement is heard and served unchanged.
+    BOOST_REQUIRE(store.Add(valid, block, 90) == AddResult::Heard);
+    const auto served{store.GetHeardForServe(block, 90, 16, 0)};
+    BOOST_REQUIRE_EQUAL(served.size(), 1U);
+    BOOST_CHECK(served[0] == valid);
+}
+
+BOOST_AUTO_TEST_CASE(heard_for_serve_respects_cap_and_ttl)
+{
+    const auto pin{MakeKeys(1)};
+    const auto open{MakeKeys(9)};
+    const uint256 chain{TestHash(0xee)};
+    const uint256 block{TestHash(0xef)};
+    {
+        auto config{MakeConfig(chain, pin, /*threshold=*/1)};
+        config.open_attestors = true;
+        config.max_heard_attestations = 8;
+        AttestationStore store{config};
+        BOOST_REQUIRE(store.Add(MustSign(MakeStatement(chain, block, 95),
+                                         open[0]),
+                                block, 95) == AddResult::Heard);
+        // Strictly the oldest entry before the cap is reached.
+        std::this_thread::sleep_for(2ms);
+        for (size_t i = 1; i < open.size(); ++i) {
+            BOOST_REQUIRE(store.Add(MustSign(MakeStatement(chain, block, 95),
+                                             open[i]),
+                                    block, 95) == AddResult::Heard);
+        }
+        BOOST_CHECK_EQUAL(store.GetStats().heard_attestations, 8U);
+        const auto served{Signers(store.GetHeardForServe(block, 95, 16, 0))};
+        BOOST_CHECK_EQUAL(served.size(), 8U);
+        BOOST_CHECK_EQUAL(served.count(open[0].GetPubKey()), 0U);
+    }
+    {
+        auto config{MakeConfig(chain, pin, /*threshold=*/1)};
+        config.open_attestors = true;
+        config.ttl = 1ms;
+        AttestationStore store{config};
+        BOOST_REQUIRE(store.Add(MustSign(MakeStatement(chain, block, 96),
+                                         open[0]),
+                                block, 96) == AddResult::Heard);
+        std::this_thread::sleep_for(5ms);
+        // Expired but not yet pruned: still counted, never served.
+        BOOST_CHECK_EQUAL(store.GetStats().heard_attestations, 1U);
+        BOOST_CHECK(store.GetHeardForServe(block, 96, 16, 0).empty());
+        store.PruneExpired();
+        BOOST_CHECK_EQUAL(store.GetStats().heard_attestations, 0U);
+    }
 }
 
 BOOST_AUTO_TEST_SUITE_END()

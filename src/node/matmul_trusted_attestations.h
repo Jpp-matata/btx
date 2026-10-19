@@ -88,6 +88,13 @@ void ResetForTest();
 [[nodiscard]] matmul::trusted::BlocklistResult AddBlocklistedSigner(
     const CPubKey& pubkey, std::string& persist_error);
 [[nodiscard]] std::vector<matmul::trusted::ExactReplayAttestation> HeardAttestations();
+/** Heard statements for one block, for a GETMMATTEST answer. See
+ *  AttestationStore::GetHeardForServe. Empty without a store. */
+[[nodiscard]] std::vector<matmul::trusted::ExactReplayAttestation> HeardForServe(
+    const uint256& block_hash,
+    int32_t block_height,
+    size_t max_items,
+    uint32_t rotate);
 [[nodiscard]] matmul::trusted::AttestationLogHead LogHead();
 /**
  * Block-index height of `block_hash`, or nullopt if unknown. Callers
@@ -314,6 +321,23 @@ static constexpr double GETMMATTEST_LIVE_REQUEST_BURST{16.0};
 static constexpr double GETMMATTEST_HISTORICAL_REQUEST_BURST{4.0};
 static constexpr auto GETMMATTEST_LIVE_TOKEN_REFILL{std::chrono::seconds{1}};
 static constexpr auto GETMMATTEST_HISTORICAL_TOKEN_REFILL{std::chrono::seconds{4}};
+/** Heard (valid, unpinned) statements a serving node with
+ *  -matmulopenattestors=1 adds to one live GETMMATTEST answer, in their own
+ *  MMATTEST after the pinned one. A receiver ignores a whole MMATTEST it
+ *  cannot afford, so the heard message can be dropped alone and never takes
+ *  the pinned votes with it. The receiver's own pin decides; nothing here
+ *  is quorum.
+ *  Heard items only fill an answer up to this many items in all (pinned +
+ *  PQ + heard); an answer that already carries this many gets none. A
+ *  receiver's per-peer MMATTEST/MMATTESTPQ bucket holds 64 items and a full
+ *  live burst is GETMMATTEST_LIVE_REQUEST_BURST (16) answers, so 16 such
+ *  answers fit it (static_assert in net_processing.cpp). */
+static constexpr size_t GETMMATTEST_HEARD_PER_ANSWER{4};
+/** Per-requester heard allowance: burst 4, then 1 per 4s (0.25 items/s, a
+ *  quarter of a receiver's 1/s MMATTEST refill). It keeps its own clock:
+ *  inbound MMATTEST resets the shared attestation refill timestamp. */
+static constexpr double GETMMATTEST_HEARD_BURST{4.0};
+static constexpr auto GETMMATTEST_HEARD_TOKEN_REFILL{std::chrono::seconds{4}};
 /** In-flight GETMMATTEST occupancy for tip chatter / competing hashes.
  *  Peer-success hints in net_processing keep using this 60s window. */
 static constexpr auto GETMMATTEST_REQUEST_TTL{std::chrono::seconds{60}};
@@ -390,6 +414,32 @@ static constexpr int GETMMATTEST_CATCHUP_TTL_HEADERS_AHEAD{2};
     bool live_window, double live_tokens, double historical_tokens)
 {
     return (live_window ? live_tokens : historical_tokens) >= 1.0;
+}
+
+/** Refill the per-requester heard allowance for `elapsed`, capped at
+ *  GETMMATTEST_HEARD_BURST. */
+[[nodiscard]] inline double GetMmAttestHeardRefill(
+    double tokens, std::chrono::microseconds elapsed)
+{
+    if (elapsed.count() > 0) {
+        tokens += static_cast<double>(elapsed.count()) /
+                  static_cast<double>(
+                      std::chrono::duration_cast<std::chrono::microseconds>(
+                          GETMMATTEST_HEARD_TOKEN_REFILL).count());
+    }
+    return std::min(GETMMATTEST_HEARD_BURST, tokens);
+}
+
+/** Heard statements one answer may carry: whole tokens only, and only up
+ *  to GETMMATTEST_HEARD_PER_ANSWER items in the whole answer, counting the
+ *  `answer_items` pinned and PQ items already sent in it. */
+[[nodiscard]] inline size_t GetMmAttestHeardAffordable(double tokens,
+                                                       size_t answer_items)
+{
+    if (answer_items >= GETMMATTEST_HEARD_PER_ANSWER) return 0;
+    if (!(tokens >= 1.0)) return 0;
+    return std::min(GETMMATTEST_HEARD_PER_ANSWER - answer_items,
+                    static_cast<size_t>(tokens));
 }
 
 /** Deferral (live GPU busy, queue/rate) must not increment the GETMMATTEST
