@@ -33,6 +33,10 @@
 #include <test/util/setup_common.h>
 #include <validation.h>
 
+extern "C" {
+#include <libbitcoinpqc/ml_dsa.h>
+}
+
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -42,6 +46,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <stdexcept>
 #include <thread>
 
@@ -13699,6 +13704,922 @@ BOOST_AUTO_TEST_CASE(replayed_unknown_attestation_getheaders_is_deduped)
     peer.fPauseSend = false;
     (void)connman.ProcessMessagesOnce(peer);
     BOOST_CHECK_GE(CountQueuedMessageType(peer, NetMsgType::GETHEADERS), 1U);
+}
+
+// Heard-directory GETMMATTEST answers (-matmulopenattestors=1). A serving
+// node that pins {pinned, unavailable} at M=2 (one pinned vote never makes
+// quorum: the functional test's B), no local signer, Profile-1 active from
+// genesis over a chain longer than the live window.
+namespace {
+uint256 HeardServeChainId() { return uint256::FromHex(std::string(64, '1')).value(); }
+uint256 HeardServeContext() { return uint256::FromHex(std::string(64, '2')).value(); }
+
+matmul::trusted::ExactReplayAttestation SignForHeardServe(
+    const CKey& key, const uint256& hash, int32_t height)
+{
+    matmul::trusted::ExactReplayStatement statement;
+    statement.chain_id = HeardServeChainId();
+    statement.block_hash = hash;
+    statement.block_height = height;
+    statement.replay_authority_context = HeardServeContext();
+    auto attestation{matmul::trusted::SignStatement(statement, key)};
+    BOOST_REQUIRE(attestation.has_value());
+    return *attestation;
+}
+
+void ConfigureHeardServer(const CKey& pinned,
+                          const CPubKey& unavailable,
+                          bool open_attestors)
+{
+    matmul::trusted::StoreConfig config;
+    config.chain_id = HeardServeChainId();
+    config.replay_authority_context = HeardServeContext();
+    config.trusted_signers = {pinned.GetPubKey(), unavailable};
+    config.threshold = 2;
+    config.open_attestors = open_attestors;
+    std::string error;
+    BOOST_REQUIRE_MESSAGE(node::matmul_trusted::Configure(
+                              std::move(config), /*trusted_mirror=*/false,
+                              /*serve=*/true, std::chrono::milliseconds{50},
+                              error),
+                          error);
+    BOOST_REQUIRE(node::matmul_trusted::ServesAttestations());
+    BOOST_REQUIRE(!node::matmul_trusted::HasLocalSigner());
+    BOOST_REQUIRE_EQUAL(node::matmul_trusted::OpenAttestorsEnabled(),
+                        open_attestors);
+}
+
+//! Mine past the live window, then make Profile-1 active from genesis
+//! (as getmmattest_historical_scan_ignored_then_banned does).
+const CBlockIndex* MineHeardServeChain(node::NodeContext& node,
+                                       Consensus::Params& consensus)
+{
+    const int need{node::matmul_trusted::SIGNER_GETMMATTEST_SERVE_WINDOW + 2};
+    while (WITH_LOCK(::cs_main, return node.chainman->ActiveHeight()) < need) {
+        const CBlockIndex* cur{
+            WITH_LOCK(::cs_main, return node.chainman->ActiveTip())};
+        BOOST_REQUIRE(cur != nullptr);
+        mineBlock(node, std::chrono::seconds{cur->GetBlockTime() + 1});
+    }
+    NeutralizeUnconnectedHeaders(*Assert(node.chainman));
+    const CBlockIndex* tip{
+        WITH_LOCK(::cs_main, return node.chainman->ActiveTip())};
+    BOOST_REQUIRE(tip != nullptr);
+    SetMockTime(std::chrono::seconds{tip->GetBlockTime() + 1});
+    consensus.nMatMulV4Height = 0;
+    consensus.nMatMulBMX4CHeight = 0;
+    consensus.nMatMulDRLTHeight = std::numeric_limits<int32_t>::max();
+    consensus.nMatMulRCHeight = 0;
+    consensus.nMatMulRCCoupledHeight = std::numeric_limits<int32_t>::max();
+    BOOST_REQUIRE(consensus.IsMatMulTrustedReplayAttestationActive(0));
+    BOOST_REQUIRE(consensus.IsMatMulTrustedReplayAttestationActive(tip->nHeight));
+    return tip;
+}
+
+std::vector<unsigned char> EncodeMmAttest(
+    const std::vector<matmul::trusted::ExactReplayAttestation>& attestations)
+{
+    // Same writer NetMsg::Make uses, so the bytes compare with the wire.
+    std::vector<unsigned char> out;
+    VectorWriter{out, 0, attestations};
+    return out;
+}
+
+std::vector<matmul::trusted::ExactReplayAttestation> DecodeMmAttest(
+    const std::vector<unsigned char>& payload)
+{
+    DataStream stream{payload};
+    std::vector<matmul::trusted::ExactReplayAttestation> out;
+    try {
+        stream >> out;
+    } catch (const std::ios_base::failure&) {
+        return {};
+    }
+    return stream.empty() ? out : std::vector<matmul::trusted::ExactReplayAttestation>{};
+}
+
+//! MMATTEST payloads queued to `node`, in send order. With sock=nullptr the
+//! first message sits in the V1 transport (optimistic write) and the rest in
+//! vSendMsg. Reads the transport framing; FlushSendBuffer afterwards.
+std::vector<std::vector<unsigned char>> QueuedMmAttestPayloads(CNode& node)
+{
+    LOCK(node.cs_vSend);
+    std::vector<std::vector<unsigned char>> out;
+    {
+        const auto& [bytes, _more, transport_type] =
+            node.m_transport->GetBytesToSend(false);
+        if (!bytes.empty() && transport_type == NetMsgType::MMATTEST) {
+            if (bytes.size() == CMessageHeader::HEADER_SIZE) {
+                node.m_transport->MarkBytesSent(bytes.size());
+                const auto& [payload, _more_payload, payload_type] =
+                    node.m_transport->GetBytesToSend(false);
+                if (payload_type == NetMsgType::MMATTEST) {
+                    out.emplace_back(payload.begin(), payload.end());
+                }
+            } else {
+                out.emplace_back(bytes.begin(), bytes.end());
+            }
+        }
+    }
+    for (const auto& msg : node.vSendMsg) {
+        if (msg.m_type == NetMsgType::MMATTEST) out.push_back(msg.data);
+    }
+    return out;
+}
+
+std::vector<std::vector<unsigned char>> AskMmAttest(ConnmanTestMsg& connman,
+                                                    CNode& peer,
+                                                    const std::string& msg_type,
+                                                    const uint256& hash)
+    EXCLUSIVE_LOCKS_REQUIRED(NetEventsInterface::g_msgproc_mutex)
+{
+    connman.FlushSendBuffer(peer);
+    peer.fPauseSend = false;
+    BOOST_REQUIRE(connman.ReceiveMsgFrom(peer, NetMsg::Make(msg_type, hash)));
+    peer.fPauseSend = false;
+    (void)connman.ProcessMessagesOnce(peer);
+    auto payloads{QueuedMmAttestPayloads(peer)};
+    connman.FlushSendBuffer(peer);
+    return payloads;
+}
+
+void RelayMmAttest(ConnmanTestMsg& connman,
+                   CNode& peer,
+                   const std::vector<matmul::trusted::ExactReplayAttestation>& attestations)
+    EXCLUSIVE_LOCKS_REQUIRED(NetEventsInterface::g_msgproc_mutex)
+{
+    connman.FlushSendBuffer(peer);
+    peer.fPauseSend = false;
+    BOOST_REQUIRE(connman.ReceiveMsgFrom(
+        peer, NetMsg::Make(NetMsgType::MMATTEST, attestations)));
+    peer.fPauseSend = false;
+    (void)connman.ProcessMessagesOnce(peer);
+}
+
+size_t HeardItems(const std::vector<std::vector<unsigned char>>& payloads,
+                  const CPubKey& pinned)
+{
+    size_t n{0};
+    for (const auto& payload : payloads) {
+        for (const auto& attestation : DecodeMmAttest(payload)) {
+            if (attestation.signer != pinned) ++n;
+        }
+    }
+    return n;
+}
+
+class HeardServePeers
+{
+public:
+    HeardServePeers(ConnmanTestMsg& connman, PeerManager& peerman)
+        : m_connman{connman}, m_peerman{peerman} {}
+    ~HeardServePeers()
+    {
+        for (auto& node : m_nodes) {
+            m_peerman.FinalizeNode(*node);
+            m_connman.RemoveTestNode(*node);
+        }
+    }
+    CNode& Add(NodeId id, uint32_t ipv4)
+    {
+        m_nodes.push_back(std::make_unique<CNode>(
+            id, /*sock=*/nullptr,
+            CAddress{PeermanTestService(ipv4), NODE_NETWORK},
+            /*nKeyedNetGroupIn=*/static_cast<uint64_t>(id),
+            /*nLocalHostNonceIn=*/0, CAddress{},
+            /*addrNameIn=*/strprintf("heard-serve-%d", id),
+            ConnectionType::INBOUND, /*inbound_onion=*/false,
+            /*network_key=*/0));
+        CNode& node{*m_nodes.back()};
+        const ServiceFlags services{ServiceFlags(
+            NODE_NETWORK | NODE_WITNESS | NODE_MATMUL_CONSENSUS)};
+        m_connman.Handshake(node, /*successfully_connected=*/true, services,
+                            services, PROTOCOL_VERSION, /*relay_txs=*/true);
+        m_connman.AddTestNode(node);
+        m_connman.FlushSendBuffer(node);
+        return node;
+    }
+
+private:
+    ConnmanTestMsg& m_connman;
+    PeerManager& m_peerman;
+    std::vector<std::unique_ptr<CNode>> m_nodes;
+};
+
+struct HeardServeStoreReset {
+    ~HeardServeStoreReset() { node::matmul_trusted::ResetForTest(); }
+};
+} // namespace
+
+// The pinned answer goes out exactly as before; the heard vote follows in
+// its own MMATTEST. The serving node's trust and quorum do not move.
+BOOST_AUTO_TEST_CASE(getmmattest_serves_heard_after_pin)
+{
+    LOCK(NetEventsInterface::g_msgproc_mutex);
+    node::matmul_trusted::ResetForTest();
+    ResetSharedPeermanFixture(m_node);
+    HeardServeStoreReset store_reset;
+    ConnmanTestMsg& connman = static_cast<ConnmanTestMsg&>(*m_node.connman);
+    PeerManager& peerman = *m_node.peerman;
+    Consensus::Params& consensus = const_cast<Consensus::Params&>(
+        m_node.chainman->GetParams().GetConsensus());
+    auto restore_heights{SaveMatMulHeights(consensus)};
+    const CBlockIndex* tip{MineHeardServeChain(m_node, consensus)};
+    peerman.SetBestBlock(tip->nHeight, std::chrono::seconds{tip->GetBlockTime()});
+    const uint256 hash{tip->GetBlockHash()};
+    const int32_t height{tip->nHeight};
+
+    CKey pinned, unavailable, open_key;
+    pinned.MakeNewKey(/*fCompressed=*/true);
+    unavailable.MakeNewKey(/*fCompressed=*/true);
+    open_key.MakeNewKey(/*fCompressed=*/true);
+    const auto pinned_vote{SignForHeardServe(pinned, hash, height)};
+    const auto heard_vote{SignForHeardServe(open_key, hash, height)};
+
+    HeardServePeers peers{connman, peerman};
+    CNode& relayer{peers.Add(/*id=*/4201, 0x2100007f)};
+    CNode& requester{peers.Add(/*id=*/4202, 0x2200007f)};
+
+    // Directory off: the reference answer.
+    ConfigureHeardServer(pinned, unavailable.GetPubKey(), /*open_attestors=*/false);
+    BOOST_REQUIRE(node::matmul_trusted::Add(pinned_vote, hash, height) ==
+                  matmul::trusted::AddResult::Accepted);
+    const auto closed{AskMmAttest(connman, requester, NetMsgType::GETMMATTEST, hash)};
+    BOOST_REQUIRE_EQUAL(closed.size(), 1U);
+    BOOST_CHECK(closed[0] == EncodeMmAttest({pinned_vote}));
+
+    // Directory on. The unpinned vote arrives from a relayer, as on a live
+    // node, and is heard: stored as directory, not pushed on (Accepted-only).
+    node::matmul_trusted::ResetForTest();
+    ConfigureHeardServer(pinned, unavailable.GetPubKey(), /*open_attestors=*/true);
+    BOOST_REQUIRE(node::matmul_trusted::Add(pinned_vote, hash, height) ==
+                  matmul::trusted::AddResult::Accepted);
+    connman.FlushSendBuffer(requester);
+    RelayMmAttest(connman, relayer, {heard_vote});
+    BOOST_CHECK(QueuedMmAttestPayloads(requester).empty());
+    connman.FlushSendBuffer(relayer);
+    BOOST_REQUIRE_EQUAL(node::matmul_trusted::HeardAttestations().size(), 1U);
+    const auto before{node::matmul_trusted::Stats()};
+
+    std::vector<std::vector<unsigned char>> open;
+    {
+        ASSERT_DEBUG_LOG("reason=heard");
+        open = AskMmAttest(connman, requester, NetMsgType::GETMMATTEST, hash);
+    }
+    BOOST_REQUIRE_EQUAL(open.size(), 2U);
+    BOOST_CHECK(open[0] == closed[0]);
+    const auto served{DecodeMmAttest(open[1])};
+    BOOST_REQUIRE_EQUAL(served.size(), 1U);
+    BOOST_CHECK(served[0] == heard_vote);
+
+    const auto after{node::matmul_trusted::Stats()};
+    BOOST_CHECK(!node::matmul_trusted::HasQuorum(hash, height));
+    BOOST_CHECK_EQUAL(after.accepted, before.accepted);
+    BOOST_CHECK_EQUAL(after.stored_attestations, before.stored_attestations);
+    BOOST_CHECK_EQUAL(after.blocks_with_quorum, 0U);
+    BOOST_CHECK_EQUAL(after.heard_attestations, before.heard_attestations);
+    BOOST_CHECK(node::matmul_trusted::AdmittedOpenSigners().empty());
+    const auto pin{node::matmul_trusted::TrustedSigners()};
+    BOOST_CHECK_EQUAL(pin.size(), 2U);
+    BOOST_CHECK(std::find(pin.begin(), pin.end(), open_key.GetPubKey()) == pin.end());
+    BOOST_CHECK(!relayer.fDisconnect);
+    BOOST_CHECK(!requester.fDisconnect);
+}
+
+BOOST_AUTO_TEST_CASE(getmmattest_heard_off_by_default)
+{
+    LOCK(NetEventsInterface::g_msgproc_mutex);
+    node::matmul_trusted::ResetForTest();
+    ResetSharedPeermanFixture(m_node);
+    HeardServeStoreReset store_reset;
+    ConnmanTestMsg& connman = static_cast<ConnmanTestMsg&>(*m_node.connman);
+    PeerManager& peerman = *m_node.peerman;
+    Consensus::Params& consensus = const_cast<Consensus::Params&>(
+        m_node.chainman->GetParams().GetConsensus());
+    auto restore_heights{SaveMatMulHeights(consensus)};
+    const CBlockIndex* tip{MineHeardServeChain(m_node, consensus)};
+    peerman.SetBestBlock(tip->nHeight, std::chrono::seconds{tip->GetBlockTime()});
+    const uint256 hash{tip->GetBlockHash()};
+    const int32_t height{tip->nHeight};
+
+    CKey pinned, unavailable, open_key;
+    pinned.MakeNewKey(/*fCompressed=*/true);
+    unavailable.MakeNewKey(/*fCompressed=*/true);
+    open_key.MakeNewKey(/*fCompressed=*/true);
+    const auto pinned_vote{SignForHeardServe(pinned, hash, height)};
+
+    BOOST_REQUIRE(!matmul::trusted::StoreConfig{}.open_attestors);
+    ConfigureHeardServer(pinned, unavailable.GetPubKey(), /*open_attestors=*/false);
+    BOOST_REQUIRE(node::matmul_trusted::Add(pinned_vote, hash, height) ==
+                  matmul::trusted::AddResult::Accepted);
+    HeardServePeers peers{connman, peerman};
+    CNode& relayer{peers.Add(/*id=*/4211, 0x2300007f)};
+    CNode& requester{peers.Add(/*id=*/4212, 0x2400007f)};
+    RelayMmAttest(connman, relayer, {SignForHeardServe(open_key, hash, height)});
+    connman.FlushSendBuffer(relayer);
+    BOOST_CHECK(node::matmul_trusted::HeardAttestations().empty());
+    BOOST_CHECK_EQUAL(node::matmul_trusted::Stats().heard_attestations, 0U);
+
+    for (int i = 0; i < 3; ++i) {
+        const auto payloads{
+            AskMmAttest(connman, requester, NetMsgType::GETMMATTEST, hash)};
+        BOOST_REQUIRE_EQUAL(payloads.size(), 1U);
+        BOOST_CHECK(payloads[0] == EncodeMmAttest({pinned_vote}));
+    }
+}
+
+BOOST_AUTO_TEST_CASE(getmmattest_heard_paced_per_requester)
+{
+    LOCK(NetEventsInterface::g_msgproc_mutex);
+    node::matmul_trusted::ResetForTest();
+    ResetSharedPeermanFixture(m_node);
+    HeardServeStoreReset store_reset;
+    ConnmanTestMsg& connman = static_cast<ConnmanTestMsg&>(*m_node.connman);
+    PeerManager& peerman = *m_node.peerman;
+    Consensus::Params& consensus = const_cast<Consensus::Params&>(
+        m_node.chainman->GetParams().GetConsensus());
+    auto restore_heights{SaveMatMulHeights(consensus)};
+    const CBlockIndex* tip{MineHeardServeChain(m_node, consensus)};
+    peerman.SetBestBlock(tip->nHeight, std::chrono::seconds{tip->GetBlockTime()});
+
+    CKey pinned, unavailable, open_key;
+    pinned.MakeNewKey(/*fCompressed=*/true);
+    unavailable.MakeNewKey(/*fCompressed=*/true);
+    open_key.MakeNewKey(/*fCompressed=*/true);
+    ConfigureHeardServer(pinned, unavailable.GetPubKey(), /*open_attestors=*/true);
+
+    // Sixteen live active-chain hashes (tip-15..tip), each with a pinned
+    // vote and a heard vote: a mirror's catch-up burst.
+    const int burst{static_cast<int>(
+        node::matmul_trusted::GETMMATTEST_LIVE_REQUEST_BURST)};
+    std::vector<uint256> hashes;
+    for (int i = 0; i < burst; ++i) {
+        const CBlockIndex* index{
+            WITH_LOCK(::cs_main, return tip->GetAncestor(tip->nHeight - i))};
+        BOOST_REQUIRE(index != nullptr);
+        BOOST_REQUIRE(node::matmul_trusted::GetMmAttestIsLiveWindow(
+            index->nHeight, tip->nHeight));
+        BOOST_REQUIRE(node::matmul_trusted::Add(
+                          SignForHeardServe(pinned, index->GetBlockHash(),
+                                            index->nHeight),
+                          index->GetBlockHash(), index->nHeight) ==
+                      matmul::trusted::AddResult::Accepted);
+        BOOST_REQUIRE(node::matmul_trusted::Add(
+                          SignForHeardServe(open_key, index->GetBlockHash(),
+                                            index->nHeight),
+                          index->GetBlockHash(), index->nHeight) ==
+                      matmul::trusted::AddResult::Heard);
+        hashes.push_back(index->GetBlockHash());
+    }
+
+    HeardServePeers peers{connman, peerman};
+    CNode& requester{peers.Add(/*id=*/4221, 0x2500007f)};
+    CNode& other{peers.Add(/*id=*/4222, 0x2600007f)};
+
+    // Frozen mock time: nothing refills during the burst.
+    size_t pinned_messages{0};
+    size_t heard_items{0};
+    for (int i = 0; i < burst; ++i) {
+        std::vector<std::vector<unsigned char>> payloads;
+        if (i == 4) {
+            ASSERT_DEBUG_LOG("Pacing heard getmmattest answer");
+            payloads = AskMmAttest(connman, requester, NetMsgType::GETMMATTEST, hashes[i]);
+        } else {
+            payloads = AskMmAttest(connman, requester, NetMsgType::GETMMATTEST, hashes[i]);
+        }
+        BOOST_REQUIRE(!payloads.empty());
+        BOOST_CHECK(DecodeMmAttest(payloads[0]).size() == 1 &&
+                    DecodeMmAttest(payloads[0])[0].signer == pinned.GetPubKey());
+        ++pinned_messages;
+        const size_t heard{HeardItems(payloads, pinned.GetPubKey())};
+        // The burst allowance goes to the first asks, one item each.
+        BOOST_CHECK_EQUAL(heard, i < 4 ? 1U : 0U);
+        BOOST_CHECK_EQUAL(payloads.size(), i < 4 ? 2U : 1U);
+        heard_items += heard;
+    }
+    BOOST_CHECK_EQUAL(pinned_messages, static_cast<size_t>(burst));
+    BOOST_CHECK_EQUAL(heard_items, node::matmul_trusted::GETMMATTEST_HEARD_PER_ANSWER);
+
+    // One more heard item per 4s. The live serve bucket refills too.
+    SetMockTime(GetTime<std::chrono::seconds>() +
+                std::chrono::duration_cast<std::chrono::seconds>(
+                    node::matmul_trusted::GETMMATTEST_HEARD_TOKEN_REFILL));
+    auto later{AskMmAttest(connman, requester, NetMsgType::GETMMATTEST, hashes[0])};
+    BOOST_CHECK_EQUAL(later.size(), 2U);
+    BOOST_CHECK_EQUAL(HeardItems(later, pinned.GetPubKey()), 1U);
+    later = AskMmAttest(connman, requester, NetMsgType::GETMMATTEST, hashes[1]);
+    BOOST_CHECK_EQUAL(later.size(), 1U);
+
+    // Another requester has its own allowance.
+    const auto fresh{AskMmAttest(connman, other, NetMsgType::GETMMATTEST, hashes[0])};
+    BOOST_CHECK_EQUAL(fresh.size(), 2U);
+    BOOST_CHECK_EQUAL(HeardItems(fresh, pinned.GetPubKey()), 1U);
+    BOOST_CHECK(!requester.fDisconnect);
+    BOOST_CHECK(!other.fDisconnect);
+}
+
+BOOST_AUTO_TEST_CASE(getmmattest_heard_flood_keeps_pin_first)
+{
+    LOCK(NetEventsInterface::g_msgproc_mutex);
+    node::matmul_trusted::ResetForTest();
+    ResetSharedPeermanFixture(m_node);
+    HeardServeStoreReset store_reset;
+    ConnmanTestMsg& connman = static_cast<ConnmanTestMsg&>(*m_node.connman);
+    PeerManager& peerman = *m_node.peerman;
+    Consensus::Params& consensus = const_cast<Consensus::Params&>(
+        m_node.chainman->GetParams().GetConsensus());
+    auto restore_heights{SaveMatMulHeights(consensus)};
+    const CBlockIndex* tip{MineHeardServeChain(m_node, consensus)};
+    peerman.SetBestBlock(tip->nHeight, std::chrono::seconds{tip->GetBlockTime()});
+    const uint256 hash{tip->GetBlockHash()};
+    const int32_t height{tip->nHeight};
+
+    CKey pinned, unavailable;
+    pinned.MakeNewKey(/*fCompressed=*/true);
+    unavailable.MakeNewKey(/*fCompressed=*/true);
+    const auto pinned_vote{SignForHeardServe(pinned, hash, height)};
+    ConfigureHeardServer(pinned, unavailable.GetPubKey(), /*open_attestors=*/true);
+    BOOST_REQUIRE(node::matmul_trusted::Add(pinned_vote, hash, height) ==
+                  matmul::trusted::AddResult::Accepted);
+    // Fresh keys are free: 300 valid unpinned votes for the same hash.
+    for (int i = 0; i < 300; ++i) {
+        CKey key;
+        key.MakeNewKey(/*fCompressed=*/true);
+        BOOST_REQUIRE(node::matmul_trusted::Add(
+                          SignForHeardServe(key, hash, height), hash, height) ==
+                      matmul::trusted::AddResult::Heard);
+    }
+    const auto directory{node::matmul_trusted::HeardAttestations()};
+    BOOST_REQUIRE_EQUAL(directory.size(), 300U);
+
+    HeardServePeers peers{connman, peerman};
+    CNode& requester{peers.Add(/*id=*/4231, 0x2700007f)};
+    // One pinned vote leaves room for 3 heard items in the answer.
+    const size_t room{node::matmul_trusted::GETMMATTEST_HEARD_PER_ANSWER - 1};
+    const auto first{AskMmAttest(connman, requester, NetMsgType::GETMMATTEST, hash)};
+    BOOST_REQUIRE_EQUAL(first.size(), 2U);
+    BOOST_CHECK(first[0] == EncodeMmAttest({pinned_vote}));
+    const auto first_heard{DecodeMmAttest(first[1])};
+    BOOST_REQUIRE_EQUAL(first_heard.size(), room);
+
+    SetMockTime(GetTime<std::chrono::seconds>() + std::chrono::seconds{16});
+    const auto second{AskMmAttest(connman, requester, NetMsgType::GETMMATTEST, hash)};
+    BOOST_REQUIRE_EQUAL(second.size(), 2U);
+    BOOST_CHECK(second[0] == first[0]);
+    const auto second_heard{DecodeMmAttest(second[1])};
+    BOOST_REQUIRE_EQUAL(second_heard.size(), room);
+    // Successive answers rotate through the directory instead of repeating
+    // the lowest signer bytes.
+    for (size_t i = 0; i < first_heard.size(); ++i) {
+        BOOST_CHECK(first_heard[i] == directory[i]);
+        BOOST_CHECK(second_heard[i] == directory[first_heard.size() + i]);
+    }
+    BOOST_CHECK(!node::matmul_trusted::HasQuorum(hash, height));
+    BOOST_CHECK(node::matmul_trusted::AdmittedOpenSigners().empty());
+    BOOST_CHECK(!requester.fDisconnect);
+}
+
+BOOST_AUTO_TEST_CASE(getmmattest_heard_active_chain_and_live_only)
+{
+    LOCK(NetEventsInterface::g_msgproc_mutex);
+    node::matmul_trusted::ResetForTest();
+    ResetSharedPeermanFixture(m_node);
+    HeardServeStoreReset store_reset;
+    ConnmanTestMsg& connman = static_cast<ConnmanTestMsg&>(*m_node.connman);
+    PeerManager& peerman = *m_node.peerman;
+    Consensus::Params& consensus = const_cast<Consensus::Params&>(
+        m_node.chainman->GetParams().GetConsensus());
+    auto restore_heights{SaveMatMulHeights(consensus)};
+    const CBlockIndex* tip{MineHeardServeChain(m_node, consensus)};
+    peerman.SetBestBlock(tip->nHeight, std::chrono::seconds{tip->GetBlockTime()});
+
+    CKey pinned, unavailable;
+    pinned.MakeNewKey(/*fCompressed=*/true);
+    unavailable.MakeNewKey(/*fCompressed=*/true);
+    ConfigureHeardServer(pinned, unavailable.GetPubKey(), /*open_attestors=*/true);
+    auto add_votes = [&](const uint256& hash, int32_t height) {
+        BOOST_REQUIRE(node::matmul_trusted::Add(
+                          SignForHeardServe(pinned, hash, height), hash,
+                          height) == matmul::trusted::AddResult::Accepted);
+        // A fresh open key per hash: one key on two hashes at a height
+        // would be an equivocation and freeze it.
+        CKey open_key;
+        open_key.MakeNewKey(/*fCompressed=*/true);
+        BOOST_REQUIRE(node::matmul_trusted::Add(
+                          SignForHeardServe(open_key, hash, height), hash,
+                          height) == matmul::trusted::AddResult::Heard);
+    };
+
+    // Followed suffix: a header-only child of the active tip.
+    const CBlock child{MineTipChild(m_node, *tip, /*extra_time=*/0)};
+    // Side branch: a header-only twin of the active tip at the same height.
+    const CBlock side_branch{MineBlockOnParent(
+        m_node, tip->pprev->GetBlockHash(), tip->nHeight,
+        static_cast<uint32_t>(tip->pprev->GetBlockTime() + 2),
+        tip->pprev->GetMedianTimePast())};
+    BOOST_REQUIRE(side_branch.GetHash() != tip->GetBlockHash());
+    for (const CBlock* block : {&child, &side_branch}) {
+        BlockValidationState state;
+        BOOST_REQUIRE_MESSAGE(m_node.chainman->ProcessNewBlockHeaders(
+                                  {{block->GetBlockHeader()}},
+                                  /*min_pow_checked=*/true, state),
+                              state.ToString());
+    }
+    const CBlockIndex* historical{WITH_LOCK(
+        ::cs_main,
+        return tip->GetAncestor(
+            tip->nHeight - node::matmul_trusted::SIGNER_GETMMATTEST_SERVE_WINDOW - 1))};
+    BOOST_REQUIRE(historical != nullptr);
+    BOOST_REQUIRE(!node::matmul_trusted::GetMmAttestIsLiveWindow(
+        historical->nHeight, tip->nHeight));
+    add_votes(tip->GetBlockHash(), tip->nHeight);
+    add_votes(historical->GetBlockHash(), historical->nHeight);
+    add_votes(child.GetHash(), tip->nHeight + 1);
+    add_votes(side_branch.GetHash(), tip->nHeight);
+
+    HeardServePeers peers{connman, peerman};
+    CNode& requester{peers.Add(/*id=*/4241, 0x2800007f)};
+    const CPubKey pin_key{pinned.GetPubKey()};
+
+    // Live and on the active chain: pinned, then heard.
+    auto payloads{AskMmAttest(connman, requester, NetMsgType::GETMMATTEST,
+                              tip->GetBlockHash())};
+    BOOST_CHECK_EQUAL(payloads.size(), 2U);
+    BOOST_CHECK_EQUAL(HeardItems(payloads, pin_key), 1U);
+
+    // On the active chain but outside the live window: pinned only.
+    payloads = AskMmAttest(connman, requester, NetMsgType::GETMMATTEST,
+                           historical->GetBlockHash());
+    BOOST_CHECK_EQUAL(payloads.size(), 1U);
+    BOOST_CHECK_EQUAL(HeardItems(payloads, pin_key), 0U);
+
+    // Followed suffix, not yet on the active chain: pinned only.
+    payloads = AskMmAttest(connman, requester, NetMsgType::GETMMATTEST,
+                           child.GetHash());
+    BOOST_CHECK_EQUAL(payloads.size(), 1U);
+    BOOST_CHECK_EQUAL(HeardItems(payloads, pin_key), 0U);
+
+    // Side branch: refused before any answer (not_canonical), as before.
+    payloads = AskMmAttest(connman, requester, NetMsgType::GETMMATTEST,
+                           side_branch.GetHash());
+    BOOST_CHECK(payloads.empty());
+
+    // A failed header: not_validated, as before.
+    {
+        LOCK(::cs_main);
+        CBlockIndex* index{
+            m_node.chainman->m_blockman.LookupBlockIndex(side_branch.GetHash())};
+        BOOST_REQUIRE(index != nullptr);
+        index->nStatus |= BLOCK_FAILED_VALID;
+        m_node.chainman->m_failed_blocks.insert(index);
+    }
+    payloads = AskMmAttest(connman, requester, NetMsgType::GETMMATTEST,
+                           side_branch.GetHash());
+    BOOST_CHECK(payloads.empty());
+
+    // After InvalidateBlock the old tip is never served, heard or pinned.
+    {
+        CBlockIndex* old_tip{WITH_LOCK(
+            ::cs_main,
+            return m_node.chainman->m_blockman.LookupBlockIndex(
+                tip->GetBlockHash()))};
+        BlockValidationState state;
+        BOOST_REQUIRE(m_node.chainman->ActiveChainstate().InvalidateBlock(
+            state, old_tip));
+        BOOST_REQUIRE(!WITH_LOCK(
+            ::cs_main, return m_node.chainman->ActiveChain().Contains(old_tip)));
+    }
+    payloads = AskMmAttest(connman, requester, NetMsgType::GETMMATTEST,
+                           tip->GetBlockHash());
+    BOOST_CHECK(payloads.empty());
+    BOOST_CHECK(!requester.fDisconnect);
+}
+
+// Documents a limit: an unpinned vote that arrives before its header is
+// dropped as today (no store, no GETHEADERS), so it is never served later.
+BOOST_AUTO_TEST_CASE(mmattest_unpinned_unknown_header_not_served)
+{
+    LOCK(NetEventsInterface::g_msgproc_mutex);
+    node::matmul_trusted::ResetForTest();
+    ResetSharedPeermanFixture(m_node);
+    HeardServeStoreReset store_reset;
+    ConnmanTestMsg& connman = static_cast<ConnmanTestMsg&>(*m_node.connman);
+    PeerManager& peerman = *m_node.peerman;
+    Consensus::Params& consensus = const_cast<Consensus::Params&>(
+        m_node.chainman->GetParams().GetConsensus());
+    auto restore_heights{SaveMatMulHeights(consensus)};
+    const CBlockIndex* tip{MineHeardServeChain(m_node, consensus)};
+    peerman.SetBestBlock(tip->nHeight, std::chrono::seconds{tip->GetBlockTime()});
+
+    CKey pinned, unavailable, open_key;
+    pinned.MakeNewKey(/*fCompressed=*/true);
+    unavailable.MakeNewKey(/*fCompressed=*/true);
+    open_key.MakeNewKey(/*fCompressed=*/true);
+    ConfigureHeardServer(pinned, unavailable.GetPubKey(), /*open_attestors=*/true);
+
+    const CBlock child{MineTipChild(m_node, *tip, /*extra_time=*/0)};
+    const uint256 child_hash{child.GetHash()};
+    const int32_t child_height{tip->nHeight + 1};
+    BOOST_REQUIRE(WITH_LOCK(::cs_main, return m_node.chainman->m_blockman.LookupBlockIndex(child_hash)) == nullptr);
+
+    HeardServePeers peers{connman, peerman};
+    CNode& relayer{peers.Add(/*id=*/4251, 0x2900007f)};
+    CNode& requester{peers.Add(/*id=*/4252, 0x2a00007f)};
+    {
+        ASSERT_DEBUG_LOG("Ignoring mmattest for unknown block=");
+        RelayMmAttest(connman, relayer,
+                      {SignForHeardServe(open_key, child_hash, child_height)});
+    }
+    BOOST_CHECK_EQUAL(CountQueuedMessageType(relayer, NetMsgType::GETHEADERS), 0U);
+    connman.FlushSendBuffer(relayer);
+    BOOST_CHECK(node::matmul_trusted::HeardAttestations().empty());
+
+    BlockValidationState state;
+    BOOST_REQUIRE_MESSAGE(m_node.chainman->ProcessNewBlockHeaders(
+                              {{child.GetBlockHeader()}},
+                              /*min_pow_checked=*/true, state),
+                          state.ToString());
+    BOOST_CHECK(node::matmul_trusted::HeardAttestations().empty());
+    BOOST_REQUIRE(node::matmul_trusted::Add(
+                      SignForHeardServe(pinned, child_hash, child_height),
+                      child_hash, child_height) ==
+                  matmul::trusted::AddResult::Accepted);
+    const auto payloads{
+        AskMmAttest(connman, requester, NetMsgType::GETMMATTEST, child_hash)};
+    BOOST_REQUIRE_EQUAL(payloads.size(), 1U);
+    BOOST_CHECK_EQUAL(HeardItems(payloads, pinned.GetPubKey()), 0U);
+}
+
+// GETMMATPQ shares the handler; it keeps its answer and never carries heard.
+BOOST_AUTO_TEST_CASE(getmmatpq_never_serves_heard)
+{
+    LOCK(NetEventsInterface::g_msgproc_mutex);
+    node::matmul_trusted::ResetForTest();
+    ResetSharedPeermanFixture(m_node);
+    HeardServeStoreReset store_reset;
+    ConnmanTestMsg& connman = static_cast<ConnmanTestMsg&>(*m_node.connman);
+    PeerManager& peerman = *m_node.peerman;
+    Consensus::Params& consensus = const_cast<Consensus::Params&>(
+        m_node.chainman->GetParams().GetConsensus());
+    auto restore_heights{SaveMatMulHeights(consensus)};
+    const CBlockIndex* tip{MineHeardServeChain(m_node, consensus)};
+    peerman.SetBestBlock(tip->nHeight, std::chrono::seconds{tip->GetBlockTime()});
+    const uint256 hash{tip->GetBlockHash()};
+    const int32_t height{tip->nHeight};
+
+    CKey pinned, unavailable, open_key;
+    pinned.MakeNewKey(/*fCompressed=*/true);
+    unavailable.MakeNewKey(/*fCompressed=*/true);
+    open_key.MakeNewKey(/*fCompressed=*/true);
+    const auto pinned_vote{SignForHeardServe(pinned, hash, height)};
+    ConfigureHeardServer(pinned, unavailable.GetPubKey(), /*open_attestors=*/true);
+    BOOST_REQUIRE(node::matmul_trusted::Add(pinned_vote, hash, height) ==
+                  matmul::trusted::AddResult::Accepted);
+    BOOST_REQUIRE(node::matmul_trusted::Add(
+                      SignForHeardServe(open_key, hash, height), hash, height) ==
+                  matmul::trusted::AddResult::Heard);
+
+    HeardServePeers peers{connman, peerman};
+    CNode& requester{peers.Add(/*id=*/4261, 0x2b00007f)};
+    for (int i = 0; i < 3; ++i) {
+        const auto payloads{
+            AskMmAttest(connman, requester, NetMsgType::GETMMATPQ, hash)};
+        BOOST_REQUIRE_EQUAL(payloads.size(), 1U);
+        BOOST_CHECK(payloads[0] == EncodeMmAttest({pinned_vote}));
+    }
+}
+
+// No pinned or PQ vote for the hash: the heard parcel goes out alone and
+// spends the request's own serve token, so a requester out of serve tokens
+// gets nothing even with heard allowance left. A hash with nothing pinned
+// or heard is answered with nothing, as before.
+BOOST_AUTO_TEST_CASE(getmmattest_heard_only_spends_serve_token)
+{
+    LOCK(NetEventsInterface::g_msgproc_mutex);
+    node::matmul_trusted::ResetForTest();
+    ResetSharedPeermanFixture(m_node);
+    HeardServeStoreReset store_reset;
+    ConnmanTestMsg& connman = static_cast<ConnmanTestMsg&>(*m_node.connman);
+    PeerManager& peerman = *m_node.peerman;
+    Consensus::Params& consensus = const_cast<Consensus::Params&>(
+        m_node.chainman->GetParams().GetConsensus());
+    auto restore_heights{SaveMatMulHeights(consensus)};
+    const CBlockIndex* tip{MineHeardServeChain(m_node, consensus)};
+    peerman.SetBestBlock(tip->nHeight, std::chrono::seconds{tip->GetBlockTime()});
+    const CBlockIndex* pinned_index{tip->pprev};
+    const CBlockIndex* empty_index{pinned_index->pprev};
+
+    CKey pinned, unavailable, open_key;
+    pinned.MakeNewKey(/*fCompressed=*/true);
+    unavailable.MakeNewKey(/*fCompressed=*/true);
+    open_key.MakeNewKey(/*fCompressed=*/true);
+    ConfigureHeardServer(pinned, unavailable.GetPubKey(), /*open_attestors=*/true);
+    const auto heard_vote{
+        SignForHeardServe(open_key, tip->GetBlockHash(), tip->nHeight)};
+    BOOST_REQUIRE(node::matmul_trusted::Add(heard_vote, tip->GetBlockHash(),
+                                            tip->nHeight) ==
+                  matmul::trusted::AddResult::Heard);
+    BOOST_REQUIRE(node::matmul_trusted::Add(
+                      SignForHeardServe(pinned, pinned_index->GetBlockHash(),
+                                        pinned_index->nHeight),
+                      pinned_index->GetBlockHash(), pinned_index->nHeight) ==
+                  matmul::trusted::AddResult::Accepted);
+
+    HeardServePeers peers{connman, peerman};
+    CNode& requester{peers.Add(/*id=*/4271, 0x2c00007f)};
+
+    // Nothing pinned or heard: no answer, as before.
+    BOOST_CHECK(AskMmAttest(connman, requester, NetMsgType::GETMMATTEST,
+                            empty_index->GetBlockHash())
+                    .empty());
+
+    // Heard only: one MMATTEST carrying the heard vote alone.
+    auto payloads{AskMmAttest(connman, requester, NetMsgType::GETMMATTEST,
+                              tip->GetBlockHash())};
+    BOOST_REQUIRE_EQUAL(payloads.size(), 1U);
+    BOOST_CHECK(DecodeMmAttest(payloads[0]) ==
+                std::vector<matmul::trusted::ExactReplayAttestation>{heard_vote});
+
+    // Frozen clock: spend the remaining live serve tokens on pinned answers.
+    // That hash has nothing heard, so the heard allowance is untouched.
+    const int live{static_cast<int>(
+        node::matmul_trusted::GETMMATTEST_LIVE_REQUEST_BURST)};
+    for (int i = 0; i < live - 1; ++i) {
+        payloads = AskMmAttest(connman, requester, NetMsgType::GETMMATTEST,
+                               pinned_index->GetBlockHash());
+        BOOST_REQUIRE_EQUAL(payloads.size(), 1U);
+    }
+    BOOST_CHECK(AskMmAttest(connman, requester, NetMsgType::GETMMATTEST,
+                            pinned_index->GetBlockHash())
+                    .empty());
+    {
+        ASSERT_DEBUG_LOG("Ignoring rate-limited getmmattest");
+        BOOST_CHECK(AskMmAttest(connman, requester, NetMsgType::GETMMATTEST,
+                                tip->GetBlockHash())
+                        .empty());
+    }
+
+    // One second refills one serve token: the heard-only answer goes out.
+    SetMockTime(GetTime<std::chrono::seconds>() + std::chrono::seconds{1});
+    payloads = AskMmAttest(connman, requester, NetMsgType::GETMMATTEST,
+                           tip->GetBlockHash());
+    BOOST_REQUIRE_EQUAL(payloads.size(), 1U);
+    BOOST_CHECK(DecodeMmAttest(payloads[0]) ==
+                std::vector<matmul::trusted::ExactReplayAttestation>{heard_vote});
+
+    // A heard-only ask refused for want of a serve token still pays one
+    // heard item for its directory walk, so a requester out of serve tokens
+    // cannot repeat the walk once per message. The 1.25 items left pay for
+    // one more refusal; the next ask is paced before any walk.
+    BOOST_CHECK(AskMmAttest(connman, requester, NetMsgType::GETMMATTEST,
+                            tip->GetBlockHash())
+                    .empty());
+    {
+        ASSERT_DEBUG_LOG("Pacing heard getmmattest answer");
+        BOOST_CHECK(AskMmAttest(connman, requester, NetMsgType::GETMMATTEST,
+                                tip->GetBlockHash())
+                        .empty());
+    }
+    BOOST_CHECK(!requester.fDisconnect);
+}
+
+// Heard items only fill an answer up to GETMMATTEST_HEARD_PER_ANSWER items
+// in all, so 16 live answers still fit a stock receiver's 64-item bucket:
+// 4 pinned votes get no heard parcel, 3 get at most one heard item, and a
+// PQ vote counts like a pinned one.
+BOOST_AUTO_TEST_CASE(getmmattest_heard_fills_answer_to_four)
+{
+    LOCK(NetEventsInterface::g_msgproc_mutex);
+    node::matmul_trusted::ResetForTest();
+    ResetSharedPeermanFixture(m_node);
+    HeardServeStoreReset store_reset;
+    ConnmanTestMsg& connman = static_cast<ConnmanTestMsg&>(*m_node.connman);
+    PeerManager& peerman = *m_node.peerman;
+    Consensus::Params& consensus = const_cast<Consensus::Params&>(
+        m_node.chainman->GetParams().GetConsensus());
+    auto restore_heights{SaveMatMulHeights(consensus)};
+    const CBlockIndex* tip{MineHeardServeChain(m_node, consensus)};
+    peerman.SetBestBlock(tip->nHeight, std::chrono::seconds{tip->GetBlockTime()});
+    const size_t per_answer{node::matmul_trusted::GETMMATTEST_HEARD_PER_ANSWER};
+
+    // Pin 4 secp keys, one PQ key and one key that never signs, at a
+    // threshold none of the hashes below reaches.
+    std::vector<CKey> pin_keys(per_answer);
+    std::set<CPubKey> pin;
+    for (auto& key : pin_keys) {
+        key.MakeNewKey(/*fCompressed=*/true);
+        pin.insert(key.GetPubKey());
+    }
+    CKey unavailable;
+    unavailable.MakeNewKey(/*fCompressed=*/true);
+    std::vector<unsigned char> pq_pk(matmul::trusted::EXACT_REPLAY_ML_DSA_44_PK);
+    std::vector<unsigned char> pq_sk(matmul::trusted::EXACT_REPLAY_ML_DSA_44_SK);
+    std::vector<unsigned char> pq_seed(128, 0x5a);
+    BOOST_REQUIRE_EQUAL(ml_dsa_44_keygen(pq_pk.data(), pq_sk.data(),
+                                         pq_seed.data(), pq_seed.size()),
+                        0);
+    matmul::trusted::StoreConfig config;
+    config.chain_id = HeardServeChainId();
+    config.replay_authority_context = HeardServeContext();
+    config.trusted_signers.assign(pin.begin(), pin.end());
+    config.trusted_signers.push_back(unavailable.GetPubKey());
+    config.trusted_pq_signers.push_back(pq_pk);
+    config.threshold = per_answer + 2;
+    config.open_attestors = true;
+    std::string error;
+    BOOST_REQUIRE_MESSAGE(node::matmul_trusted::Configure(
+                              std::move(config), /*trusted_mirror=*/false,
+                              /*serve=*/true, std::chrono::milliseconds{50},
+                              error),
+                          error);
+
+    // tip: 4 pinned votes; tip-1: 3; tip-2: 3 and a PQ vote. Each hash
+    // also has 4 heard votes.
+    auto add_votes = [&](const CBlockIndex* index, size_t pinned, bool pq) {
+        const uint256 hash{index->GetBlockHash()};
+        for (size_t i = 0; i < pinned; ++i) {
+            BOOST_REQUIRE(node::matmul_trusted::Add(
+                              SignForHeardServe(pin_keys[i], hash, index->nHeight),
+                              hash, index->nHeight) ==
+                          matmul::trusted::AddResult::Accepted);
+        }
+        if (pq) {
+            matmul::trusted::ExactReplayStatement statement;
+            statement.chain_id = HeardServeChainId();
+            statement.block_hash = hash;
+            statement.block_height = index->nHeight;
+            statement.replay_authority_context = HeardServeContext();
+            const auto pq_vote{
+                matmul::trusted::SignStatementMlDsa44(statement, pq_sk, pq_pk)};
+            BOOST_REQUIRE(pq_vote.has_value());
+            BOOST_REQUIRE(node::matmul_trusted::AddPq(*pq_vote, hash,
+                                                      index->nHeight) ==
+                          matmul::trusted::AddResult::Accepted);
+        }
+        for (size_t i = 0; i < per_answer; ++i) {
+            CKey open_key;
+            open_key.MakeNewKey(/*fCompressed=*/true);
+            BOOST_REQUIRE(node::matmul_trusted::Add(
+                              SignForHeardServe(open_key, hash, index->nHeight),
+                              hash, index->nHeight) ==
+                          matmul::trusted::AddResult::Heard);
+        }
+        BOOST_REQUIRE(!node::matmul_trusted::HasQuorum(hash, index->nHeight));
+    };
+    const CBlockIndex* four{tip};
+    const CBlockIndex* three{tip->pprev};
+    const CBlockIndex* three_pq{three->pprev};
+    add_votes(four, per_answer, /*pq=*/false);
+    add_votes(three, per_answer - 1, /*pq=*/false);
+    add_votes(three_pq, per_answer - 1, /*pq=*/true);
+
+    HeardServePeers peers{connman, peerman};
+    CNode& requester{peers.Add(/*id=*/4281, 0x2d00007f)};
+    auto heard_items = [&](const std::vector<std::vector<unsigned char>>& payloads) {
+        size_t n{0};
+        for (const auto& payload : payloads) {
+            for (const auto& attestation : DecodeMmAttest(payload)) {
+                if (pin.count(attestation.signer) == 0) ++n;
+            }
+        }
+        return n;
+    };
+
+    // 4 pinned votes: the pinned message only, every time.
+    for (int i = 0; i < 3; ++i) {
+        const auto payloads{AskMmAttest(connman, requester,
+                                        NetMsgType::GETMMATTEST,
+                                        four->GetBlockHash())};
+        BOOST_REQUIRE_EQUAL(payloads.size(), 1U);
+        BOOST_CHECK_EQUAL(DecodeMmAttest(payloads[0]).size(), per_answer);
+        BOOST_CHECK_EQUAL(heard_items(payloads), 0U);
+    }
+
+    // 3 pinned votes: one heard item, in its own message after the pinned
+    // one, although the allowance and the directory hold 4.
+    auto payloads{AskMmAttest(connman, requester, NetMsgType::GETMMATTEST,
+                              three->GetBlockHash())};
+    BOOST_REQUIRE_EQUAL(payloads.size(), 2U);
+    BOOST_CHECK_EQUAL(DecodeMmAttest(payloads[0]).size(), per_answer - 1);
+    BOOST_CHECK_EQUAL(heard_items({payloads[0]}), 0U);
+    BOOST_CHECK_EQUAL(DecodeMmAttest(payloads[1]).size(), 1U);
+    BOOST_CHECK_EQUAL(heard_items(payloads), 1U);
+
+    // 3 pinned votes and a PQ vote: 4 items already, no heard parcel.
+    connman.FlushSendBuffer(requester);
+    requester.fPauseSend = false;
+    BOOST_REQUIRE(connman.ReceiveMsgFrom(
+        requester, NetMsg::Make(NetMsgType::GETMMATTEST,
+                                three_pq->GetBlockHash())));
+    requester.fPauseSend = false;
+    (void)connman.ProcessMessagesOnce(requester);
+    BOOST_CHECK_EQUAL(CountQueuedMessageType(requester, NetMsgType::MMATTESTPQ), 1U);
+    payloads = QueuedMmAttestPayloads(requester);
+    connman.FlushSendBuffer(requester);
+    BOOST_REQUIRE_EQUAL(payloads.size(), 1U);
+    BOOST_CHECK_EQUAL(DecodeMmAttest(payloads[0]).size(), per_answer - 1);
+    BOOST_CHECK_EQUAL(heard_items(payloads), 0U);
+    BOOST_CHECK(!requester.fDisconnect);
 }
 
 BOOST_AUTO_TEST_SUITE_END()

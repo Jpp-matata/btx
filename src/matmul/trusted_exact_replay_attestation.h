@@ -655,6 +655,19 @@ public:
     [[nodiscard]] std::set<CPubKey> FrozenOpenSigners() const;
     [[nodiscard]] std::vector<ExactReplayAttestation> GetHeard(
         const uint256& block_hash, int32_t block_height) const;
+    /**
+     * Heard statements for one block, to hand out after the pinned answer
+     * to GETMMATTEST. At most `max_items`; never a blocklisted key, this
+     * process's own signer, or an entry past the directory TTL. Starts at
+     * `rotate` modulo the matches and wraps, so repeated answers walk every
+     * heard key instead of the lowest signer bytes. Read-only directory,
+     * not authority.
+     */
+    [[nodiscard]] std::vector<ExactReplayAttestation> GetHeardForServe(
+        const uint256& block_hash,
+        int32_t block_height,
+        size_t max_items,
+        uint32_t rotate) const;
     [[nodiscard]] std::vector<ExactReplayAttestation> ExportHeard() const;
     [[nodiscard]] std::vector<ExactReplayRefutation> GetRefutations(
         const uint256& block_hash, int32_t block_height) const;

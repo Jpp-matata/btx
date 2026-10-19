@@ -191,6 +191,13 @@ static constexpr double MATMUL_ATTESTATION_HISTORICAL_REQUEST_BURST{
 static constexpr double MATMUL_ATTESTATION_INBOUND_BURST{64.0};
 static constexpr double MATMUL_ATTESTATION_GLOBAL_INBOUND_BURST{256.0};
 static constexpr double MATMUL_ATTESTATION_NETGROUP_INBOUND_BURST{64.0};
+// A live GETMMATTEST answer that carries heard statements holds at most
+// GETMMATTEST_HEARD_PER_ANSWER items in all, so a full live request burst of
+// such answers fits the receiver's per-peer bucket above.
+static_assert(static_cast<double>(
+                  node::matmul_trusted::GETMMATTEST_HEARD_PER_ANSWER) *
+                  node::matmul_trusted::GETMMATTEST_LIVE_REQUEST_BURST <=
+              MATMUL_ATTESTATION_INBOUND_BURST);
 /** Per-source ceiling on attestation signature-verification work accepted
  *  before validity is known. Bounds aggregate CPU without a global choke point
  *  that one flooding netgroup could exhaust for everybody. */
@@ -1235,6 +1242,13 @@ struct Peer {
     double m_matmul_attestation_inbound_tokens GUARDED_BY(NetEventsInterface::g_msgproc_mutex){
         MATMUL_ATTESTATION_INBOUND_BURST};
     std::chrono::microseconds m_matmul_attestation_last_refill GUARDED_BY(NetEventsInterface::g_msgproc_mutex){0us};
+    /** Heard statements served to this peer after a pinned GETMMATTEST
+     *  answer (-matmulopenattestors=1 only). Own bucket and clock; the
+     *  cursor rotates through the heard keys of a hash across answers. */
+    double m_matmul_heard_serve_tokens GUARDED_BY(NetEventsInterface::g_msgproc_mutex){
+        node::matmul_trusted::GETMMATTEST_HEARD_BURST};
+    std::chrono::microseconds m_matmul_heard_serve_last_refill GUARDED_BY(NetEventsInterface::g_msgproc_mutex){0us};
+    uint32_t m_matmul_heard_serve_cursor GUARDED_BY(NetEventsInterface::g_msgproc_mutex){0};
     /** Consecutive ignored GETMMATTEST / over-budget MMATTEST. Reset on
      *  a successful serve or accepted mmattest. Aggressive P2P is
      *  penalized once this hits GETMMATTEST_HAMMER_BAN_AFTER. */
@@ -21123,6 +21137,8 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
                 peer->m_matmul_protocol_ignored = 0;
             }
         };
+        // Pinned and PQ items already sent in this answer (push_heard).
+        size_t answer_items{0};
         auto push_mmattest =
             [&](std::vector<matmul::trusted::ExactReplayAttestation> attestations,
                 const char* reason) {
@@ -21135,6 +21151,7 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
                     return;
                 }
                 if (!ensure_logical_token()) return;
+                answer_items += attestations.size();
                 MakeAndPushMessage(
                     pfrom, NetMsgType::MMATTEST, attestations);
                 MaybeLogAttestationServe(
@@ -21150,11 +21167,66 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
                 }
                 if (attestations.empty()) return;
                 if (!ensure_logical_token()) return;
+                answer_items += attestations.size();
                 MakeAndPushMessage(
                     pfrom, NetMsgType::MMATTESTPQ, attestations);
                 MaybeLogAttestationServe(reason, block_hash, height,
                                          pfrom.GetId());
             };
+
+        // Open-attestor directory (-matmulopenattestors=1): after the pinned
+        // and PQ answers, fill the answer up to GETMMATTEST_HEARD_PER_ANSWER
+        // items with valid statements from keys this node does not pin. A
+        // requester that pins one of those keys counts it through its own
+        // Add(); nobody's trust changes here. Own MMATTEST, so a receiver
+        // short of tokens drops only this message, and an answer that
+        // already carries GETMMATTEST_HEARD_PER_ANSWER items gets none. Live
+        // active-chain hashes only (not recovery forks or followed
+        // suffixes), paced per requester, never GETMMATPQ.
+        auto push_heard = [&]() {
+            if (msg_type != NetMsgType::GETMMATTEST) return;
+            if (!on_active_chain || !live_window) return;
+            if (!node::matmul_trusted::OpenAttestorsEnabled()) return;
+            if (logical_rate_limited) return;
+            if (answer_items >=
+                node::matmul_trusted::GETMMATTEST_HEARD_PER_ANSWER) {
+                return;
+            }
+            if (peer->m_matmul_heard_serve_last_refill != 0us) {
+                peer->m_matmul_heard_serve_tokens =
+                    node::matmul_trusted::GetMmAttestHeardRefill(
+                        peer->m_matmul_heard_serve_tokens,
+                        now - peer->m_matmul_heard_serve_last_refill);
+            }
+            peer->m_matmul_heard_serve_last_refill = now;
+            const size_t affordable{
+                node::matmul_trusted::GetMmAttestHeardAffordable(
+                    peer->m_matmul_heard_serve_tokens, answer_items)};
+            if (affordable == 0) {
+                LogDebug(BCLog::NET,
+                         "Pacing heard getmmattest answer peer=%d block=%s\n",
+                         pfrom.GetId(), block_hash.ToString());
+                return;
+            }
+            auto heard{node::matmul_trusted::HeardForServe(
+                block_hash, height, affordable,
+                peer->m_matmul_heard_serve_cursor)};
+            if (heard.empty()) return;
+            if (!ensure_logical_token()) {
+                // A refused heard-only ask still pays one heard item for the
+                // walk, so a requester out of serve tokens cannot repeat it
+                // once per message (affordable >= 1, so never negative).
+                peer->m_matmul_heard_serve_tokens -= 1.0;
+                return;
+            }
+            peer->m_matmul_heard_serve_tokens -=
+                static_cast<double>(heard.size());
+            peer->m_matmul_heard_serve_cursor +=
+                static_cast<uint32_t>(heard.size());
+            MakeAndPushMessage(pfrom, NetMsgType::MMATTEST, heard);
+            MaybeLogAttestationServe(
+                "heard", block_hash, height, pfrom.GetId());
+        };
 
         const char* serve_reason{"cached"};
         auto existing{node::matmul_trusted::Get(block_hash, height)};
@@ -21164,6 +21236,7 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
                 push_mmattest(std::move(existing), serve_reason);
             }
             push_mmattestpq(std::move(existing_pq), serve_reason);
+            push_heard();
             finish_logical();
             return;
         }
@@ -21253,6 +21326,7 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
             node::matmul_trusted::Get(block_hash, height), serve_reason);
         push_mmattestpq(
             node::matmul_trusted::GetPq(block_hash, height), serve_reason);
+        push_heard();
         finish_logical();
         return;
     }
