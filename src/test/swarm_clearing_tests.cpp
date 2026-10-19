@@ -194,4 +194,29 @@ BOOST_AUTO_TEST_CASE(slices_above_capacity_fail_open)
     BOOST_CHECK_EQUAL(book.Balance("B"), 0);
 }
 
+BOOST_AUTO_TEST_CASE(one_close_template_covers_every_pool)
+{
+    modelnet::SwarmClearingBook book;
+    std::string err;
+    BOOST_REQUIRE(book.Open(300, {Slice("A", 100), Slice("B", 100), Slice("C", 100)}, err));
+    modelnet::SwarmClearingReceipt receipt;
+    BOOST_REQUIRE(book.Apply({Pay("p1", "A", "B", 40), Pay("p2", "B", "A", 10), Pay("p3", "A", "C", 5)}, receipt, err));
+    std::map<std::string, std::vector<unsigned char>> scripts = {
+        {"A", {0x51}},
+        {"B", {0x52}},
+        {"C", {0x53}},
+    };
+    const Txid funding = Txid::FromUint256(uint256::ONE);
+    modelnet::SwarmClearingClose close;
+    BOOST_REQUIRE(modelnet::SwarmBuildClearingClose(book, funding, scripts, "B", 100, close, err));
+    BOOST_CHECK(!close.broadcast);
+    BOOST_CHECK_EQUAL(close.templates, 1);
+    BOOST_CHECK_EQUAL(close.outputs, 3);
+    BOOST_CHECK_EQUAL(close.tx.vin.size(), 1U);
+    BOOST_CHECK(close.tx.vin[0].prevout.hash == funding);
+    BOOST_CHECK_EQUAL(close.tx.vout[0].nValue + close.tx.vout[1].nValue + close.tx.vout[2].nValue, 300);
+    BOOST_CHECK(!modelnet::SwarmBuildClearingClose(book, funding, scripts, "B", 200, close, err));
+    BOOST_CHECK_EQUAL(err, "DECREASING_PAYMENT");
+}
+
 BOOST_AUTO_TEST_SUITE_END()

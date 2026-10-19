@@ -244,6 +244,11 @@ int64_t SwarmClearingBook::Balance(const std::string& pool_id) const
     return it->second;
 }
 
+std::vector<std::pair<std::string, int64_t>> SwarmClearingBook::Balances() const
+{
+    return {m_balances.begin(), m_balances.end()};
+}
+
 int64_t SwarmClearingBook::Sequence() const
 {
     return m_sequence;
@@ -298,6 +303,50 @@ bool SwarmClearingBook::Load(const fs::path& modeldir, std::string& err)
     m_balances.swap(balances);
     m_seen.swap(seen);
     m_open = true;
+    err.clear();
+    return true;
+}
+
+bool SwarmBuildClearingClose(const SwarmClearingBook& book, const Txid& funding,
+                             const std::map<std::string, std::vector<unsigned char>>& scripts,
+                             const std::string& worker_pool, int64_t previous_worker_atoms, SwarmClearingClose& out,
+                             std::string& err)
+{
+    out.tx = CMutableTransaction();
+    out.templates = 0;
+    out.outputs = 0;
+    out.broadcast = false;
+    const std::vector<std::pair<std::string, int64_t>> balances = book.Balances();
+    if (balances.empty()) {
+        err = "CLOSED";
+        return false;
+    }
+    const int64_t worker_atoms = book.Balance(worker_pool);
+    if (!worker_pool.empty() && worker_atoms < previous_worker_atoms) {
+        err = "DECREASING_PAYMENT";
+        return false;
+    }
+    out.tx.vin.emplace_back(COutPoint(funding, 0));
+    int64_t sum = 0;
+    for (const auto& entry : balances) {
+        if (entry.second <= 0) continue;
+        const auto script = scripts.find(entry.first);
+        if (script == scripts.end() || script->second.empty()) {
+            err = "CLOSE_SCRIPT";
+            return false;
+        }
+        out.tx.vout.emplace_back(entry.second, CScript(script->second.begin(), script->second.end()));
+        sum += entry.second;
+    }
+    int64_t expected = 0;
+    for (const auto& entry : balances) expected += entry.second;
+    if (sum != expected || out.tx.vout.empty() || out.tx.vin.size() != 1) {
+        err = "CLOSE_CONSERVATION";
+        return false;
+    }
+    out.templates = 1;
+    out.outputs = static_cast<int>(out.tx.vout.size());
+    out.broadcast = false;
     err.clear();
     return true;
 }

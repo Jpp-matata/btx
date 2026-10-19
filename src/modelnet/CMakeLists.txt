@@ -35,6 +35,9 @@ add_library(bitcoin_modelnet STATIC
   swarm_clearing.cpp
   swarm_liquidity.cpp
   swarm_live.cpp
+  swarm_funding_class.cpp
+  swarm_timescale.cpp
+  swarm_raftlog.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
