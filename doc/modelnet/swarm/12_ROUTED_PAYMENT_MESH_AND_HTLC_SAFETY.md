@@ -2,7 +2,7 @@
 
 Document: **BTX-SWARM-SPEC-12**, revision **0.1.0**, 19 October 2026.
 
-**Implementation scope:** Routing, fee/expiry calculations, hashlock conservation models and watch alerts are executable. Native bidirectional commitments, penalties, atomic routed settlement and watchtower remedies are not implemented.
+**Implementation scope:** Routing, fees, expiry slack, hashlock binding, and the watchtower appointment are executable. `secp_penalty` is refused. A stale state is `HASHLOCK_REMEDY` when the prior secret is released and `STALE_STATE_ALERT` otherwise. A native penalty remedy is `NATIVE_REMEDY`. Nothing in this path broadcasts.
 
 ## One reusable mesh
 

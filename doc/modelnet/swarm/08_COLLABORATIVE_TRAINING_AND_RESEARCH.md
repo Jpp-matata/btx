@@ -16,9 +16,9 @@ Cross-hardware floating-point execution is not generally bit-identical. The targ
 
 ## Fast local training islands
 
-**TRN-002.** Tightly coupled collectives belong inside a measured high-bandwidth island. `btxmesh.island` is an actual `torchrun` entrypoint using distributed data parallelism: Gloo on CPU and a selectable NCCL/CUDA path. Each rank consumes its own seeded samples, participates in real gradient all-reduce, and writes rank-specific training state. The test launches two real Python processes and checks identical synchronized output checkpoints and nontrivial updates.
+**TRN-002.** Tightly coupled collectives belong inside a measured high-bandwidth island. `btxd` does not start `torchrun` or a collective. Compatible nearby peers may share a cohort only when the checkpoint and recipe match. An incompatible branch forks.
 
-The NCCL path has code but no GPU execution evidence. Multi-host authenticated rendezvous, FSDP/ZeRO state sharding, parallel model architectures, accelerator-specific kernels, node loss recovery and optimizer-state elasticity are not implemented as qualified production profiles. Private collective ports must not be exposed to unauthenticated public peers.
+A missing GPU or collective library is `ENGINE_ABSENT` and moves no bytes. This process does not start `torchrun`, NCCL, FSDP, or ZeRO, and it does not open a collective port to a public peer. Incompatible branches fork. A merge stays unaccepted until an independent evaluation accepts it.
 
 ## Cooperative outer rounds
 

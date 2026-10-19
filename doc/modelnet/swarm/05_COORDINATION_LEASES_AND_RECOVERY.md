@@ -2,7 +2,7 @@
 
 Document: **BTX-SWARM-SPEC-05**, revision **0.1.0**, 19 October 2026.
 
-**Implementation scope:** Persistent static-committee Raft and work fencing are executable and tested. Dynamic membership, Byzantine committees and distributed external-effect transactions are not implemented.
+**Implementation scope:** The in-process committee log writes a vote before it returns, refuses a mismatched predecessor, and refuses to truncate a committed prefix. A voter-set change is refused. An attempt lease expires, stays idempotent, and refuses work until the worker is quiescent. This log does not open a socket and does not spend.
 
 ## Coordination model
 

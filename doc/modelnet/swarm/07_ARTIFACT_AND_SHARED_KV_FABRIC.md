@@ -2,13 +2,13 @@
 
 Document: **BTX-SWARM-SPEC-07**, revision **0.1.0**, 19 October 2026.
 
-**Implementation scope:** Encrypted bounded CAS, actual paged reference KV transfer and exact reuse are implemented and network-tested. Production GPU zero-copy, NIXL/RDMA and approximate cross-model reuse are not implemented.
+**Implementation scope:** A piece is accepted only when its SHA-384 matches the id and the body is at most 32 MiB. A ciphertext body is `REALM_SEALED` and is not decrypted. A KV prefix mismatch is `PREFIX_MISMATCH`. A prefetch without an engine is `ENGINE_ABSENT` and moves no bytes. An invalid eviction deletes nothing, and the index is committed before an orphan delete. Incomplete bytes are `INCOMPLETE` and are not trusted. GPU zero-copy, NIXL, Mooncake, and RDMA are `ENGINE_ABSENT`. Approximate cross-model KV reuse is not enabled.
 
 ## Object transport and storage
 
 **KV-001.** Durable artifacts are exact immutable byte objects, divided into bounded 4 MiB pieces with SHA-384 verification. Manifests bind artifact identity, length and ordered piece identities. Transfer may resume from verified pieces; a manifest is not usable until required pieces have been verified. Paths from peers are never storage keys or shell arguments.
 
-The portable CAS encrypts pieces under realm keys using AES-GCM and realm-scoped authenticated storage names. It validates reads, records pins and physical leases, refuses quota exhaustion conservatively and atomically commits indexes. An eviction plan must be valid before any referenced piece is removed. Index changes commit before orphan file deletion so a failed write cannot delete bytes still represented as valid.
+A ciphertext piece is `REALM_SEALED`. This process does not apply AES-GCM and does not decrypt it. An eviction plan must be valid before any referenced piece is removed. `SwarmCommitCas` marks the index committed before it records an orphan deletion. Unverified bytes are `INCOMPLETE` and are not trusted. Acceptance of a plaintext piece does not transfer bytes.
 
 **KV-002.** Cross-realm plaintext deduplication must not reveal membership or content equality. An untrusted storage source can be used for authenticated ciphertext, but the producer's correctness is a separate trust decision. The current store is local to the sidecar or worker, not a native ModelNet CAS replacement. Native acquisition and retention must be reconciled through an explicit bridge.
 
@@ -44,12 +44,12 @@ Work graphs should provide next-use hints: retain a parent context while a tool 
 
 | Profile | Required integration | Current delivery |
 |---|---|---|
-| Exact local/shared prefix | Runtime-compatible pages, complete fingerprint | Executed on reference PyTorch decoder |
-| vLLM / SGLang prefix and host tiers | Version-pinned launch/config and live output checks | Generated plans and process/client code; not executed with those engines |
-| LMCache distributed tier | Qualified current connector/backend contract | Plan uses V1-style connector; migration/qualification required |
-| NIXL / Mooncake / RDMA | Registered-memory lifetime, connection auth, data ownership, completion fencing | Specification and qualification requirements only |
-| LoRA/base decomposition | Proven shared subgraph, adapter ordering and quality checks | Not implemented |
-| Cross-model transformed KV | Pair-specific converter plus held-out equivalence/error policy | Not implemented; never silently enabled |
-| Compiled/runtime caches | Trusted builder, exact runtime/compiler/shape and source binding | Required production extension, not a signed-model shortcut |
+| Exact local/shared prefix | Runtime-compatible pages, complete fingerprint | Prefix mismatch is `PREFIX_MISMATCH`. No engine is `ENGINE_ABSENT` and moves no bytes |
+| vLLM / SGLang prefix and host tiers | Version-pinned launch/config and live output checks | `ENGINE_ABSENT`. This process does not start those engines |
+| LMCache distributed tier | Qualified current connector/backend contract | `ENGINE_ABSENT`. No bytes are moved |
+| NIXL / Mooncake / RDMA | Registered-memory lifetime, connection auth, data ownership, completion fencing | `ENGINE_ABSENT`. No bytes are moved |
+| LoRA/base decomposition | Proven shared subgraph, adapter ordering and quality checks | Adapter mismatch is `PREFIX_MISMATCH`. Silent decomposition is refused |
+| Cross-model transformed KV | Pair-specific converter plus held-out equivalence/error policy | Refused. A different fingerprint is `PREFIX_MISMATCH` and is never silently enabled |
+| Compiled/runtime caches | Trusted builder, exact runtime/compiler/shape and source binding | A signed model is not a builder. Incomplete bytes are `INCOMPLETE` |
 
 A high-performance feature is automatically eligible only when a compatible, locally authorized and empirically qualified implementation exists. Availability of an importable module is discovery, not qualification.

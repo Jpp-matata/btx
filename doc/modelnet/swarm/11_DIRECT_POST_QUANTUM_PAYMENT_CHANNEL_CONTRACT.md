@@ -2,7 +2,7 @@
 
 Document: **BTX-SWARM-SPEC-11**, revision **0.1.0**, 19 October 2026.
 
-**Implementation scope:** Complete target state/transaction contract and an executable monotonic voucher model are provided. Native P2MR construction, PSBT signing and unilateral exits are not implemented in this package.
+**Implementation scope:** The monotonic voucher, the 2-of-2 funding template, the PSBT refund template, and the worker payout template are constructed in this process. Funding counts only after the refund is bound to the same outpoint. This process does not sign with a spend key and does not broadcast. A broadcast attempt is `BROADCAST_FORBIDDEN`.
 
 ## Channel class and threat model
 

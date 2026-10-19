@@ -2,11 +2,11 @@
 
 Document: **BTX-SWARM-SPEC-01**, revision **0.1.0**, 19 October 2026.
 
-**Implementation scope:** Target product contract; local default subscriptions and approved private swarms are implemented, universal public model-community joining is not.
+**Implementation scope:** A byte-verified catalog row joins the lineage inside `btxd` with ModelNet on. This process does not open a public WAN socket. Private membership is not advertised.
 
 ## Mission and boundaries
 
-A model is a persistent evolutionary lineage, not merely a download. ModelNet distributes immutable assets and family metadata; Lab preserves provenance and admission evidence; Swarm runs work and learning; SEP accounts for economic objectives; PAY must eventually deliver independently enforceable settlement. Monetary consensus remains unchanged. The executable version in this handoff is a private integration implementation, not a qualified replacement for the 0.35 release candidate.
+A model is a persistent evolutionary lineage, not merely a download. ModelNet, the lab records, the swarm, and the payment templates run inside `btxd`. PAY builds the refund and the payout and does not broadcast them. The scheduler has no spend key. Monetary consensus remains unchanged. This branch is not a qualified replacement for the 0.35 release candidate.
 
 **LIF-001.** A successfully acquired, byte-verified, complete model MUST cause local observer subscription and model-family discovery without an additional feature switch. Discovery MUST NOT require a GPU, a wallet, a paid account, or a training-capable representation. `CatalogWatcher` implements the local acquisition transition by consuming the verified fields in the pinned `catalog.json` format.
 
@@ -35,11 +35,11 @@ A model is a persistent evolutionary lineage, not merely a download. ModelNet di
 
 ## User experience and deployment modes
 
-Ship `btx-swarmd`, `btx-swarm`, and `btx-paynetd` with ModelNet. The native patch starts the swarm service automatically when `btx-modeld` starts. Do not add a second CMake enable switch. Ordinary monetary startup and validation must not depend on the swarm service becoming healthy. A missing wheel bundle causes a visible degraded sidecar, not silent monetary failure or an online dependency installer.
+ModelNet starts inside `btxd`. There is no second swarm binary and no extra startup flag. `btxd` does not exec `btx-swarmd` or `btx-paynetd`. Ordinary monetary startup does not depend on a Python wheel. A missing GPU or transfer engine is `ENGINE_ABSENT` and moves no bytes.
 
 Fresh initialization selects an IPv4 route interface and an authenticated listener automatically. Its address is only a reachability hint; NAT and public reachability must be measured separately. Existing configurations are never silently rewritten. Local administration remains a private Unix socket with a token, not an internet-exposed API.
 
-The executable supports a single-node default controller or a preconfigured static controller committee. Joining a work realm does not join that controller committee. Complete automatic family-wide rendezvous, decentralized public membership, dynamic committee membership and native identity binding are outstanding product requirements, not hidden configuration options that already work.
+The process keeps a static controller committee. Joining a work realm does not join that committee. A request to join both is `COMMITTEE`. A worker announcement cannot set the voter bit. A changed voter set is refused. Public discovery stores an artifact-to-lineage mapping and refuses a private membership, a prompt, a work detail, and a data grant. This process does not open a public WAN socket.
 
 ## Explicit non-goals and compatibility
 

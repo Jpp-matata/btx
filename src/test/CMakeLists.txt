@@ -616,6 +616,7 @@ if(WITH_MODELNET)
     swarm_opening_tests.cpp
     swarm_appointment_tests.cpp
     swarm_boundary_tests.cpp
+    swarm_store_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp

@@ -38,7 +38,7 @@ The portable runner suppresses child stdout/stderr rather than logging arbitrary
 
 ## Required sandbox profile
 
-A general coding or sysadmin executor must specify network egress, filesystem mounts, process limits, temporary disk, syscall restrictions, source snapshot, dependency lock, permitted tools and external effects. It must run under an appropriate sandbox/container/VM boundary, not merely a Python subprocess. Remote manifests must never select host interpreters or provider credentials. This executor is not implemented in this handoff.
+A general coding or sysadmin executor must name its sandbox boundary. A remote manifest that selects a host interpreter or a provider credential is `EXECUTOR`. Without a sandbox the request is `SANDBOX_ABSENT`. `SwarmAdmitExecutor` does not start a child. `launched` stays false.
 
 ## Acceptance
 
