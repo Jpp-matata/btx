@@ -1153,6 +1153,9 @@ if(WITH_MODELNET)
     swarm_notnosighash_tests.cpp
     swarm_notnotimeout_tests.cpp
     swarm_notnotype_tests.cpp
+    swarm_notnohashlock_tests.cpp
+    swarm_notnohost_tests.cpp
+    swarm_notnopreimage_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
