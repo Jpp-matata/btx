@@ -1287,6 +1287,7 @@ if(WITH_MODELNET)
     swarm_notnoholdtime_tests.cpp
     swarm_notnosignerkey_tests.cpp
     swarm_notnohostname_tests.cpp
+    swarm_notnoextra_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp

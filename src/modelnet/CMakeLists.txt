@@ -723,6 +723,7 @@ add_library(bitcoin_modelnet STATIC
   swarm_notnoholdtime.cpp
   swarm_notnosignerkey.cpp
   swarm_notnohostname.cpp
+  swarm_notnoextra.cpp
   swarm_notslots.cpp
   swarm_notprivateoff.cpp
   swarm_notclosetmpl.cpp
