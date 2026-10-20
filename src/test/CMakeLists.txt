@@ -1048,6 +1048,9 @@ if(WITH_MODELNET)
     swarm_notnosub_tests.cpp
     swarm_notnoowner_tests.cpp
     swarm_notnocrash_tests.cpp
+    swarm_notnolease_tests.cpp
+    swarm_notnoproposer_tests.cpp
+    swarm_notnouseful_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
