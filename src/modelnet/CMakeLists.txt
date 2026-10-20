@@ -164,6 +164,9 @@ add_library(bitcoin_modelnet STATIC
   swarm_community.cpp
   swarm_poolepoch.cpp
   swarm_meshpool.cpp
+  swarm_revsplit.cpp
+  swarm_governor.cpp
+  swarm_vram.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
