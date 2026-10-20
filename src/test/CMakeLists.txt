@@ -1713,6 +1713,8 @@ if(WITH_MODELNET)
     swarm_notclosetmpl_tests.cpp
     swarm_notmandate_tests.cpp
     swarm_runcycle_tests.cpp
+    swarm_faultjournal_tests.cpp
+    swarm_scriptroute_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp

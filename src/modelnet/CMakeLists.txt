@@ -1149,6 +1149,8 @@ add_library(bitcoin_modelnet STATIC
   swarm_notclosetmpl.cpp
   swarm_notmandate.cpp
   swarm_runcycle.cpp
+  swarm_faultjournal.cpp
+  swarm_scriptroute.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
