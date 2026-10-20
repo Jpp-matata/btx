@@ -898,6 +898,12 @@ if(WITH_MODELNET)
     swarm_notmedium_tests.cpp
     swarm_notproposer_tests.cpp
     swarm_notsandbox_tests.cpp
+    swarm_nota2a_tests.cpp
+    swarm_notfamilydir_tests.cpp
+    swarm_notlongbase_tests.cpp
+    swarm_notmcp_tests.cpp
+    swarm_notreport_tests.cpp
+    swarm_notscripthop_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp
