@@ -1162,6 +1162,14 @@ if(WITH_MODELNET)
     swarm_notnosolver_tests.cpp
     swarm_notnoattest_tests.cpp
     swarm_notnoresearch_tests.cpp
+    swarm_notnoschedkey_tests.cpp
+    swarm_notnoinfo2_tests.cpp
+    swarm_notnodns_tests.cpp
+    swarm_notnoaccount_tests.cpp
+    swarm_notnoegress_tests.cpp
+    swarm_notnoadvert_tests.cpp
+    swarm_notnochild_tests.cpp
+    swarm_notnoactivate_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
