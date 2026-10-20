@@ -313,6 +313,9 @@ add_library(bitcoin_modelnet STATIC
   swarm_notframework.cpp
   swarm_notplaceoff.cpp
   swarm_notisland.cpp
+  swarm_notaccel.cpp
+  swarm_notresource.cpp
+  swarm_notomit.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
