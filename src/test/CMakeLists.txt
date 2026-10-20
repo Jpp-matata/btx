@@ -1757,6 +1757,7 @@ if(WITH_MODELNET)
     swarm_datasetgate_tests.cpp
     swarm_staleupdate_tests.cpp
     swarm_debitcap_tests.cpp
+    swarm_manifestok_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp
