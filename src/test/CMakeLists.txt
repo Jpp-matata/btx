@@ -1472,6 +1472,7 @@ if(WITH_MODELNET)
     swarm_notnolmcacheops2_tests.cpp
     swarm_notnordmaabsent2_tests.cpp
     swarm_notnofsdprun2_tests.cpp
+    swarm_notnomixedprec2_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
