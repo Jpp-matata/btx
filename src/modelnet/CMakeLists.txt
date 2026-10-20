@@ -1115,6 +1115,7 @@ add_library(bitcoin_modelnet STATIC
   swarm_kvbench.cpp
   swarm_fsdpheld.cpp
   swarm_mixedprec.cpp
+  swarm_shardheld.cpp
   swarm_notslots.cpp
   swarm_notprivateoff.cpp
   swarm_notclosetmpl.cpp
