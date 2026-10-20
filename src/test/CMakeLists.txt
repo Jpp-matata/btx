@@ -1693,6 +1693,7 @@ if(WITH_MODELNET)
     swarm_wanupdate_tests.cpp
     swarm_staleisland_tests.cpp
     swarm_sandboxcap_tests.cpp
+    swarm_revoke_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
