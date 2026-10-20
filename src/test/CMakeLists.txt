@@ -1621,6 +1621,7 @@ if(WITH_MODELNET)
     swarm_receiptbook_tests.cpp
     swarm_capcover_tests.cpp
     swarm_schedwit_tests.cpp
+    swarm_gradexport_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp

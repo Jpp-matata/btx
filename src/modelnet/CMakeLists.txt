@@ -1057,6 +1057,7 @@ add_library(bitcoin_modelnet STATIC
   swarm_receiptbook.cpp
   swarm_capcover.cpp
   swarm_schedwit.cpp
+  swarm_gradexport.cpp
   swarm_notslots.cpp
   swarm_notprivateoff.cpp
   swarm_notclosetmpl.cpp
