@@ -1110,6 +1110,12 @@ if(WITH_MODELNET)
     swarm_notnoagree_tests.cpp
     swarm_notnoabsent_tests.cpp
     swarm_notnoeval_tests.cpp
+    swarm_notnoadmin_tests.cpp
+    swarm_notnoblock_tests.cpp
+    swarm_notnocltv_tests.cpp
+    swarm_notnofamily_tests.cpp
+    swarm_notnojoin_tests.cpp
+    swarm_notnoprof_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
