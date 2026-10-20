@@ -122,6 +122,9 @@ add_library(bitcoin_modelnet STATIC
   swarm_masshold.cpp
   swarm_spendgate.cpp
   swarm_gradrealm.cpp
+  swarm_selfeval.cpp
+  swarm_niche.cpp
+  swarm_unfunded.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
