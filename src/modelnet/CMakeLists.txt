@@ -174,6 +174,7 @@ add_library(bitcoin_modelnet STATIC
   swarm_fundsign.cpp
   swarm_piece4m.cpp
   swarm_private.cpp
+  swarm_authorsign.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
