@@ -1598,6 +1598,9 @@ if(WITH_MODELNET)
     swarm_headkeep_tests.cpp
     swarm_prefixbook_tests.cpp
     swarm_tenantlook_tests.cpp
+    swarm_earnkeep_tests.cpp
+    swarm_cycleparent_tests.cpp
+    swarm_manifestbind_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp

@@ -1034,6 +1034,9 @@ add_library(bitcoin_modelnet STATIC
   swarm_headkeep.cpp
   swarm_prefixbook.cpp
   swarm_tenantlook.cpp
+  swarm_earnkeep.cpp
+  swarm_cycleparent.cpp
+  swarm_manifestbind.cpp
   swarm_notslots.cpp
   swarm_notprivateoff.cpp
   swarm_notclosetmpl.cpp
