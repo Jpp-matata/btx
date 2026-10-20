@@ -1818,6 +1818,17 @@ if(WITH_MODELNET)
     swarm_remedy_script_tests.cpp
     swarm_remedy_supersede_tests.cpp
     swarm_remedy_watch_tests.cpp
+    swarm_artifact_offer_tests.cpp
+    swarm_artifact_plane_tests.cpp
+    swarm_bodygate_join_tests.cpp
+    swarm_bodygate_manifest_tests.cpp
+    swarm_bodygate_piece_tests.cpp
+    swarm_channelset_claim_tests.cpp
+    swarm_channelset_fund_tests.cpp
+    swarm_channelset_open_tests.cpp
+    swarm_channelset_payout_tests.cpp
+    swarm_channelset_policy_tests.cpp
+    swarm_channelset_refund_tests.cpp
     swarm_evolve_graduate_tests.cpp
     swarm_evolve_measure_tests.cpp
     swarm_evolve_recover_tests.cpp

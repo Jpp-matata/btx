@@ -1298,6 +1298,28 @@ add_library(bitcoin_modelnet STATIC
   swarm_remedy/leaf.cpp
   swarm_remedy/watch.cpp
   swarm_remedy/remedy.cpp
+  swarm_artifact/artifact.cpp
+  swarm_artifact/capture.cpp
+  swarm_artifact/join.cpp
+  swarm_artifact/offer.cpp
+  swarm_artifact/pieces.cpp
+  swarm_artifact/split.cpp
+  swarm_bodygate/piece.cpp
+  swarm_bodygate/ledger.cpp
+  swarm_bodygate/span.cpp
+  swarm_bodygate/lastmark.cpp
+  swarm_bodygate/join.cpp
+  swarm_bodygate/manifest.cpp
+  swarm_bodygate/swarm_bodygate.cpp
+  swarm_channelset/keys.cpp
+  swarm_channelset/open.cpp
+  swarm_channelset/refund.cpp
+  swarm_channelset/fund.cpp
+  swarm_channelset/margin.cpp
+  swarm_channelset/payout.cpp
+  swarm_channelset/claim.cpp
+  swarm_channelset/policy.cpp
+  swarm_channelset/channelset.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
