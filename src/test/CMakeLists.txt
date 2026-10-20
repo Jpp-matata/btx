@@ -1063,6 +1063,8 @@ if(WITH_MODELNET)
     swarm_notnoprompt_tests.cpp
     swarm_notnowear_tests.cpp
     swarm_notnochurn_tests.cpp
+    swarm_notnostale_tests.cpp
+    swarm_notnocoord_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
