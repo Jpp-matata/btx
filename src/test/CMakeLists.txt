@@ -1030,6 +1030,12 @@ if(WITH_MODELNET)
     swarm_notnoincompat_tests.cpp
     swarm_notnoinform_tests.cpp
     swarm_notnoniche_tests.cpp
+    swarm_notnofiat_tests.cpp
+    swarm_notno90s_tests.cpp
+    swarm_notnobody32_tests.cpp
+    swarm_notnopiece4_tests.cpp
+    swarm_notnofetch_tests.cpp
+    swarm_notnomcp_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
