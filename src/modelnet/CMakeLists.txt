@@ -1277,6 +1277,12 @@ add_library(bitcoin_modelnet STATIC
   swarm_experience/queue.cpp
   swarm_experience/reward.cpp
   swarm_experience/store.cpp
+  swarm_scriptmesh/admit.cpp
+  swarm_scriptmesh/claim.cpp
+  swarm_scriptmesh/policy.cpp
+  swarm_scriptmesh/refund.cpp
+  swarm_scriptmesh/replay.cpp
+  swarm_scriptmesh/scriptmesh.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
