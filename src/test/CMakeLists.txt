@@ -1193,6 +1193,7 @@ if(WITH_MODELNET)
     swarm_notnoidremap_tests.cpp
     swarm_notnopoison_tests.cpp
     swarm_notnoreorg2_tests.cpp
+    swarm_notnotenant_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
