@@ -1856,6 +1856,10 @@ if(WITH_MODELNET)
     swarm_reorghold_open_tests.cpp
     swarm_reorghold_refund_tests.cpp
     swarm_reorghold_reorg_tests.cpp
+    swarm_nicheslots_move_tests.cpp
+    swarm_nicheslots_open_tests.cpp
+    swarm_nicheslots_quiet_tests.cpp
+    swarm_nicheslots_spend_tests.cpp
     swarm_evolve_graduate_tests.cpp
     swarm_evolve_measure_tests.cpp
     swarm_evolve_recover_tests.cpp

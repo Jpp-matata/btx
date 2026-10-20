@@ -1374,6 +1374,13 @@ add_library(bitcoin_modelnet STATIC
   swarm_reorghold/exit.cpp
   swarm_reorghold/refund.cpp
   swarm_reorghold/swarm_reorghold.cpp
+  swarm_nicheslots/names.cpp
+  swarm_nicheslots/table.cpp
+  swarm_nicheslots/open.cpp
+  swarm_nicheslots/spend.cpp
+  swarm_nicheslots/move.cpp
+  swarm_nicheslots/quiet.cpp
+  swarm_nicheslots/nicheslots.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
