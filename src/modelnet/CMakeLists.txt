@@ -82,6 +82,12 @@ add_library(bitcoin_modelnet STATIC
   swarm_bench.cpp
   swarm_specbranch.cpp
   swarm_fundscript.cpp
+  swarm_kvadapter.cpp
+  swarm_reorg.cpp
+  swarm_runtimepick.cpp
+  swarm_toolcont.cpp
+  swarm_toolreuse.cpp
+  swarm_confine.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp

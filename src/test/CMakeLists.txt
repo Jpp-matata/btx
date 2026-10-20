@@ -646,6 +646,12 @@ if(WITH_MODELNET)
     swarm_bench_tests.cpp
     swarm_specbranch_tests.cpp
     swarm_fundscript_tests.cpp
+    swarm_kvadapter_tests.cpp
+    swarm_reorg_tests.cpp
+    swarm_runtimepick_tests.cpp
+    swarm_toolcont_tests.cpp
+    swarm_toolreuse_tests.cpp
+    swarm_confine_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp
