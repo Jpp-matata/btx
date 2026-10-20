@@ -821,6 +821,18 @@ if(WITH_MODELNET)
     swarm_notwitness_tests.cpp
     swarm_notguest_tests.cpp
     swarm_notfalsecompat_tests.cpp
+    swarm_fault03_tests.cpp
+    swarm_fault05_tests.cpp
+    swarm_fault06_tests.cpp
+    swarm_fault07_tests.cpp
+    swarm_fault09_tests.cpp
+    swarm_fault14_tests.cpp
+    swarm_fault15_tests.cpp
+    swarm_fault16_tests.cpp
+    swarm_fault17_tests.cpp
+    swarm_fault18_tests.cpp
+    swarm_fault19_tests.cpp
+    swarm_flag04_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp
