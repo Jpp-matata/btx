@@ -723,6 +723,7 @@ if(WITH_MODELNET)
     swarm_workcycle_tests.cpp
     swarm_preimage_tests.cpp
     swarm_peerpath_tests.cpp
+    swarm_pareto_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp
