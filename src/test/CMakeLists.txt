@@ -955,6 +955,9 @@ if(WITH_MODELNET)
     swarm_notmargin_tests.cpp
     swarm_notredistrib_tests.cpp
     swarm_nottrainlicense_tests.cpp
+    swarm_notsequence_tests.cpp
+    swarm_notmanifestcap_tests.cpp
+    swarm_notl1_tests.cpp
     swarm_notmandate_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
