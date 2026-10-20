@@ -1589,6 +1589,18 @@ add_library(bitcoin_modelnet STATIC
   swarm_paylabel/accept.cpp
   swarm_paylabel/quiet.cpp
   swarm_paylabel/swarm_paylabel.cpp
+  swarm_quotefiat/blank.cpp
+  swarm_quotefiat/text.cpp
+  swarm_quotefiat/record.cpp
+  swarm_quotefiat/book.cpp
+  swarm_quotefiat/replay.cpp
+  swarm_quotefiat/balance.cpp
+  swarm_quotefiat/atoms.cpp
+  swarm_quotefiat/gate.cpp
+  swarm_quotefiat/keep.cpp
+  swarm_quotefiat/quote.cpp
+  swarm_quotefiat/quiet.cpp
+  swarm_quotefiat/swarm_quotefiat.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
