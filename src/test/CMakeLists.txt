@@ -1395,6 +1395,12 @@ if(WITH_MODELNET)
     swarm_notnoquorum2_tests.cpp
     swarm_notnofour2_tests.cpp
     swarm_notnocapab2_tests.cpp
+    swarm_notnorv2_tests.cpp
+    swarm_notnogradexp2_tests.cpp
+    swarm_notnotrustckpt2_tests.cpp
+    swarm_notnoadminmove2_tests.cpp
+    swarm_notnoprivate2_tests.cpp
+    swarm_notnohostnote2_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
