@@ -1643,6 +1643,8 @@ if(WITH_MODELNET)
     swarm_selfscore_tests.cpp
     swarm_downloadlic_tests.cpp
     swarm_votemaj_tests.cpp
+    swarm_fiatkeep_tests.cpp
+    swarm_spacingkeep_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
