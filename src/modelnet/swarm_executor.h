@@ -5,6 +5,7 @@
 #ifndef BTX_MODELNET_SWARM_EXECUTOR_H
 #define BTX_MODELNET_SWARM_EXECUTOR_H
 
+#include <cstdint>
 #include <string>
 
 namespace modelnet {
@@ -20,6 +21,12 @@ struct SwarmExecutorRequest {
     bool selects_host_interpreter{false};
     bool selects_provider_credential{false};
     bool sandbox_present{false};
+    /** Zero means the caller did not ask for a thread count. Above 64 or below 0 is CAPPED. */
+    int64_t requested_threads{0};
+    /** Zero means the caller did not ask for memory. Above 16384 or below 0 is CAPPED. */
+    int64_t requested_mib{0};
+    /** A network request is refused. The sandbox does not open one. */
+    bool network{false};
 };
 
 struct SwarmExecutorDecision {
