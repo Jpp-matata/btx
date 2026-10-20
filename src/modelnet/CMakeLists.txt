@@ -151,6 +151,8 @@ add_library(bitcoin_modelnet STATIC
   swarm_nbhd.cpp
   swarm_idle.cpp
   swarm_piece32.cpp
+  swarm_fwdfee.cpp
+  swarm_dnsempty.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
