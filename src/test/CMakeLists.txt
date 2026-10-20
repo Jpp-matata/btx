@@ -1036,6 +1036,7 @@ if(WITH_MODELNET)
     swarm_notnopiece4_tests.cpp
     swarm_notnofetch_tests.cpp
     swarm_notnomcp_tests.cpp
+    swarm_notnopqmesh_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
