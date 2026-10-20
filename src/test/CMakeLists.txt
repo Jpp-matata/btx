@@ -1006,6 +1006,10 @@ if(WITH_MODELNET)
     swarm_notnomixed_tests.cpp
     swarm_notnogain_tests.cpp
     swarm_notnofund_tests.cpp
+    swarm_notnograd_tests.cpp
+    swarm_notnotps_tests.cpp
+    swarm_notnoglobal_tests.cpp
+    swarm_notnotwonode_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
