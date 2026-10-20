@@ -13,7 +13,7 @@ BOOST_FIXTURE_TEST_SUITE(swarm_privfam_publish_tests, BasicTestingSetup)
 
 BOOST_AUTO_TEST_CASE(private_family_is_not_published)
 {
-    modelnet::SwarmPrivFam plane;
+    modelnet::SwarmPrivFamily plane;
     std::string err = "prior";
 
     BOOST_REQUIRE(plane.Offer("fam-1", true, err));
@@ -46,7 +46,7 @@ BOOST_AUTO_TEST_CASE(private_family_is_not_published)
 
 BOOST_AUTO_TEST_CASE(unknown_family_is_family)
 {
-    modelnet::SwarmPrivFam plane;
+    modelnet::SwarmPrivFamily plane;
     std::string err = "prior";
 
     BOOST_REQUIRE(!plane.Publish("fam-9", err));
@@ -74,7 +74,7 @@ BOOST_AUTO_TEST_CASE(unknown_family_is_family)
 
 BOOST_AUTO_TEST_CASE(empty_family_publish_is_family)
 {
-    modelnet::SwarmPrivFam plane;
+    modelnet::SwarmPrivFamily plane;
     std::string err = "prior";
 
     BOOST_REQUIRE(plane.Offer("fam-1", true, err));
@@ -96,7 +96,7 @@ BOOST_AUTO_TEST_CASE(empty_family_publish_is_family)
 
 BOOST_AUTO_TEST_CASE(publish_of_one_family_leaves_another_private)
 {
-    modelnet::SwarmPrivFam plane;
+    modelnet::SwarmPrivFamily plane;
     std::string err = "prior";
 
     BOOST_REQUIRE(plane.Offer("fam-1", true, err));

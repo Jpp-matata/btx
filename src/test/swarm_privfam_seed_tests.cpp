@@ -14,7 +14,7 @@ BOOST_FIXTURE_TEST_SUITE(swarm_privfam_seed_tests, BasicTestingSetup)
 
 BOOST_AUTO_TEST_CASE(dns_seeds_stay_empty_and_addseed_is_held)
 {
-    modelnet::SwarmPrivFam plane;
+    modelnet::SwarmPrivFamily plane;
     std::string err = "prior";
 
     const std::vector<std::string>& seeds = plane.dns_seeds();
@@ -55,7 +55,7 @@ BOOST_AUTO_TEST_CASE(dns_seeds_stay_empty_and_addseed_is_held)
 
 BOOST_AUTO_TEST_CASE(offer_and_publish_do_not_fill_dns_seeds)
 {
-    modelnet::SwarmPrivFam plane;
+    modelnet::SwarmPrivFamily plane;
     std::string err = "prior";
 
     BOOST_REQUIRE(plane.Offer("fam-1", true, err));

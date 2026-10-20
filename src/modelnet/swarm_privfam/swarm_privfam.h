@@ -35,7 +35,7 @@ namespace modelnet {
  * AddSeed returns HELD. dns_seeds() stays empty. connected() stays false.
  * bytes_moved() stays 0. launched() stays false.
  */
-class SwarmPrivFam {
+class SwarmPrivFamily {
 public:
     bool Offer(const std::string& family, bool private_flag, std::string& err);
     bool Publish(const std::string& family, std::string& err);

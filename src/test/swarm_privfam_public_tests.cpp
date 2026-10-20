@@ -13,7 +13,7 @@ BOOST_FIXTURE_TEST_SUITE(swarm_privfam_public_tests, BasicTestingSetup)
 
 BOOST_AUTO_TEST_CASE(public_flag_is_public_and_stores_nothing)
 {
-    modelnet::SwarmPrivFam plane;
+    modelnet::SwarmPrivFamily plane;
     std::string err = "prior";
 
     BOOST_REQUIRE(!plane.Offer("fam-1", false, err));
@@ -43,7 +43,7 @@ BOOST_AUTO_TEST_CASE(public_flag_is_public_and_stores_nothing)
 
 BOOST_AUTO_TEST_CASE(public_refusal_does_not_block_a_later_private_offer)
 {
-    modelnet::SwarmPrivFam plane;
+    modelnet::SwarmPrivFamily plane;
     std::string err = "prior";
 
     BOOST_REQUIRE(!plane.Offer("fam-1", false, err));
@@ -65,7 +65,7 @@ BOOST_AUTO_TEST_CASE(public_refusal_does_not_block_a_later_private_offer)
 
 BOOST_AUTO_TEST_CASE(empty_family_is_family_before_public)
 {
-    modelnet::SwarmPrivFam plane;
+    modelnet::SwarmPrivFamily plane;
     std::string err = "prior";
 
     BOOST_REQUIRE(!plane.Offer("", false, err));

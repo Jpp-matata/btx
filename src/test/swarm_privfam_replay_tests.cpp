@@ -13,7 +13,7 @@ BOOST_FIXTURE_TEST_SUITE(swarm_privfam_replay_tests, BasicTestingSetup)
 
 BOOST_AUTO_TEST_CASE(second_offer_is_replay_and_keeps_the_private_flag)
 {
-    modelnet::SwarmPrivFam plane;
+    modelnet::SwarmPrivFamily plane;
     std::string err = "prior";
 
     BOOST_REQUIRE(plane.Offer("fam-1", true, err));
@@ -42,7 +42,7 @@ BOOST_AUTO_TEST_CASE(second_offer_is_replay_and_keeps_the_private_flag)
 
 BOOST_AUTO_TEST_CASE(second_offer_with_public_flag_is_still_replay)
 {
-    modelnet::SwarmPrivFam plane;
+    modelnet::SwarmPrivFamily plane;
     std::string err = "prior";
 
     BOOST_REQUIRE(plane.Offer("fam-1", true, err));
@@ -72,7 +72,7 @@ BOOST_AUTO_TEST_CASE(second_offer_with_public_flag_is_still_replay)
 
 BOOST_AUTO_TEST_CASE(a_different_family_is_not_a_replay)
 {
-    modelnet::SwarmPrivFam plane;
+    modelnet::SwarmPrivFamily plane;
     std::string err = "prior";
 
     BOOST_REQUIRE(plane.Offer("fam-1", true, err));
@@ -90,7 +90,7 @@ BOOST_AUTO_TEST_CASE(a_different_family_is_not_a_replay)
 
 BOOST_AUTO_TEST_CASE(empty_second_name_is_family)
 {
-    modelnet::SwarmPrivFam plane;
+    modelnet::SwarmPrivFamily plane;
     std::string err = "prior";
 
     BOOST_REQUIRE(plane.Offer("fam-1", true, err));

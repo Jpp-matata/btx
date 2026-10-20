@@ -13,7 +13,7 @@ BOOST_FIXTURE_TEST_SUITE(swarm_privfam_quiet_tests, BasicTestingSetup)
 
 BOOST_AUTO_TEST_CASE(bytes_moved_stay_zero)
 {
-    modelnet::SwarmPrivFam plane;
+    modelnet::SwarmPrivFamily plane;
     std::string err = "prior";
 
     BOOST_REQUIRE(plane.bytes_moved() == 0);
@@ -68,7 +68,7 @@ BOOST_AUTO_TEST_CASE(bytes_moved_stay_zero)
 
 BOOST_AUTO_TEST_CASE(nothing_connects_or_launches)
 {
-    modelnet::SwarmPrivFam plane;
+    modelnet::SwarmPrivFamily plane;
     std::string err = "prior";
 
     BOOST_REQUIRE(!plane.connected());
