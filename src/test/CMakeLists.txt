@@ -1204,6 +1204,12 @@ if(WITH_MODELNET)
     swarm_notnoholdrotate_tests.cpp
     swarm_notnoleak_tests.cpp
     swarm_notnowanavg_tests.cpp
+    swarm_notnochurnpeer_tests.cpp
+    swarm_notnonat_tests.cpp
+    swarm_notnoprovisional_tests.cpp
+    swarm_notnosandbox_tests.cpp
+    swarm_notnotrajectory_tests.cpp
+    swarm_notnosealed_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
