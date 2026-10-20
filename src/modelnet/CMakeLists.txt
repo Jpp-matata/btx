@@ -430,6 +430,8 @@ add_library(bitcoin_modelnet STATIC
   swarm_notnordma.cpp
   swarm_notmoonabs.cpp
   swarm_notnofsdp.cpp
+  swarm_notnosglang.cpp
+  swarm_notnodiloco.cpp
   swarm_notslots.cpp
   swarm_notprivateoff.cpp
   swarm_notclosetmpl.cpp
