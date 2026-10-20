@@ -1038,6 +1038,8 @@ add_library(bitcoin_modelnet STATIC
   swarm_cycleparent.cpp
   swarm_manifestbind.cpp
   swarm_lineagejoin.cpp
+  swarm_sealkeep.cpp
+  swarm_datasetgrant.cpp
   swarm_notslots.cpp
   swarm_notprivateoff.cpp
   swarm_notclosetmpl.cpp
