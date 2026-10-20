@@ -1427,6 +1427,7 @@ if(WITH_MODELNET)
     swarm_notnothermal2_tests.cpp
     swarm_notnoinside2_tests.cpp
     swarm_notnobattery2_tests.cpp
+    swarm_notnoidleoff2_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
