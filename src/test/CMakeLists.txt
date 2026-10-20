@@ -713,6 +713,8 @@ if(WITH_MODELNET)
     swarm_wallclock_tests.cpp
     swarm_watchalert_tests.cpp
     swarm_nbhd_tests.cpp
+    swarm_idle_tests.cpp
+    swarm_piece32_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp

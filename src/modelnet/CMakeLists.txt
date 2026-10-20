@@ -149,6 +149,8 @@ add_library(bitcoin_modelnet STATIC
   swarm_wallclock.cpp
   swarm_watchalert.cpp
   swarm_nbhd.cpp
+  swarm_idle.cpp
+  swarm_piece32.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
