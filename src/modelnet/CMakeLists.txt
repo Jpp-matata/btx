@@ -1184,6 +1184,8 @@ add_library(bitcoin_modelnet STATIC
   swarm_closeout.cpp
   swarm_poolfund.cpp
   swarm_sighashok.cpp
+  swarm_headpin.cpp
+  swarm_specslot.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
