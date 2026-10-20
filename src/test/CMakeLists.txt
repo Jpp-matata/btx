@@ -965,6 +965,7 @@ if(WITH_MODELNET)
     swarm_notmodelon_tests.cpp
     swarm_notrefundfirst_tests.cpp
     swarm_notvramzero_tests.cpp
+    swarm_nothflineage_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
