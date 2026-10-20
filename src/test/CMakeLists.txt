@@ -1674,6 +1674,8 @@ if(WITH_MODELNET)
     swarm_sglangtok_tests.cpp
     swarm_mooncakeabs_tests.cpp
     swarm_nixlabsent_tests.cpp
+    swarm_rdmaabsent_tests.cpp
+    swarm_lmcacheops_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
