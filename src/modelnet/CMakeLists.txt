@@ -201,6 +201,8 @@ add_library(bitcoin_modelnet STATIC
   swarm_familyonly.cpp
   swarm_notfsdp.cpp
   swarm_notsglang.cpp
+  swarm_notwindows.cpp
+  swarm_notlmcache.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
