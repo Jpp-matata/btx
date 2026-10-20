@@ -1052,6 +1052,7 @@ add_library(bitcoin_modelnet STATIC
   swarm_poolrank.cpp
   swarm_churnnote.cpp
   swarm_closerefund.cpp
+  swarm_cachestand.cpp
   swarm_notslots.cpp
   swarm_notprivateoff.cpp
   swarm_notclosetmpl.cpp
