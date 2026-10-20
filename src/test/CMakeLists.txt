@@ -1829,6 +1829,14 @@ if(WITH_MODELNET)
     swarm_channelset_payout_tests.cpp
     swarm_channelset_policy_tests.cpp
     swarm_channelset_refund_tests.cpp
+    swarm_stagehead_adopt_tests.cpp
+    swarm_stagehead_bytes_tests.cpp
+    swarm_stagehead_pin_tests.cpp
+    swarm_stagehead_rollback_tests.cpp
+    swarm_stagehead_stage_tests.cpp
+    swarm_forward_forward_tests.cpp
+    swarm_forward_open_tests.cpp
+    swarm_forward_policy_tests.cpp
     swarm_evolve_graduate_tests.cpp
     swarm_evolve_measure_tests.cpp
     swarm_evolve_recover_tests.cpp

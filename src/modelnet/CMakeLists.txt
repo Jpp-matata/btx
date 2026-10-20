@@ -1320,6 +1320,26 @@ add_library(bitcoin_modelnet STATIC
   swarm_channelset/claim.cpp
   swarm_channelset/policy.cpp
   swarm_channelset/channelset.cpp
+  swarm_stagehead/active.cpp
+  swarm_stagehead/candidate.cpp
+  swarm_stagehead/memory.cpp
+  swarm_stagehead/stage.cpp
+  swarm_stagehead/adopt.cpp
+  swarm_stagehead/rollback.cpp
+  swarm_stagehead/regress.cpp
+  swarm_stagehead/pin.cpp
+  swarm_stagehead/realm.cpp
+  swarm_stagehead/stagehead.cpp
+  swarm_forward/open.cpp
+  swarm_forward/channel.cpp
+  swarm_forward/payment.cpp
+  swarm_forward/liquidity.cpp
+  swarm_forward/margin.cpp
+  swarm_forward/allow.cpp
+  swarm_forward/route.cpp
+  swarm_forward/policy.cpp
+  swarm_forward/ledger.cpp
+  swarm_forward/forward.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
