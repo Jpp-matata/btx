@@ -886,6 +886,7 @@ if(WITH_MODELNET)
     swarm_notcatalog_tests.cpp
     swarm_notdep_tests.cpp
     swarm_notsubscribe_tests.cpp
+    swarm_notinit_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp
