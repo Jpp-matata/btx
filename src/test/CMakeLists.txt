@@ -1378,6 +1378,7 @@ if(WITH_MODELNET)
     swarm_notnoevalcpu2_tests.cpp
     swarm_notnospendkey2_tests.cpp
     swarm_notnofirstedge2_tests.cpp
+    swarm_notno51vote2_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
