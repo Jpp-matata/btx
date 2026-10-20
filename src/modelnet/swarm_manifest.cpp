@@ -7,6 +7,7 @@
 #include <modelnet/swarm_piece.h>
 
 #include <algorithm>
+#include <cstddef>
 
 namespace modelnet {
 namespace {

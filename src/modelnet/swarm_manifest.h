@@ -12,7 +12,7 @@
 
 namespace modelnet {
 
-inline constexpr std::size_t SWARM_PIECE_BYTES = 4U * 1024U * 1024U;
+static constexpr std::size_t SWARM_PIECE_BYTES = 4 * 1024 * 1024;
 
 struct SwarmPieceRef {
     std::string id;
@@ -31,14 +31,15 @@ struct SwarmArtifactManifest {
 /**
  * Split a body into pieces of at most 4 MiB. Each piece id is the SHA-384 of
  * that slice. The manifest is usable only when every piece verifies and the
- * lengths sum to the body. A body over 32 MiB is PIECE_LIMIT. This does not
- * write, decrypt, or broadcast.
+ * lengths sum to the body. An empty body is PIECE. A body over 32 MiB is
+ * PIECE_LIMIT. This does not write a file, decrypt, or broadcast.
  */
 bool SwarmSplitManifest(const std::vector<unsigned char>& body, SwarmArtifactManifest& manifest, std::string& err);
 
 /**
- * Pieces whose ids are absent from already_verified_ids become unverified.
- * The manifest is usable only when every piece is verified. Otherwise MANIFEST.
+ * A piece whose id is in already_verified_ids stays verified. A piece whose
+ * id is absent becomes unverified. Usable is true only when every piece is
+ * verified. No pieces, or any unverified piece, is MANIFEST.
  */
 bool SwarmResumeManifest(SwarmArtifactManifest& manifest, const std::vector<std::string>& already_verified_ids, std::string& err);
 

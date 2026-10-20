@@ -622,6 +622,8 @@ if(WITH_MODELNET)
     swarm_manifest_tests.cpp
     swarm_tenant_tests.cpp
     swarm_pressure_tests.cpp
+    swarm_quota_tests.cpp
+    swarm_taskfence_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp

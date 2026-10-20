@@ -4,10 +4,12 @@
 
 #include <modelnet/swarm_graph.h>
 #include <modelnet/swarm_manifest.h>
+#include <modelnet/swarm_piece.h>
 #include <test/util/setup_common.h>
 
 #include <boost/test/unit_test.hpp>
 
+#include <cstddef>
 #include <vector>
 
 BOOST_FIXTURE_TEST_SUITE(swarm_manifest_tests, BasicTestingSetup)
@@ -22,16 +24,34 @@ BOOST_AUTO_TEST_CASE(a_manifest_is_usable_only_when_every_piece_verifies)
 
     const std::vector<unsigned char> small{1, 2, 3, 4, 5};
     BOOST_REQUIRE(modelnet::SwarmSplitManifest(small, manifest, err));
+    BOOST_CHECK(err.empty());
     BOOST_CHECK(manifest.usable);
-    BOOST_CHECK_EQUAL(manifest.pieces.size(), 1U);
+    BOOST_CHECK_EQUAL(manifest.artifact_id, modelnet::SwarmPieceDigest(small));
     BOOST_CHECK_EQUAL(manifest.length, 5U);
+    BOOST_REQUIRE_EQUAL(manifest.pieces.size(), 1U);
+    BOOST_CHECK_EQUAL(manifest.pieces[0].id, modelnet::SwarmPieceDigest(small));
+    BOOST_CHECK_EQUAL(manifest.pieces[0].offset, 0U);
+    BOOST_CHECK_EQUAL(manifest.pieces[0].length, 5U);
+    BOOST_CHECK(manifest.pieces[0].verified);
 
     std::vector<unsigned char> wide(modelnet::SWARM_PIECE_BYTES + 1, 7);
     BOOST_REQUIRE(modelnet::SwarmSplitManifest(wide, manifest, err));
-    BOOST_CHECK_EQUAL(manifest.pieces.size(), 2U);
+    BOOST_CHECK(err.empty());
     BOOST_CHECK(manifest.usable);
+    BOOST_CHECK_EQUAL(manifest.artifact_id, modelnet::SwarmPieceDigest(wide));
+    BOOST_CHECK_EQUAL(manifest.length, wide.size());
+    BOOST_REQUIRE_EQUAL(manifest.pieces.size(), 2U);
+    const std::vector<unsigned char> first(wide.begin(), wide.begin() + static_cast<std::ptrdiff_t>(modelnet::SWARM_PIECE_BYTES));
+    const std::vector<unsigned char> last(wide.end() - 1, wide.end());
+    BOOST_CHECK_EQUAL(manifest.pieces[0].id, modelnet::SwarmPieceDigest(first));
+    BOOST_CHECK_EQUAL(manifest.pieces[0].offset, 0U);
     BOOST_CHECK_EQUAL(manifest.pieces[0].length, modelnet::SWARM_PIECE_BYTES);
+    BOOST_CHECK(manifest.pieces[0].verified);
+    BOOST_CHECK_EQUAL(manifest.pieces[1].id, modelnet::SwarmPieceDigest(last));
+    BOOST_CHECK_EQUAL(manifest.pieces[1].offset, modelnet::SWARM_PIECE_BYTES);
     BOOST_CHECK_EQUAL(manifest.pieces[1].length, 1U);
+    BOOST_CHECK(manifest.pieces[1].verified);
+    BOOST_CHECK_EQUAL(manifest.pieces[0].length + manifest.pieces[1].length, wide.size());
 
     BOOST_CHECK(!modelnet::SwarmResumeManifest(manifest, {manifest.pieces[0].id}, err));
     BOOST_CHECK_EQUAL(err, "MANIFEST");
