@@ -229,6 +229,10 @@ add_library(bitcoin_modelnet STATIC
   swarm_notpay.cpp
   swarm_notcachegain.cpp
   swarm_notnat.cpp
+  swarm_notcanary.cpp
+  swarm_notpromo.cpp
+  swarm_nottrunc.cpp
+  swarm_notdup.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
