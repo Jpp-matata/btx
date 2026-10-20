@@ -1210,6 +1210,10 @@ if(WITH_MODELNET)
     swarm_notnosandbox_tests.cpp
     swarm_notnotrajectory_tests.cpp
     swarm_notnosealed_tests.cpp
+    swarm_notnocost_tests.cpp
+    swarm_notnoablation_tests.cpp
+    swarm_notnoglobalckpt_tests.cpp
+    swarm_notnottft_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
