@@ -1576,6 +1576,14 @@ if(WITH_MODELNET)
     swarm_notnojoindefault2_tests.cpp
     swarm_notnoseedempty2_tests.cpp
     swarm_notnospawnside2_tests.cpp
+    swarm_sandbox_plan_tests.cpp
+    swarm_workload_tests.cpp
+    swarm_flagdrive_tests.cpp
+    swarm_islandcur_tests.cpp
+    swarm_hopcheck_tests.cpp
+    swarm_costmeter_tests.cpp
+    swarm_kvadmit_tests.cpp
+    swarm_benchrec_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp

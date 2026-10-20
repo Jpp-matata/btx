@@ -1012,6 +1012,14 @@ add_library(bitcoin_modelnet STATIC
   swarm_notnojoindefault2.cpp
   swarm_notnoseedempty2.cpp
   swarm_notnospawnside2.cpp
+  swarm_sandbox_plan.cpp
+  swarm_workload.cpp
+  swarm_flagdrive.cpp
+  swarm_islandcur.cpp
+  swarm_hopcheck.cpp
+  swarm_costmeter.cpp
+  swarm_kvadmit.cpp
+  swarm_benchrec.cpp
   swarm_notslots.cpp
   swarm_notprivateoff.cpp
   swarm_notclosetmpl.cpp
