@@ -1727,6 +1727,9 @@ if(WITH_MODELNET)
     swarm_agentacct_tests.cpp
     swarm_budget_tests.cpp
     swarm_capassign_tests.cpp
+    swarm_trace_tests.cpp
+    swarm_jobcancel_tests.cpp
+    swarm_leaderepoch_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp
