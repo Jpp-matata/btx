@@ -1403,6 +1403,10 @@ if(WITH_MODELNET)
     swarm_notnohostnote2_tests.cpp
     swarm_notnoearnedstay2_tests.cpp
     swarm_notnocostcharge2_tests.cpp
+    swarm_notnoholdoutrot2_tests.cpp
+    swarm_notnonataddr2_tests.cpp
+    swarm_notnosandboxcap2_tests.cpp
+    swarm_notnosigner2_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
