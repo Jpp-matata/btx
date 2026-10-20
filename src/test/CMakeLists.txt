@@ -1482,6 +1482,12 @@ if(WITH_MODELNET)
     swarm_notnofamilydir2_tests.cpp
     swarm_notnoreportrec2_tests.cpp
     swarm_notnoswarmdjoin2_tests.cpp
+    swarm_notnowinlife2_tests.cpp
+    swarm_notnorpcpage2_tests.cpp
+    swarm_notnowearcost2_tests.cpp
+    swarm_notnoeleccost2_tests.cpp
+    swarm_notnokvmove2_tests.cpp
+    swarm_notnocompatfam2_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp

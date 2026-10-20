@@ -918,6 +918,12 @@ add_library(bitcoin_modelnet STATIC
   swarm_notnofamilydir2.cpp
   swarm_notnoreportrec2.cpp
   swarm_notnoswarmdjoin2.cpp
+  swarm_notnowinlife2.cpp
+  swarm_notnorpcpage2.cpp
+  swarm_notnowearcost2.cpp
+  swarm_notnoeleccost2.cpp
+  swarm_notnokvmove2.cpp
+  swarm_notnocompatfam2.cpp
   swarm_notslots.cpp
   swarm_notprivateoff.cpp
   swarm_notclosetmpl.cpp
