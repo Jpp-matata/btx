@@ -188,6 +188,8 @@ add_library(bitcoin_modelnet STATIC
   swarm_agreement.cpp
   swarm_launchprof.cpp
   swarm_nobroadcast.cpp
+  swarm_schedkey.cpp
+  swarm_frozenpairs.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
