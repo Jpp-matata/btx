@@ -675,6 +675,7 @@ if(WITH_MODELNET)
     swarm_workerdrop_tests.cpp
     swarm_forknote_tests.cpp
     swarm_evalsplit_tests.cpp
+    swarm_staleepoch_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp

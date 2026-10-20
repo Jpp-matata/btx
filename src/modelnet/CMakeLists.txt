@@ -111,6 +111,7 @@ add_library(bitcoin_modelnet STATIC
   swarm_workerdrop.cpp
   swarm_forknote.cpp
   swarm_evalsplit.cpp
+  swarm_staleepoch.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
