@@ -1180,6 +1180,8 @@ if(WITH_MODELNET)
     swarm_notnomassexit_tests.cpp
     swarm_notnospecial_tests.cpp
     swarm_notnopermcoord_tests.cpp
+    swarm_notnoplaintext_tests.cpp
+    swarm_notnorefundmat_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
