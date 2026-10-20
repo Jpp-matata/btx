@@ -1236,6 +1236,9 @@ if(WITH_MODELNET)
     swarm_notnoredist_tests.cpp
     swarm_notnoclearing_tests.cpp
     swarm_notnoevalself_tests.cpp
+    swarm_notnoauthor2_tests.cpp
+    swarm_notnofee0_tests.cpp
+    swarm_notnoinclusive_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
