@@ -1967,6 +1967,12 @@ if(WITH_MODELNET)
     swarm_fourscale_open_tests.cpp
     swarm_fourscale_replay_tests.cpp
     swarm_fourscale_step_tests.cpp
+    swarm_disputestay_atoms_tests.cpp
+    swarm_disputestay_empty_tests.cpp
+    swarm_disputestay_open_tests.cpp
+    swarm_disputestay_quiet_tests.cpp
+    swarm_disputestay_replay_tests.cpp
+    swarm_disputestay_settle_tests.cpp
     swarm_evolve_graduate_tests.cpp
     swarm_evolve_measure_tests.cpp
     swarm_evolve_recover_tests.cpp

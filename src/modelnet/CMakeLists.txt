@@ -1638,6 +1638,19 @@ add_library(bitcoin_modelnet STATIC
   swarm_fourscale/quiet.cpp
   swarm_fourscale/realm.cpp
   swarm_fourscale/swarm_fourscale.cpp
+  swarm_disputestay/blank.cpp
+  swarm_disputestay/name.cpp
+  swarm_disputestay/record.cpp
+  swarm_disputestay/book.cpp
+  swarm_disputestay/replay.cpp
+  swarm_disputestay/gate.cpp
+  swarm_disputestay/open.cpp
+  swarm_disputestay/keep.cpp
+  swarm_disputestay/atoms.cpp
+  swarm_disputestay/hold.cpp
+  swarm_disputestay/settle.cpp
+  swarm_disputestay/quiet.cpp
+  swarm_disputestay/swarm_disputestay.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
