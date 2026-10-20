@@ -701,6 +701,12 @@ if(WITH_MODELNET)
     swarm_nopenalty_tests.cpp
     swarm_joinflag_tests.cpp
     swarm_seqonce_tests.cpp
+    swarm_fiatquote_tests.cpp
+    swarm_refundheight_tests.cpp
+    swarm_provis_tests.cpp
+    swarm_cohortexp_tests.cpp
+    swarm_closemargin_tests.cpp
+    swarm_redist_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp
