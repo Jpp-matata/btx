@@ -1012,6 +1012,11 @@ if(WITH_MODELNET)
     swarm_notnotwonode_tests.cpp
     swarm_notnogpu_tests.cpp
     swarm_notnoroute_tests.cpp
+    swarm_notnoflag_tests.cpp
+    swarm_notnolive_tests.cpp
+    swarm_notnoreorg_tests.cpp
+    swarm_notnoreplay_tests.cpp
+    swarm_notnoclose_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
