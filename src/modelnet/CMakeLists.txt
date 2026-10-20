@@ -195,6 +195,9 @@ add_library(bitcoin_modelnet STATIC
   swarm_notbenchmark.cpp
   swarm_safetyblock.cpp
   swarm_notmultihop.cpp
+  swarm_nosidecar.cpp
+  swarm_kvnomove.cpp
+  swarm_assumedclose.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp

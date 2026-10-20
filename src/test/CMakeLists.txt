@@ -759,6 +759,9 @@ if(WITH_MODELNET)
     swarm_notbenchmark_tests.cpp
     swarm_safetyblock_tests.cpp
     swarm_notmultihop_tests.cpp
+    swarm_nosidecar_tests.cpp
+    swarm_kvnomove_tests.cpp
+    swarm_assumedclose_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp
