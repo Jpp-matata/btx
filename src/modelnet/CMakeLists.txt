@@ -65,6 +65,8 @@ add_library(bitcoin_modelnet STATIC
   swarm_verify.cpp
   swarm_rollout.cpp
   swarm_engine.cpp
+  swarm_island.cpp
+  swarm_invoice.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
