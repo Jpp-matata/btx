@@ -1141,6 +1141,10 @@ if(WITH_MODELNET)
     swarm_notnochannel_tests.cpp
     swarm_notnosequence_tests.cpp
     swarm_notnoneigh_tests.cpp
+    swarm_notnoadv_tests.cpp
+    swarm_notnofork_tests.cpp
+    swarm_notnoholdout_tests.cpp
+    swarm_notnoreplayadm_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
