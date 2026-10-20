@@ -999,6 +999,10 @@ if(WITH_MODELNET)
     swarm_notnixlabs_tests.cpp
     swarm_notnomult_tests.cpp
     swarm_notnopct_tests.cpp
+    swarm_notnobytes_tests.cpp
+    swarm_notnohit_tests.cpp
+    swarm_notnowin_tests.cpp
+    swarm_notnottft_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
