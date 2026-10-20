@@ -94,6 +94,10 @@ EXTENDED_SCRIPTS = [
     # BTX: KAWPOW is currently disabled in consensus params; keep coverage categorized,
     # but don't run it as part of the base suite.
     'feature_btx_kawpow_consensus.py',
+    # BTX: upstream test that builds SHA256d blocks; MatMul regtest rejects them
+    # (DoS 100). Keep it categorized, out of the base suite, until it is ported
+    # to node-built MatMul blocks.
+    'p2p_unrequested_blocks.py',
 ]
 
 BASE_SCRIPTS = [
@@ -490,7 +494,6 @@ BASE_SCRIPTS = [
     'p2p_add_connections.py',
     'p2p_duplicate_manual_connections.py',
     'feature_bind_port_discover.py',
-    'p2p_unrequested_blocks.py',
     'p2p_message_capture.py',
     'feature_softwareexpiry.py',
     'feature_includeconf.py',
