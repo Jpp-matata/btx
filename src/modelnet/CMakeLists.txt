@@ -295,6 +295,9 @@ add_library(bitcoin_modelnet STATIC
   swarm_notckpttime.cpp
   swarm_notuseful.cpp
   swarm_notplacement.cpp
+  swarm_notfinetune.cpp
+  swarm_notmultinode.cpp
+  swarm_nottasklat.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
