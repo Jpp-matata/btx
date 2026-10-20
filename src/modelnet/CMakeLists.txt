@@ -129,6 +129,9 @@ add_library(bitcoin_modelnet STATIC
   swarm_majority.cpp
   swarm_clearnote.cpp
   swarm_balclass.cpp
+  swarm_refundkey.cpp
+  swarm_researchkey.cpp
+  swarm_onetemplate.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
