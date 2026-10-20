@@ -1940,6 +1940,11 @@ if(WITH_MODELNET)
     swarm_islandgate_quiet_tests.cpp
     swarm_islandgate_replay_tests.cpp
     swarm_islandgate_stale_tests.cpp
+    swarm_paylabel_accept_tests.cpp
+    swarm_paylabel_atoms_tests.cpp
+    swarm_paylabel_label_tests.cpp
+    swarm_paylabel_refuse_tests.cpp
+    swarm_paylabel_replay_tests.cpp
     swarm_evolve_graduate_tests.cpp
     swarm_evolve_measure_tests.cpp
     swarm_evolve_recover_tests.cpp

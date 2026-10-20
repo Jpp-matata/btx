@@ -1579,6 +1579,16 @@ add_library(bitcoin_modelnet STATIC
   swarm_islandgate/exchange.cpp
   swarm_islandgate/quiet.cpp
   swarm_islandgate/swarm_islandgate.cpp
+  swarm_paylabel/vocabulary.cpp
+  swarm_paylabel/profit.cpp
+  swarm_paylabel/work.cpp
+  swarm_paylabel/record.cpp
+  swarm_paylabel/book.cpp
+  swarm_paylabel/replay.cpp
+  swarm_paylabel/gate.cpp
+  swarm_paylabel/accept.cpp
+  swarm_paylabel/quiet.cpp
+  swarm_paylabel/swarm_paylabel.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
