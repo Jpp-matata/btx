@@ -707,6 +707,9 @@ if(WITH_MODELNET)
     swarm_cohortexp_tests.cpp
     swarm_closemargin_tests.cpp
     swarm_redist_tests.cpp
+    swarm_assurance_tests.cpp
+    swarm_senderedge_tests.cpp
+    swarm_poolref_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp

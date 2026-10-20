@@ -143,6 +143,9 @@ add_library(bitcoin_modelnet STATIC
   swarm_cohortexp.cpp
   swarm_closemargin.cpp
   swarm_redist.cpp
+  swarm_assurance.cpp
+  swarm_senderedge.cpp
+  swarm_poolref.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
