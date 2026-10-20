@@ -1188,6 +1188,7 @@ add_library(bitcoin_modelnet STATIC
   swarm_specslot.cpp
   swarm_watchseq.cpp
   swarm_piecejoin.cpp
+  swarm_anchorbind.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
