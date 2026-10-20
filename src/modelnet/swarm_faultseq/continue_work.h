@@ -14,7 +14,13 @@ namespace modelnet {
  * is idle, bytes_moved is 0, and earned still equals the armed value.
  * The predicate does not mine, spend, or broadcast.
  */
-bool SwarmFaultSeqMayContinue(bool begun, bool latched, bool last_applied, bool hold_idle, int64_t observed_earned, int64_t armed_earned, int64_t bytes_moved);
+bool SwarmFaultSeqMayContinue(bool begun,
+                              bool latched,
+                              bool last_applied,
+                              bool hold_idle,
+                              int64_t observed_earned,
+                              int64_t armed_earned,
+                              int64_t bytes_moved);
 
 } // namespace modelnet
 

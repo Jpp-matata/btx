@@ -6,7 +6,13 @@
 
 namespace modelnet {
 
-bool SwarmFaultSeqMayContinue(bool begun, bool latched, bool last_applied, bool hold_idle, int64_t observed_earned, int64_t armed_earned, int64_t bytes_moved)
+bool SwarmFaultSeqMayContinue(bool begun,
+                              bool latched,
+                              bool last_applied,
+                              bool hold_idle,
+                              int64_t observed_earned,
+                              int64_t armed_earned,
+                              int64_t bytes_moved)
 {
     if (!begun || latched || !last_applied || !hold_idle) return false;
     return observed_earned == armed_earned && bytes_moved == 0;

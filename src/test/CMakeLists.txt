@@ -1803,6 +1803,13 @@ if(WITH_MODELNET)
     swarm_paystage_spend_tests.cpp
     swarm_paystage_tests.cpp
     swarm_faultseq_tests.cpp
+    swarm_evolve_adopt_tests.cpp
+    swarm_evolve_continue_tests.cpp
+    swarm_evolve_experience_tests.cpp
+    swarm_evolve_graduate_tests.cpp
+    swarm_evolve_measure_tests.cpp
+    swarm_evolve_recover_tests.cpp
+    swarm_evolve_train_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp

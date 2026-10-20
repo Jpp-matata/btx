@@ -37,11 +37,6 @@ SwarmFaultSeqStep SwarmFaultSequence::Step(std::string& err)
 
     const int fault = m_cursor.Take();
     const SwarmFaultSeqApplyResult applied = SwarmFaultSeqApply(m_journal, fault);
-    if (!applied.called || !SwarmFaultSeqInRange(fault)) {
-        err = kSwarmFaultSeqDone;
-        m_refusal.NoteDone();
-        return SwarmFaultSeqStep::Done;
-    }
     m_record.Add(applied.code);
     if (applied.status != SwarmFaultSeqStep::Applied) {
         m_refusal.NoteRefused();
@@ -55,7 +50,13 @@ SwarmFaultSeqStep SwarmFaultSequence::Step(std::string& err)
 
 bool SwarmFaultSequence::ContinueWork() const
 {
-    return SwarmFaultSeqMayContinue(m_begun, m_refusal.latched(), m_refusal.last_applied(), m_hold.allows_work(), m_journal.earned_atoms(), m_earned, m_journal.bytes_moved());
+    return SwarmFaultSeqMayContinue(m_begun,
+                                    m_refusal.latched(),
+                                    m_refusal.last_applied(),
+                                    m_hold.allows_work(),
+                                    m_journal.earned_atoms(),
+                                    m_earned,
+                                    m_journal.bytes_moved());
 }
 
 bool SwarmFaultSequence::Restart()

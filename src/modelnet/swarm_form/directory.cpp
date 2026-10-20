@@ -28,16 +28,16 @@ bool SwarmFormDirectory::Open(const std::filesystem::path& modeldir, std::string
     bool created = false;
     try {
         created = fs::create_directories(swarm);
+        // create_directories returns false when the directory already exists.
+        if (!created && !fs::exists(swarm)) {
+            err = "SWARM_DIR";
+            return false;
+        }
+        if (!fs::exists(swarm)) {
+            err = "SWARM_DIR";
+            return false;
+        }
     } catch (const std::filesystem::filesystem_error&) {
-        err = "SWARM_DIR";
-        return false;
-    }
-    // create_directories returns false when the directory already exists.
-    if (!created && !fs::exists(swarm)) {
-        err = "SWARM_DIR";
-        return false;
-    }
-    if (!fs::exists(swarm)) {
         err = "SWARM_DIR";
         return false;
     }

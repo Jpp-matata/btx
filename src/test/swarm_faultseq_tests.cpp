@@ -75,16 +75,17 @@ BOOST_AUTO_TEST_CASE(earned_42_steps_all_twenty)
         BOOST_CHECK_EQUAL(seq.journal().code(), kCode[fault - 1]);
         if (kApplied[fault - 1]) {
             BOOST_REQUIRE(step == modelnet::SwarmFaultSeqStep::Applied);
+            // Fault 1 is the only success before a refusal. Later successes stay blocked until Restart.
             if (!seq.refused()) {
                 BOOST_REQUIRE(seq.ContinueWork());
             } else {
-                BOOST_CHECK(!seq.ContinueWork());
+                BOOST_REQUIRE(!seq.ContinueWork());
             }
         } else {
-            BOOST_CHECK(step == modelnet::SwarmFaultSeqStep::Failed);
+            BOOST_REQUIRE(step == modelnet::SwarmFaultSeqStep::Failed);
             BOOST_CHECK_EQUAL(err, kCode[fault - 1]);
-            BOOST_CHECK(!seq.ContinueWork());
-            BOOST_CHECK(!seq.ContinueWork());
+            BOOST_REQUIRE(!seq.ContinueWork());
+            BOOST_REQUIRE(!seq.ContinueWork());
         }
         if (fault == 12) {
             BOOST_CHECK(!seq.journal().report_accepted());
