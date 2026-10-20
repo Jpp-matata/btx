@@ -1419,6 +1419,8 @@ if(WITH_MODELNET)
     swarm_notnosidecarname2_tests.cpp
     swarm_notnoqualify2_tests.cpp
     swarm_notnowindows2_tests.cpp
+    swarm_notnofaultinject2_tests.cpp
+    swarm_notnoreplaymine2_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
