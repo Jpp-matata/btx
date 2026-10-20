@@ -1250,6 +1250,9 @@ if(WITH_MODELNET)
     swarm_notnoimmature_tests.cpp
     swarm_notnotokrate_tests.cpp
     swarm_notnoreplace_tests.cpp
+    swarm_notnopin_tests.cpp
+    swarm_notnoneigh2_tests.cpp
+    swarm_notnotrunc_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
