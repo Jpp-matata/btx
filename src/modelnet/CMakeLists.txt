@@ -1024,6 +1024,9 @@ add_library(bitcoin_modelnet STATIC
   swarm_weakpick.cpp
   swarm_holdbook.cpp
   swarm_familycat.cpp
+  swarm_disputemove.cpp
+  swarm_regcheck.cpp
+  swarm_engadapter.cpp
   swarm_notslots.cpp
   swarm_notprivateoff.cpp
   swarm_notclosetmpl.cpp
