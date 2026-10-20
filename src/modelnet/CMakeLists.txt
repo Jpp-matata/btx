@@ -63,6 +63,8 @@ add_library(bitcoin_modelnet STATIC
   swarm_faultmore.cpp
   swarm_cohortbook.cpp
   swarm_verify.cpp
+  swarm_rollout.cpp
+  swarm_engine.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp

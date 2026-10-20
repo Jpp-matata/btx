@@ -628,6 +628,7 @@ if(WITH_MODELNET)
     swarm_fault_tests.cpp
     swarm_faultmore_tests.cpp
     swarm_gate_tests.cpp
+    swarm_accept_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp
