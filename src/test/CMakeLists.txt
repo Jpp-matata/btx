@@ -1523,6 +1523,8 @@ if(WITH_MODELNET)
     swarm_notnockptonly2_tests.cpp
     swarm_notnopassnote2_tests.cpp
     swarm_notnoschedwit2_tests.cpp
+    swarm_notnodistinctev2_tests.cpp
+    swarm_notnosideexec2_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
