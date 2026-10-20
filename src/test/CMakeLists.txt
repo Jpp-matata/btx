@@ -1680,6 +1680,8 @@ if(WITH_MODELNET)
     swarm_fsdpheld_tests.cpp
     swarm_mixedprec_tests.cpp
     swarm_shardheld_tests.cpp
+    swarm_ckptsave_tests.cpp
+    swarm_gradsync_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
