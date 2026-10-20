@@ -1180,6 +1180,9 @@ add_library(bitcoin_modelnet STATIC
   swarm_distillrec.cpp
   swarm_fourbook.cpp
   swarm_preimage32.cpp
+  swarm_channelone.cpp
+  swarm_closeout.cpp
+  swarm_poolfund.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
