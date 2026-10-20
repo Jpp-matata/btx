@@ -1083,6 +1083,10 @@ if(WITH_MODELNET)
     swarm_notnoedge_tests.cpp
     swarm_notnoexplore_tests.cpp
     swarm_notnorevenue_tests.cpp
+    swarm_notnohf_tests.cpp
+    swarm_notnorealm_tests.cpp
+    swarm_notnoseed_tests.cpp
+    swarm_notnocohort_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
