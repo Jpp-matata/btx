@@ -1100,6 +1100,8 @@ add_library(bitcoin_modelnet STATIC
   swarm_adminrefund.cpp
   swarm_firstedge.cpp
   swarm_sighashout.cpp
+  swarm_selfsign.cpp
+  swarm_l2one.cpp
   swarm_notslots.cpp
   swarm_notprivateoff.cpp
   swarm_notclosetmpl.cpp
