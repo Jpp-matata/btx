@@ -1089,6 +1089,7 @@ if(WITH_MODELNET)
     swarm_notnocohort_tests.cpp
     swarm_notnofallback_tests.cpp
     swarm_notnodrain_tests.cpp
+    swarm_notnopaynet_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
