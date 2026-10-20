@@ -1544,6 +1544,9 @@ if(WITH_MODELNET)
     swarm_notnothermdrain2_tests.cpp
     swarm_notnometerdrain2_tests.cpp
     swarm_notnofallconn2_tests.cpp
+    swarm_notnoseedrole2_tests.cpp
+    swarm_notnoclosemargin2_tests.cpp
+    swarm_notnocohortexp2_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
