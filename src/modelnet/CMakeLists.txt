@@ -1158,6 +1158,7 @@ add_library(bitcoin_modelnet STATIC
   swarm_islandopt.cpp
   swarm_leasefence.cpp
   swarm_lineage.cpp
+  swarm_speculate.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
