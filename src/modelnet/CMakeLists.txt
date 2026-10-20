@@ -116,6 +116,9 @@ add_library(bitcoin_modelnet STATIC
   swarm_replaystall.cpp
   swarm_untaxed.cpp
   swarm_visiblehead.cpp
+  swarm_dlgrant.cpp
+  swarm_originnote.cpp
+  swarm_profit.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
