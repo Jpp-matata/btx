@@ -1646,6 +1646,7 @@ if(WITH_MODELNET)
     swarm_fiatkeep_tests.cpp
     swarm_spacingkeep_tests.cpp
     swarm_piecekeep_tests.cpp
+    swarm_escrowboth_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
