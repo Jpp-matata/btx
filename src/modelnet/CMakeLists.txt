@@ -1088,6 +1088,9 @@ add_library(bitcoin_modelnet STATIC
   swarm_autospent.cpp
   swarm_privateoff.cpp
   swarm_seedrole.cpp
+  swarm_evalrole.cpp
+  swarm_bodycap.cpp
+  swarm_flatcap.cpp
   swarm_notslots.cpp
   swarm_notprivateoff.cpp
   swarm_notclosetmpl.cpp

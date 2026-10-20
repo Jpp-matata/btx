@@ -1652,6 +1652,9 @@ if(WITH_MODELNET)
     swarm_autospent_tests.cpp
     swarm_privateoff_tests.cpp
     swarm_seedrole_tests.cpp
+    swarm_evalrole_tests.cpp
+    swarm_bodycap_tests.cpp
+    swarm_flatcap_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
