@@ -1141,6 +1141,9 @@ add_library(bitcoin_modelnet STATIC
   swarm_engineflag.cpp
   swarm_fallconn.cpp
   swarm_privfam.cpp
+  swarm_batterydrain.cpp
+  swarm_thermaldrain.cpp
+  swarm_meterdrain.cpp
   swarm_notslots.cpp
   swarm_notprivateoff.cpp
   swarm_notclosetmpl.cpp
