@@ -1099,6 +1099,7 @@ if(WITH_MODELNET)
     swarm_notnospawn_tests.cpp
     swarm_notnoflat_tests.cpp
     swarm_notnospend_tests.cpp
+    swarm_notno6720_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
