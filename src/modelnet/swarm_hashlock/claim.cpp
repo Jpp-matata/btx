@@ -4,6 +4,7 @@
 
 #include <modelnet/swarm_hashlock/claim.h>
 
+#include <modelnet/swarm_hashlock/bind.h>
 #include <modelnet/swarm_hashlock/digest.h>
 
 namespace modelnet {
@@ -16,10 +17,9 @@ bool SwarmHashlockApplyClaim(SwarmHashlockOffer& offer,
         err = SWARM_HASHLOCK_PREIMAGE;
         return false;
     }
-    // SwarmInvoice also needs an amount, a beneficiary, an objective, and a
-    // route. This offer stores only an id and a payment hash, so
-    // SwarmBindPreimage is not called. The gate is one SHA-256.
-    if (!SwarmHashlockDigestEquals(offer.payment_hash, preimage)) {
+    const bool digest_ok = SwarmHashlockDigestEquals(offer.payment_hash, preimage);
+    const bool bind_ok = SwarmHashlockBindAgrees(offer.id, offer.payment_hash, preimage);
+    if (!digest_ok || !bind_ok) {
         err = SWARM_HASHLOCK_HASHLOCK;
         return false;
     }

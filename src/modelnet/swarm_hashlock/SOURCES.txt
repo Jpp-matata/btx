@@ -1,3 +1,4 @@
+swarm_hashlock/bind.cpp
 swarm_hashlock/claim.cpp
 swarm_hashlock/digest.cpp
 swarm_hashlock/hashlock.cpp

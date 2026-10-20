@@ -1886,6 +1886,16 @@ if(WITH_MODELNET)
     swarm_familyadmit_seed_tests.cpp
     swarm_hashlock_claim_tests.cpp
     swarm_hashlock_offer_tests.cpp
+    swarm_readfence_accept_tests.cpp
+    swarm_readfence_place_tests.cpp
+    swarm_readfence_prefetch_tests.cpp
+    swarm_readfence_probe_tests.cpp
+    swarm_readfence_read_tests.cpp
+    swarm_cursorfence_advance_tests.cpp
+    swarm_cursorfence_commit_tests.cpp
+    swarm_cursorfence_gap_tests.cpp
+    swarm_cursorfence_mine_tests.cpp
+    swarm_cursorfence_stale_tests.cpp
     swarm_evolve_graduate_tests.cpp
     swarm_evolve_measure_tests.cpp
     swarm_evolve_recover_tests.cpp

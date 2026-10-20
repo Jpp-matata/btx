@@ -1439,6 +1439,31 @@ add_library(bitcoin_modelnet STATIC
   swarm_hashlock/hashlock.cpp
   swarm_hashlock/offer.cpp
   swarm_hashlock/policy.cpp
+  swarm_readfence/page.cpp
+  swarm_readfence/book.cpp
+  swarm_readfence/names.cpp
+  swarm_readfence/engine.cpp
+  swarm_readfence/warm.cpp
+  swarm_readfence/roster.cpp
+  swarm_readfence/ledger.cpp
+  swarm_readfence/span.cpp
+  swarm_readfence/quiet.cpp
+  swarm_readfence/place.cpp
+  swarm_readfence/probe.cpp
+  swarm_readfence/prefetch.cpp
+  swarm_readfence/revoke.cpp
+  swarm_readfence/read.cpp
+  swarm_readfence/accept.cpp
+  swarm_readfence/readfence.cpp
+  swarm_cursorfence/quiet.cpp
+  swarm_cursorfence/cursor.cpp
+  swarm_cursorfence/span.cpp
+  swarm_cursorfence/advance.cpp
+  swarm_cursorfence/hash.cpp
+  swarm_cursorfence/ledger.cpp
+  swarm_cursorfence/commit.cpp
+  swarm_cursorfence/mine.cpp
+  swarm_cursorfence/swarm_cursorfence.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
