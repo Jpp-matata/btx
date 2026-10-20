@@ -1611,6 +1611,9 @@ if(WITH_MODELNET)
     swarm_refundbind_tests.cpp
     swarm_watchstate_tests.cpp
     swarm_preimagebind_tests.cpp
+    swarm_confirmnote_tests.cpp
+    swarm_negkeep_tests.cpp
+    swarm_poolrank_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
