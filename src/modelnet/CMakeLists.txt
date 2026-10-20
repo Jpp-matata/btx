@@ -128,6 +128,7 @@ add_library(bitcoin_modelnet STATIC
   swarm_doubleuse.cpp
   swarm_majority.cpp
   swarm_clearnote.cpp
+  swarm_balclass.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
