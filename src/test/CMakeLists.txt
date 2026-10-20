@@ -1900,6 +1900,11 @@ if(WITH_MODELNET)
     swarm_earlyhalt_promote_tests.cpp
     swarm_earlyhalt_realm_tests.cpp
     swarm_earlyhalt_step_tests.cpp
+    swarm_capact_act_tests.cpp
+    swarm_capact_empty_tests.cpp
+    swarm_capact_grant_tests.cpp
+    swarm_capact_quiet_tests.cpp
+    swarm_capact_replay_tests.cpp
     swarm_evolve_graduate_tests.cpp
     swarm_evolve_measure_tests.cpp
     swarm_evolve_recover_tests.cpp

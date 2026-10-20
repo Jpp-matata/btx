@@ -1475,6 +1475,20 @@ add_library(bitcoin_modelnet STATIC
   swarm_earlyhalt/promote.cpp
   swarm_earlyhalt/realm.cpp
   swarm_earlyhalt/earlyhalt.cpp
+  swarm_capact/blank.cpp
+  swarm_capact/record.cpp
+  swarm_capact/entry.cpp
+  swarm_capact/grants.cpp
+  swarm_capact/actions.cpp
+  swarm_capact/replay.cpp
+  swarm_capact/grantkind.cpp
+  swarm_capact/actkind.cpp
+  swarm_capact/gate.cpp
+  swarm_capact/actgate.cpp
+  swarm_capact/grant.cpp
+  swarm_capact/act.cpp
+  swarm_capact/quiet.cpp
+  swarm_capact/swarm_capact.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
