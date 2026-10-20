@@ -727,6 +727,7 @@ if(WITH_MODELNET)
     swarm_explore_tests.cpp
     swarm_community_tests.cpp
     swarm_poolepoch_tests.cpp
+    swarm_meshpool_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp
