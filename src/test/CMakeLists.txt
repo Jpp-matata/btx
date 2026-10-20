@@ -1560,6 +1560,9 @@ if(WITH_MODELNET)
     swarm_notno51grad2_tests.cpp
     swarm_notnoqualitygrade2_tests.cpp
     swarm_notnosignerclaim2_tests.cpp
+    swarm_notnocoordstay2_tests.cpp
+    swarm_notnotaxopen2_tests.cpp
+    swarm_notnoprofitref2_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
