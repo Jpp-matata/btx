@@ -1130,6 +1130,8 @@ add_library(bitcoin_modelnet STATIC
   swarm_staleisland.cpp
   swarm_sandboxcap.cpp
   swarm_revoke.cpp
+  swarm_sealopen.cpp
+  swarm_prefetch.cpp
   swarm_notslots.cpp
   swarm_notprivateoff.cpp
   swarm_notclosetmpl.cpp
