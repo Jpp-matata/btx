@@ -1090,6 +1090,10 @@ if(WITH_MODELNET)
     swarm_notnofallback_tests.cpp
     swarm_notnodrain_tests.cpp
     swarm_notnopaynet_tests.cpp
+    swarm_notnokey_tests.cpp
+    swarm_notnoquorum_tests.cpp
+    swarm_notnoslots_tests.cpp
+    swarm_notnovram_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
