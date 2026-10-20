@@ -1684,6 +1684,7 @@ if(WITH_MODELNET)
     swarm_gradsync_tests.cpp
     swarm_ablation_tests.cpp
     swarm_trajstore_tests.cpp
+    swarm_proposer_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
