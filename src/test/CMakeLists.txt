@@ -1704,6 +1704,7 @@ if(WITH_MODELNET)
     swarm_holdrot_tests.cpp
     swarm_engineflag_tests.cpp
     swarm_fallconn_tests.cpp
+    swarm_privfam_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
