@@ -1091,6 +1091,7 @@ add_library(bitcoin_modelnet STATIC
   swarm_evalrole.cpp
   swarm_bodycap.cpp
   swarm_flatcap.cpp
+  swarm_pqmesh.cpp
   swarm_notslots.cpp
   swarm_notprivateoff.cpp
   swarm_notclosetmpl.cpp
