@@ -1117,6 +1117,7 @@ if(WITH_MODELNET)
     swarm_notnojoin_tests.cpp
     swarm_notnoprof_tests.cpp
     swarm_notnoisland_tests.cpp
+    swarm_notnopool_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
