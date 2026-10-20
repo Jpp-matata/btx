@@ -1245,6 +1245,15 @@ add_library(bitcoin_modelnet STATIC
   swarm_infer/runtime.cpp
   swarm_infer/session.cpp
   swarm_infer/text_slot.cpp
+  swarm_paystage/balances.cpp
+  swarm_paystage/channel.cpp
+  swarm_paystage/preimage.cpp
+  swarm_paystage/qualify.cpp
+  swarm_paystage/spend_policy.cpp
+  swarm_paystage/fiat_quote.cpp
+  swarm_paystage/profit_split.cpp
+  swarm_paystage/invoice_path.cpp
+  swarm_paystage/paystage.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp

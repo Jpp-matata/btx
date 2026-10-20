@@ -1795,6 +1795,13 @@ if(WITH_MODELNET)
     swarm_infer_publish_tests.cpp
     swarm_infer_session_tests.cpp
     swarm_infer_text_tests.cpp
+    swarm_paystage_balances_tests.cpp
+    swarm_paystage_channel_tests.cpp
+    swarm_paystage_invoice_tests.cpp
+    swarm_paystage_qualify_tests.cpp
+    swarm_paystage_quote_tests.cpp
+    swarm_paystage_spend_tests.cpp
+    swarm_paystage_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp
