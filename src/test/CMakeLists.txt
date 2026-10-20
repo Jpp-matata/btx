@@ -656,6 +656,10 @@ if(WITH_MODELNET)
     swarm_distill_tests.cpp
     swarm_lora_tests.cpp
     swarm_routecheck_tests.cpp
+    swarm_sybil_tests.cpp
+    swarm_tokfp_tests.cpp
+    swarm_reward_tests.cpp
+    swarm_fsjail_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp
