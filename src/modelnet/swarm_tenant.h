@@ -24,6 +24,9 @@ bool SwarmLookupTenant(const std::string& tenant, const std::string& cache_tenan
  */
 bool SwarmRotateKeyEpoch(bool shared_realm_key, bool& rotated, std::string& err);
 
+/** This process does not open a public rendezvous socket. */
+bool SwarmOpenPublicRendezvous(bool want_socket, std::string& err);
+
 } // namespace modelnet
 
 #endif // BTX_MODELNET_SWARM_TENANT_H

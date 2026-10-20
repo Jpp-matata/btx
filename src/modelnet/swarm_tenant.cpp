@@ -19,18 +19,12 @@ bool SwarmLookupTenant(const std::string& tenant, const std::string& cache_tenan
 bool SwarmRotateKeyEpoch(bool shared_realm_key, bool& rotated, std::string& err)
 {
     rotated = false;
-    err = shared_realm_key ? "SHARED_REALM_KEY" : "KEY_EPOCH";
-    return false;
-}
-
-bool SwarmOpenPublicRendezvous(bool want_socket, std::string& err)
-{
-    if (want_socket) {
-        err = "NO_SOCKET";
+    if (shared_realm_key) {
+        err = "SHARED_REALM_KEY";
         return false;
     }
-    err.clear();
-    return true;
+    err = "KEY_EPOCH";
+    return false;
 }
 
 } // namespace modelnet
