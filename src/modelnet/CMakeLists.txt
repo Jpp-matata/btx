@@ -408,6 +408,12 @@ add_library(bitcoin_modelnet STATIC
   swarm_notopeninfer.cpp
   swarm_notrefundleaf.cpp
   swarm_notsponsor.cpp
+  swarm_notppmfee.cpp
+  swarm_notqualrealm.cpp
+  swarm_notzerostep.cpp
+  swarm_nothashleaf.cpp
+  swarm_notweek.cpp
+  swarm_notsigsize.cpp
   swarm_notslots.cpp
   swarm_notprivateoff.cpp
   swarm_notclosetmpl.cpp

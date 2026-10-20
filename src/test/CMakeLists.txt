@@ -972,6 +972,12 @@ if(WITH_MODELNET)
     swarm_notopeninfer_tests.cpp
     swarm_notrefundleaf_tests.cpp
     swarm_notsponsor_tests.cpp
+    swarm_notppmfee_tests.cpp
+    swarm_notqualrealm_tests.cpp
+    swarm_notzerostep_tests.cpp
+    swarm_nothashleaf_tests.cpp
+    swarm_notweek_tests.cpp
+    swarm_notsigsize_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
