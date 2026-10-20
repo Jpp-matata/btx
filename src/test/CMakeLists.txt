@@ -633,6 +633,7 @@ if(WITH_MODELNET)
     swarm_invoice_tests.cpp
     swarm_propose_tests.cpp
     swarm_regress_tests.cpp
+    swarm_dispute_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp
