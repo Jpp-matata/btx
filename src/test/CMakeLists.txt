@@ -1905,6 +1905,28 @@ if(WITH_MODELNET)
     swarm_capact_grant_tests.cpp
     swarm_capact_quiet_tests.cpp
     swarm_capact_replay_tests.cpp
+    swarm_idledrain_admit_tests.cpp
+    swarm_idledrain_cap_tests.cpp
+    swarm_idledrain_drain_tests.cpp
+    swarm_idledrain_open_tests.cpp
+    swarm_idledrain_realm_tests.cpp
+    swarm_canaryback_adopt_tests.cpp
+    swarm_canaryback_graduate_tests.cpp
+    swarm_canaryback_mine_tests.cpp
+    swarm_canaryback_regress_tests.cpp
+    swarm_canaryback_stage_tests.cpp
+    swarm_privfam_offer_tests.cpp
+    swarm_privfam_public_tests.cpp
+    swarm_privfam_publish_tests.cpp
+    swarm_privfam_quiet_tests.cpp
+    swarm_privfam_replay_tests.cpp
+    swarm_privfam_seed_tests.cpp
+    swarm_adminhold_bytes_tests.cpp
+    swarm_adminhold_height_tests.cpp
+    swarm_adminhold_key_tests.cpp
+    swarm_adminhold_movekey_tests.cpp
+    swarm_adminhold_open_tests.cpp
+    swarm_adminhold_replay_tests.cpp
     swarm_evolve_graduate_tests.cpp
     swarm_evolve_measure_tests.cpp
     swarm_evolve_recover_tests.cpp

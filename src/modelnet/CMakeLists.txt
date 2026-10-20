@@ -1489,6 +1489,57 @@ add_library(bitcoin_modelnet STATIC
   swarm_capact/act.cpp
   swarm_capact/quiet.cpp
   swarm_capact/swarm_capact.cpp
+  swarm_idledrain/reason.cpp
+  swarm_idledrain/workers.cpp
+  swarm_idledrain/seat.cpp
+  swarm_idledrain/mark.cpp
+  swarm_idledrain/cap.cpp
+  swarm_idledrain/replay.cpp
+  swarm_idledrain/open.cpp
+  swarm_idledrain/admit.cpp
+  swarm_idledrain/drain.cpp
+  swarm_idledrain/realm.cpp
+  swarm_idledrain/idledrain.cpp
+  swarm_canaryback/id.cpp
+  swarm_canaryback/active.cpp
+  swarm_canaryback/candidate.cpp
+  swarm_canaryback/prior.cpp
+  swarm_canaryback/stage.cpp
+  swarm_canaryback/adopt.cpp
+  swarm_canaryback/regress.cpp
+  swarm_canaryback/graduate.cpp
+  swarm_canaryback/mine.cpp
+  swarm_canaryback/quiet.cpp
+  swarm_canaryback/canaryback.cpp
+  swarm_privfam/record.cpp
+  swarm_privfam/blank.cpp
+  swarm_privfam/flag.cpp
+  swarm_privfam/roster.cpp
+  swarm_privfam/replay.cpp
+  swarm_privfam/gate.cpp
+  swarm_privfam/offer.cpp
+  swarm_privfam/known.cpp
+  swarm_privfam/release.cpp
+  swarm_privfam/shelf.cpp
+  swarm_privfam/publish.cpp
+  swarm_privfam/discover.cpp
+  swarm_privfam/link.cpp
+  swarm_privfam/seeds.cpp
+  swarm_privfam/quiet.cpp
+  swarm_privfam/swarm_privfam.cpp
+  swarm_adminhold/channel.cpp
+  swarm_adminhold/height.cpp
+  swarm_adminhold/key.cpp
+  swarm_adminhold/record.cpp
+  swarm_adminhold/book.cpp
+  swarm_adminhold/replay.cpp
+  swarm_adminhold/gate.cpp
+  swarm_adminhold/open.cpp
+  swarm_adminhold/freeze.cpp
+  swarm_adminhold/moveheight.cpp
+  swarm_adminhold/movekey.cpp
+  swarm_adminhold/quiet.cpp
+  swarm_adminhold/swarm_adminhold.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
