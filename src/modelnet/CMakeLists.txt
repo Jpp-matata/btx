@@ -60,6 +60,7 @@ add_library(bitcoin_modelnet STATIC
   swarm_taskfence.cpp
   swarm_cycle.cpp
   swarm_fault.cpp
+  swarm_faultmore.cpp
   swarm_cohortbook.cpp
   swarm_verify.cpp
   free_grant.cpp
