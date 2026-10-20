@@ -689,6 +689,9 @@ if(WITH_MODELNET)
     swarm_selfeval_tests.cpp
     swarm_niche_tests.cpp
     swarm_unfunded_tests.cpp
+    swarm_doubleuse_tests.cpp
+    swarm_majority_tests.cpp
+    swarm_clearnote_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp
