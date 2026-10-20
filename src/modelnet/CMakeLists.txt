@@ -170,6 +170,7 @@ add_library(bitcoin_modelnet STATIC
   swarm_cpueval.cpp
   swarm_kvshare.cpp
   swarm_fallback.cpp
+  swarm_hashlock.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
