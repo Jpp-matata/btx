@@ -1768,6 +1768,23 @@ if(WITH_MODELNET)
     swarm_kvpage_tests.cpp
     swarm_rotgate_tests.cpp
     swarm_sandboxfs_tests.cpp
+    swarm_kvfabric_compat_tests.cpp
+    swarm_kvfabric_control_tests.cpp
+    swarm_kvfabric_engine_tests.cpp
+    swarm_kvfabric_multiplier_tests.cpp
+    swarm_kvfabric_placement_tests.cpp
+    swarm_kvfabric_prefetch_tests.cpp
+    swarm_kvfabric_revoke_tests.cpp
+    swarm_kvfabric_truncation_tests.cpp
+    swarm_agents_account_tests.cpp
+    swarm_agents_builtin_tests.cpp
+    swarm_agents_dag_tests.cpp
+    swarm_agents_gate_tests.cpp
+    swarm_agents_lease_tests.cpp
+    swarm_agents_plane_tests.cpp
+    swarm_agents_shared_tests.cpp
+    swarm_agents_trace_tests.cpp
+    swarm_traincohort_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp

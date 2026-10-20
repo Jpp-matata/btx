@@ -1204,6 +1204,33 @@ add_library(bitcoin_modelnet STATIC
   swarm_kvpage.cpp
   swarm_rotgate.cpp
   swarm_sandboxfs.cpp
+  swarm_kvfabric/bytes.cpp
+  swarm_kvfabric/engine_names.cpp
+  swarm_kvfabric/engine_probe.cpp
+  swarm_kvfabric/placement.cpp
+  swarm_kvfabric/compatibility.cpp
+  swarm_kvfabric/prefetch.cpp
+  swarm_kvfabric/revocation.cpp
+  swarm_kvfabric/truncation.cpp
+  swarm_kvfabric/multiplier.cpp
+  swarm_kvfabric/fabric.cpp
+  swarm_agents/path_check.cpp
+  swarm_agents/dag.cpp
+  swarm_agents/gate.cpp
+  swarm_agents/builtin_hold.cpp
+  swarm_agents/builtin_integer.cpp
+  swarm_agents/registry.cpp
+  swarm_agents/lease.cpp
+  swarm_agents/account.cpp
+  swarm_agents/trace.cpp
+  swarm_agents/shared.cpp
+  swarm_agents/plane.cpp
+  swarm_traincohort/average.cpp
+  swarm_traincohort/cohort.cpp
+  swarm_traincohort/grant.cpp
+  swarm_traincohort/member.cpp
+  swarm_traincohort/remote.cpp
+  swarm_traincohort/step.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
