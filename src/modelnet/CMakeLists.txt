@@ -1340,6 +1340,12 @@ add_library(bitcoin_modelnet STATIC
   swarm_forward/policy.cpp
   swarm_forward/ledger.cpp
   swarm_forward/forward.cpp
+  swarm_evalboard/check.cpp
+  swarm_evalboard/ledger.cpp
+  swarm_evalboard/quorum.cpp
+  swarm_evalboard/attach.cpp
+  swarm_evalboard/realm.cpp
+  swarm_evalboard/board.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp

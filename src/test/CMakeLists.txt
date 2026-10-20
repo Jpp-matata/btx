@@ -1837,6 +1837,7 @@ if(WITH_MODELNET)
     swarm_forward_forward_tests.cpp
     swarm_forward_open_tests.cpp
     swarm_forward_policy_tests.cpp
+    swarm_evalboard_tests.cpp
     swarm_evolve_graduate_tests.cpp
     swarm_evolve_measure_tests.cpp
     swarm_evolve_recover_tests.cpp
