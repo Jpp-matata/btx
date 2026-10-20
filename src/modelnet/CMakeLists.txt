@@ -1106,6 +1106,7 @@ add_library(bitcoin_modelnet STATIC
   swarm_passthru.cpp
   swarm_windowslife.cpp
   swarm_loginpath.cpp
+  swarm_realmoney.cpp
   swarm_notslots.cpp
   swarm_notprivateoff.cpp
   swarm_notclosetmpl.cpp

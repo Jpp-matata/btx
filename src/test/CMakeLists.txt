@@ -1670,6 +1670,7 @@ if(WITH_MODELNET)
     swarm_passthru_tests.cpp
     swarm_windowslife_tests.cpp
     swarm_loginpath_tests.cpp
+    swarm_realmoney_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
