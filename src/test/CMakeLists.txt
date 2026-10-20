@@ -883,6 +883,8 @@ if(WITH_MODELNET)
     swarm_notfallback_tests.cpp
     swarm_notenv_tests.cpp
     swarm_notcrash_tests.cpp
+    swarm_notcatalog_tests.cpp
+    swarm_notdep_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp
