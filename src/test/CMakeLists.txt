@@ -641,6 +641,7 @@ if(WITH_MODELNET)
     swarm_meter_tests.cpp
     swarm_trajectory_tests.cpp
     swarm_agentproto_tests.cpp
+    swarm_sandbox_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp
