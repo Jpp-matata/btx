@@ -1097,6 +1097,7 @@ add_library(bitcoin_modelnet STATIC
   swarm_preimagelen.cpp
   swarm_thirdleaf.cpp
   swarm_nonsigner.cpp
+  swarm_adminrefund.cpp
   swarm_notslots.cpp
   swarm_notprivateoff.cpp
   swarm_notclosetmpl.cpp

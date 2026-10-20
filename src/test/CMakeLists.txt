@@ -1661,6 +1661,7 @@ if(WITH_MODELNET)
     swarm_preimagelen_tests.cpp
     swarm_thirdleaf_tests.cpp
     swarm_nonsigner_tests.cpp
+    swarm_adminrefund_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
