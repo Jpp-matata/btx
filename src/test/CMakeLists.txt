@@ -1614,6 +1614,7 @@ if(WITH_MODELNET)
     swarm_confirmnote_tests.cpp
     swarm_negkeep_tests.cpp
     swarm_poolrank_tests.cpp
+    swarm_churnnote_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
