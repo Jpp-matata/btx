@@ -182,6 +182,7 @@ add_library(bitcoin_modelnet STATIC
   swarm_maxsteps.cpp
   swarm_notrealm.cpp
   swarm_meter0.cpp
+  swarm_hforigin.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
