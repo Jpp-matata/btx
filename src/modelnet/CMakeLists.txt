@@ -1710,6 +1710,17 @@ add_library(bitcoin_modelnet STATIC
   swarm_ckptsave/keep.cpp
   swarm_ckptsave/quiet.cpp
   swarm_ckptsave/swarm_ckptsave.cpp
+  swarm_synchold/blank.cpp
+  swarm_synchold/name.cpp
+  swarm_synchold/record.cpp
+  swarm_synchold/book.cpp
+  swarm_synchold/replay.cpp
+  swarm_synchold/gate.cpp
+  swarm_synchold/stay.cpp
+  swarm_synchold/request.cpp
+  swarm_synchold/keep.cpp
+  swarm_synchold/quiet.cpp
+  swarm_synchold/swarm_synchold.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
