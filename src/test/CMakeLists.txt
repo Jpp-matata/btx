@@ -783,6 +783,7 @@ if(WITH_MODELNET)
     swarm_notcert_tests.cpp
     swarm_notflagship_tests.cpp
     swarm_notlivefault_tests.cpp
+    swarm_notadopt_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp
