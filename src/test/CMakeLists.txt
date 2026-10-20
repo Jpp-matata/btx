@@ -1365,6 +1365,10 @@ if(WITH_MODELNET)
     swarm_notno90blk2_tests.cpp
     swarm_notnofiat2_tests.cpp
     swarm_notnoleak2_tests.cpp
+    swarm_notnoauthor3_tests.cpp
+    swarm_notnobalance4_tests.cpp
+    swarm_notnoescrow2_tests.cpp
+    swarm_notnoprompt2_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
