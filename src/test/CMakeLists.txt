@@ -1253,6 +1253,8 @@ if(WITH_MODELNET)
     swarm_notnopin_tests.cpp
     swarm_notnoneigh2_tests.cpp
     swarm_notnotrunc_tests.cpp
+    swarm_notnoneg_tests.cpp
+    swarm_notno604800_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
