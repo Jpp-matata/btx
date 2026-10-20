@@ -1688,6 +1688,17 @@ add_library(bitcoin_modelnet STATIC
   swarm_natpub/seeds.cpp
   swarm_natpub/quiet.cpp
   swarm_natpub/swarm_natpub.cpp
+  swarm_mixedhold/blank.cpp
+  swarm_mixedhold/name.cpp
+  swarm_mixedhold/record.cpp
+  swarm_mixedhold/book.cpp
+  swarm_mixedhold/replay.cpp
+  swarm_mixedhold/gate.cpp
+  swarm_mixedhold/stay.cpp
+  swarm_mixedhold/request.cpp
+  swarm_mixedhold/keep.cpp
+  swarm_mixedhold/quiet.cpp
+  swarm_mixedhold/swarm_mixedhold.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
