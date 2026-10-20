@@ -1346,6 +1346,24 @@ add_library(bitcoin_modelnet STATIC
   swarm_evalboard/attach.cpp
   swarm_evalboard/realm.cpp
   swarm_evalboard/board.cpp
+  swarm_nodedefault/gate.cpp
+  swarm_nodedefault/profile.cpp
+  swarm_nodedefault/seeds.cpp
+  swarm_nodedefault/training.cpp
+  swarm_nodedefault/privacy.cpp
+  swarm_nodedefault/sign.cpp
+  swarm_nodedefault/bound.cpp
+  swarm_nodedefault/spend.cpp
+  swarm_nodedefault/cpu.cpp
+  swarm_nodedefault/vram.cpp
+  swarm_nodedefault/role.cpp
+  swarm_nodedefault/nodedefault.cpp
+  swarm_workpay/receipt.cpp
+  swarm_workpay/earned.cpp
+  swarm_workpay/spend_policy.cpp
+  swarm_workpay/fiat_quote.cpp
+  swarm_workpay/merge.cpp
+  swarm_workpay/workpay.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp

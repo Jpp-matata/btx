@@ -1838,6 +1838,20 @@ if(WITH_MODELNET)
     swarm_forward_open_tests.cpp
     swarm_forward_policy_tests.cpp
     swarm_evalboard_tests.cpp
+    swarm_nodedefault_cpu_tests.cpp
+    swarm_nodedefault_defaults_tests.cpp
+    swarm_nodedefault_gate_tests.cpp
+    swarm_nodedefault_privacy_tests.cpp
+    swarm_nodedefault_profile_tests.cpp
+    swarm_nodedefault_role_tests.cpp
+    swarm_nodedefault_seeds_tests.cpp
+    swarm_nodedefault_spend_tests.cpp
+    swarm_nodedefault_training_tests.cpp
+    swarm_nodedefault_vram_tests.cpp
+    swarm_workpay_bind_tests.cpp
+    swarm_workpay_quote_tests.cpp
+    swarm_workpay_spend_tests.cpp
+    swarm_workpay_tests.cpp
     swarm_evolve_graduate_tests.cpp
     swarm_evolve_measure_tests.cpp
     swarm_evolve_recover_tests.cpp
