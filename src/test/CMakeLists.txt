@@ -1557,6 +1557,9 @@ if(WITH_MODELNET)
     swarm_notnoblockspace2_tests.cpp
     swarm_notnoexploreassign2_tests.cpp
     swarm_notnopreimage32_tests.cpp
+    swarm_notno51grad2_tests.cpp
+    swarm_notnoqualitygrade2_tests.cpp
+    swarm_notnosignerclaim2_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
