@@ -32,6 +32,24 @@ struct SwarmWorkHint {
 SwarmWorkHint SwarmPlanWorkGraph(bool tool_running, bool child_known, bool branch_inactive, bool shared_ancestor,
                                  bool engine_present, std::string& err);
 
+/** A causal append leaves the existing prefix unchanged and extends only the suffix. */
+struct SwarmPrefixBytes {
+    std::string prefix;
+    std::string suffix;
+};
+
+bool SwarmAppendCausal(const SwarmPrefixBytes& base, const std::string& token, SwarmPrefixBytes& out, std::string& err);
+
+/** A peer may stay passive, disappear, or follow an older generation. */
+struct SwarmParticipation {
+    bool passive{false};
+    bool disappeared{false};
+    bool follows_older{false};
+    bool community_continues{false};
+};
+
+bool SwarmNoteParticipant(SwarmParticipation& row, bool passive, bool disappeared, bool follows_older, bool any_other_active, std::string& err);
+
 } // namespace modelnet
 
 #endif // BTX_MODELNET_SWARM_GRAPH_H

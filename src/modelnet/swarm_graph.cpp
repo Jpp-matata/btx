@@ -23,4 +23,26 @@ SwarmWorkHint SwarmPlanWorkGraph(bool tool_running, bool child_known, bool branc
     return hint;
 }
 
+bool SwarmAppendCausal(const SwarmPrefixBytes& base, const std::string& token, SwarmPrefixBytes& out, std::string& err)
+{
+    if (token.empty()) {
+        err = "CAUSAL";
+        return false;
+    }
+    out.prefix = base.prefix;
+    out.suffix = base.suffix + token;
+    err.clear();
+    return true;
+}
+
+bool SwarmNoteParticipant(SwarmParticipation& row, bool passive, bool disappeared, bool follows_older, bool any_other_active, std::string& err)
+{
+    row.passive = passive;
+    row.disappeared = disappeared;
+    row.follows_older = follows_older;
+    row.community_continues = any_other_active;
+    err.clear();
+    return true;
+}
+
 } // namespace modelnet
