@@ -17,7 +17,7 @@ enum class LeaseWorkHashKind {
 };
 
 /**
- * No stored hash can be stored.
+ * When nothing is stored yet, the next hash can be stored.
  * The same hash is a replay. A different hash is a conflict.
  * The stored hash is not changed by this classification.
  */
