@@ -89,6 +89,7 @@ add_library(bitcoin_modelnet STATIC
   swarm_toolreuse.cpp
   swarm_confine.cpp
   swarm_opportunity.cpp
+  swarm_distill.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
