@@ -1233,6 +1233,7 @@ if(WITH_MODELNET)
     swarm_notnoseedcpu_tests.cpp
     swarm_notnothreads64_tests.cpp
     swarm_notnovram0_tests.cpp
+    swarm_notnoredist_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
