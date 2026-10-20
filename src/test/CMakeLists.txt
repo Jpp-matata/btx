@@ -1123,6 +1123,8 @@ if(WITH_MODELNET)
     swarm_notnopenalty_tests.cpp
     swarm_notnobody_tests.cpp
     swarm_notnol1_tests.cpp
+    swarm_notnogrant_tests.cpp
+    swarm_notnowan_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
