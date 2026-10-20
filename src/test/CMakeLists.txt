@@ -936,6 +936,10 @@ if(WITH_MODELNET)
     swarm_notpiece_tests.cpp
     swarm_notbody_tests.cpp
     swarm_notniche_tests.cpp
+    swarm_nottax_tests.cpp
+    swarm_notneighborhood_tests.cpp
+    swarm_notunfunded_tests.cpp
+    swarm_notkvpage_tests.cpp
     swarm_notmandate_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
