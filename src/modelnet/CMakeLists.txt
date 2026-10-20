@@ -639,6 +639,7 @@ add_library(bitcoin_modelnet STATIC
   swarm_notnotrustckpt.cpp
   swarm_notnoholdrotate.cpp
   swarm_notnoleak.cpp
+  swarm_notnowanavg.cpp
   swarm_notslots.cpp
   swarm_notprivateoff.cpp
   swarm_notclosetmpl.cpp
