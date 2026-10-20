@@ -1736,6 +1736,9 @@ if(WITH_MODELNET)
     swarm_cohortpick_tests.cpp
     swarm_revokelist_tests.cpp
     swarm_samplepick_tests.cpp
+    swarm_conflict_tests.cpp
+    swarm_cursorstep_tests.cpp
+    swarm_earlystop_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp
