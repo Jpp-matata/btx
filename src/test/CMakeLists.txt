@@ -1374,6 +1374,9 @@ if(WITH_MODELNET)
     swarm_notnocputhread2_tests.cpp
     swarm_notnoslots2_tests.cpp
     swarm_notnodevice2_tests.cpp
+    swarm_notnoseed2_tests.cpp
+    swarm_notnoevalcpu2_tests.cpp
+    swarm_notnospendkey2_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
