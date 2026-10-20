@@ -1604,6 +1604,7 @@ if(WITH_MODELNET)
     swarm_lineagejoin_tests.cpp
     swarm_sealkeep_tests.cpp
     swarm_datasetgrant_tests.cpp
+    swarm_presence_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
