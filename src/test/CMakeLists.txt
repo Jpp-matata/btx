@@ -1440,6 +1440,10 @@ if(WITH_MODELNET)
     swarm_notnoevalauthor2_tests.cpp
     swarm_notnoleaf2_tests.cpp
     swarm_notnohtlcsigner2_tests.cpp
+    swarm_notnochurnsend2_tests.cpp
+    swarm_notnopiece4mib2_tests.cpp
+    swarm_notnorefundleaf2_tests.cpp
+    swarm_notnoflatcap2_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
