@@ -1506,6 +1506,11 @@ if(WITH_MODELNET)
     swarm_notnoengineflag2_tests.cpp
     swarm_notnohashroute2_tests.cpp
     swarm_notnofourbal2_tests.cpp
+    swarm_notnoadminheight2_tests.cpp
+    swarm_notnoforkavg2_tests.cpp
+    swarm_notnol2channel2_tests.cpp
+    swarm_notnoquorumdom2_tests.cpp
+    swarm_notnowanupdate2_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
