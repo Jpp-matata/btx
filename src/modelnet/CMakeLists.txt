@@ -167,6 +167,7 @@ add_library(bitcoin_modelnet STATIC
   swarm_revsplit.cpp
   swarm_governor.cpp
   swarm_vram.cpp
+  swarm_cpueval.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
