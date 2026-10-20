@@ -1183,6 +1183,7 @@ add_library(bitcoin_modelnet STATIC
   swarm_channelone.cpp
   swarm_closeout.cpp
   swarm_poolfund.cpp
+  swarm_sighashok.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp

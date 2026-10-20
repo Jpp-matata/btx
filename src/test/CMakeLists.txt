@@ -1747,6 +1747,7 @@ if(WITH_MODELNET)
     swarm_channelone_tests.cpp
     swarm_closeout_tests.cpp
     swarm_poolfund_tests.cpp
+    swarm_sighashok_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp
