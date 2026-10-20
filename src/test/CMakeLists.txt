@@ -1638,6 +1638,7 @@ if(WITH_MODELNET)
     swarm_currencykeep_tests.cpp
     swarm_profitshare_tests.cpp
     swarm_hostnote_tests.cpp
+    swarm_hubcard_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
