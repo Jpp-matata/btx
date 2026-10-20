@@ -1171,6 +1171,9 @@ if(WITH_MODELNET)
     swarm_notnochild_tests.cpp
     swarm_notnoactivate_tests.cpp
     swarm_notnoassurance_tests.cpp
+    swarm_notnoconfirm_tests.cpp
+    swarm_notnoparent_tests.cpp
+    swarm_notnostaleep_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
