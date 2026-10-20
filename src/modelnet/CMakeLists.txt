@@ -1613,6 +1613,31 @@ add_library(bitcoin_modelnet STATIC
   swarm_clockspan/mine.cpp
   swarm_clockspan/quiet.cpp
   swarm_clockspan/swarm_clockspan.cpp
+  swarm_gradhold/blank.cpp
+  swarm_gradhold/name.cpp
+  swarm_gradhold/record.cpp
+  swarm_gradhold/book.cpp
+  swarm_gradhold/replay.cpp
+  swarm_gradhold/gate.cpp
+  swarm_gradhold/offer.cpp
+  swarm_gradhold/keep.cpp
+  swarm_gradhold/seal.cpp
+  swarm_gradhold/egress.cpp
+  swarm_gradhold/quiet.cpp
+  swarm_gradhold/swarm_gradhold.cpp
+  swarm_fourscale/names.cpp
+  swarm_fourscale/record.cpp
+  swarm_fourscale/book.cpp
+  swarm_fourscale/replay.cpp
+  swarm_fourscale/scale.cpp
+  swarm_fourscale/gate.cpp
+  swarm_fourscale/open.cpp
+  swarm_fourscale/step.cpp
+  swarm_fourscale/average.cpp
+  swarm_fourscale/graduate.cpp
+  swarm_fourscale/quiet.cpp
+  swarm_fourscale/realm.cpp
+  swarm_fourscale/swarm_fourscale.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp

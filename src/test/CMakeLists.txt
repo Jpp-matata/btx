@@ -1956,6 +1956,17 @@ if(WITH_MODELNET)
     swarm_clockspan_range_tests.cpp
     swarm_clockspan_replay_tests.cpp
     swarm_clockspan_spacing_tests.cpp
+    swarm_gradhold_bytes_tests.cpp
+    swarm_gradhold_empty_tests.cpp
+    swarm_gradhold_export_tests.cpp
+    swarm_gradhold_offer_tests.cpp
+    swarm_gradhold_replay_tests.cpp
+    swarm_fourscale_average_tests.cpp
+    swarm_fourscale_bytes_tests.cpp
+    swarm_fourscale_graduate_tests.cpp
+    swarm_fourscale_open_tests.cpp
+    swarm_fourscale_replay_tests.cpp
+    swarm_fourscale_step_tests.cpp
     swarm_evolve_graduate_tests.cpp
     swarm_evolve_measure_tests.cpp
     swarm_evolve_recover_tests.cpp
