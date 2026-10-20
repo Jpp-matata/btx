@@ -1020,6 +1020,7 @@ add_library(bitcoin_modelnet STATIC
   swarm_costmeter.cpp
   swarm_kvadmit.cpp
   swarm_benchrec.cpp
+  swarm_learnerq.cpp
   swarm_notslots.cpp
   swarm_notprivateoff.cpp
   swarm_notclosetmpl.cpp

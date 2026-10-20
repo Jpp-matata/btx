@@ -1584,6 +1584,7 @@ if(WITH_MODELNET)
     swarm_costmeter_tests.cpp
     swarm_kvadmit_tests.cpp
     swarm_benchrec_tests.cpp
+    swarm_learnerq_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
