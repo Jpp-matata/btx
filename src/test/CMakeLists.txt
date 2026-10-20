@@ -1010,6 +1010,8 @@ if(WITH_MODELNET)
     swarm_notnotps_tests.cpp
     swarm_notnoglobal_tests.cpp
     swarm_notnotwonode_tests.cpp
+    swarm_notnogpu_tests.cpp
+    swarm_notnoroute_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
