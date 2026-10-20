@@ -978,6 +978,9 @@ if(WITH_MODELNET)
     swarm_nothashleaf_tests.cpp
     swarm_notweek_tests.cpp
     swarm_notsigsize_tests.cpp
+    swarm_notquorumdom_tests.cpp
+    swarm_notcpueval_tests.cpp
+    swarm_notgpuoff_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
