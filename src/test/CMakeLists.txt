@@ -2001,6 +2001,10 @@ if(WITH_MODELNET)
     swarm_ablatehold_empty_tests.cpp
     swarm_ablatehold_replay_tests.cpp
     swarm_ablatehold_request_tests.cpp
+    swarm_passhold_bytes_tests.cpp
+    swarm_passhold_empty_tests.cpp
+    swarm_passhold_replay_tests.cpp
+    swarm_passhold_request_tests.cpp
     swarm_ckptsave_request_tests.cpp
     swarm_mixedhold_request_tests.cpp
     swarm_evolve_graduate_tests.cpp

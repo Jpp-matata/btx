@@ -1732,6 +1732,17 @@ add_library(bitcoin_modelnet STATIC
   swarm_ablatehold/keep.cpp
   swarm_ablatehold/quiet.cpp
   swarm_ablatehold/swarm_ablatehold.cpp
+  swarm_passhold/blank.cpp
+  swarm_passhold/name.cpp
+  swarm_passhold/record.cpp
+  swarm_passhold/book.cpp
+  swarm_passhold/replay.cpp
+  swarm_passhold/gate.cpp
+  swarm_passhold/stay.cpp
+  swarm_passhold/request.cpp
+  swarm_passhold/keep.cpp
+  swarm_passhold/quiet.cpp
+  swarm_passhold/swarm_passhold.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
