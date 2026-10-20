@@ -1687,6 +1687,8 @@ if(WITH_MODELNET)
     swarm_proposer_tests.cpp
     swarm_reportrec_tests.cpp
     swarm_familydir_tests.cpp
+    swarm_learnerheld_tests.cpp
+    swarm_natpub_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
