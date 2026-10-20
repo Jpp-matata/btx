@@ -1930,6 +1930,16 @@ if(WITH_MODELNET)
     swarm_cachepair_bytes_tests.cpp
     swarm_cachepair_place_tests.cpp
     swarm_cachepair_share_tests.cpp
+    swarm_dupreceipt_bytes_tests.cpp
+    swarm_dupreceipt_key_tests.cpp
+    swarm_dupreceipt_receipt_tests.cpp
+    swarm_dupreceipt_replay_tests.cpp
+    swarm_dupreceipt_tests.cpp
+    swarm_islandgate_admit_tests.cpp
+    swarm_islandgate_exchange_tests.cpp
+    swarm_islandgate_quiet_tests.cpp
+    swarm_islandgate_replay_tests.cpp
+    swarm_islandgate_stale_tests.cpp
     swarm_evolve_graduate_tests.cpp
     swarm_evolve_measure_tests.cpp
     swarm_evolve_recover_tests.cpp

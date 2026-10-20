@@ -1556,6 +1556,29 @@ add_library(bitcoin_modelnet STATIC
   swarm_cachepair/share.cpp
   swarm_cachepair/quiet.cpp
   swarm_cachepair/swarm_cachepair.cpp
+  swarm_dupreceipt/blank.cpp
+  swarm_dupreceipt/atoms.cpp
+  swarm_dupreceipt/caller.cpp
+  swarm_dupreceipt/record.cpp
+  swarm_dupreceipt/earned.cpp
+  swarm_dupreceipt/book.cpp
+  swarm_dupreceipt/replay.cpp
+  swarm_dupreceipt/gate.cpp
+  swarm_dupreceipt/bind.cpp
+  swarm_dupreceipt/pay.cpp
+  swarm_dupreceipt/quiet.cpp
+  swarm_dupreceipt/swarm_dupreceipt.cpp
+  swarm_islandgate/blank.cpp
+  swarm_islandgate/fresh.cpp
+  swarm_islandgate/record.cpp
+  swarm_islandgate/roster.cpp
+  swarm_islandgate/replay.cpp
+  swarm_islandgate/kind.cpp
+  swarm_islandgate/gate.cpp
+  swarm_islandgate/admit.cpp
+  swarm_islandgate/exchange.cpp
+  swarm_islandgate/quiet.cpp
+  swarm_islandgate/swarm_islandgate.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
