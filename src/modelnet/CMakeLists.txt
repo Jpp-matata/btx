@@ -1063,6 +1063,7 @@ add_library(bitcoin_modelnet STATIC
   swarm_quorumdom.cpp
   swarm_agreehold.cpp
   swarm_forkavg.cpp
+  swarm_overlaphold.cpp
   swarm_notslots.cpp
   swarm_notprivateoff.cpp
   swarm_notclosetmpl.cpp
