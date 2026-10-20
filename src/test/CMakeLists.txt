@@ -652,6 +652,7 @@ if(WITH_MODELNET)
     swarm_toolcont_tests.cpp
     swarm_toolreuse_tests.cpp
     swarm_confine_tests.cpp
+    swarm_opportunity_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp
