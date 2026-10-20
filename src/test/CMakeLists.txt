@@ -983,6 +983,10 @@ if(WITH_MODELNET)
     swarm_notgpuoff_tests.cpp
     swarm_notmhq_tests.cpp
     swarm_not14400_tests.cpp
+    swarm_notminthread_tests.cpp
+    swarm_nottxid_tests.cpp
+    swarm_notnoseal_tests.cpp
+    swarm_notstall_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
