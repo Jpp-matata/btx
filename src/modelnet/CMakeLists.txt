@@ -366,6 +366,9 @@ add_library(bitcoin_modelnet STATIC
   swarm_notcapped.cpp
   swarm_notprefetch.cpp
   swarm_notvote.cpp
+  swarm_notprofile.cpp
+  swarm_notspacing.cpp
+  swarm_notfiat.cpp
   swarm_notmandate.cpp
   free_grant.cpp
   router.cpp

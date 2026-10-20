@@ -930,6 +930,9 @@ if(WITH_MODELNET)
     swarm_notcapped_tests.cpp
     swarm_notprefetch_tests.cpp
     swarm_notvote_tests.cpp
+    swarm_notprofile_tests.cpp
+    swarm_notspacing_tests.cpp
+    swarm_notfiat_tests.cpp
     swarm_notmandate_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
