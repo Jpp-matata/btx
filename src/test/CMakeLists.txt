@@ -670,6 +670,11 @@ if(WITH_MODELNET)
     swarm_promohalt_tests.cpp
     swarm_partial_tests.cpp
     swarm_canaryhold_tests.cpp
+    swarm_truncpage_tests.cpp
+    swarm_survivor_tests.cpp
+    swarm_workerdrop_tests.cpp
+    swarm_forknote_tests.cpp
+    swarm_evalsplit_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp

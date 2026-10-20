@@ -106,6 +106,11 @@ add_library(bitcoin_modelnet STATIC
   swarm_promohalt.cpp
   swarm_partial.cpp
   swarm_canaryhold.cpp
+  swarm_truncpage.cpp
+  swarm_survivor.cpp
+  swarm_workerdrop.cpp
+  swarm_forknote.cpp
+  swarm_evalsplit.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
