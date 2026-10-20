@@ -736,6 +736,8 @@ if(WITH_MODELNET)
     swarm_fallback_tests.cpp
     swarm_hashlock_tests.cpp
     swarm_fundsign_tests.cpp
+    swarm_piece4m_tests.cpp
+    swarm_private_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp
