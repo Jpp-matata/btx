@@ -1455,6 +1455,8 @@ if(WITH_MODELNET)
     swarm_notnoopenlictax2_tests.cpp
     swarm_notnohflineage2_tests.cpp
     swarm_notnoprofitshare2_tests.cpp
+    swarm_notnorevenueill2_tests.cpp
+    swarm_notnoengineabsent2_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
