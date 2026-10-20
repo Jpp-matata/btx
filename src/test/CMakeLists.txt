@@ -1241,6 +1241,9 @@ if(WITH_MODELNET)
     swarm_notnoinclusive_tests.cpp
     swarm_notnomanifest_tests.cpp
     swarm_notno160blk_tests.cpp
+    swarm_notnokvpage_tests.cpp
+    swarm_notnoseq_tests.cpp
+    swarm_notnofirstedge_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
