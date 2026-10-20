@@ -1169,6 +1169,8 @@ add_library(bitcoin_modelnet STATIC
   swarm_resultcache.cpp
   swarm_resultshare.cpp
   swarm_rollback.cpp
+  swarm_cohortpick.cpp
+  swarm_revokelist.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
