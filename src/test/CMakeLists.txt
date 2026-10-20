@@ -1439,6 +1439,7 @@ if(WITH_MODELNET)
     swarm_notnocurrencybtx2_tests.cpp
     swarm_notnoevalauthor2_tests.cpp
     swarm_notnoleaf2_tests.cpp
+    swarm_notnohtlcsigner2_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
