@@ -1530,6 +1530,11 @@ if(WITH_MODELNET)
     swarm_notnosolvable2_tests.cpp
     swarm_notnounfundad2_tests.cpp
     swarm_notnovalidated2_tests.cpp
+    swarm_notnochallinfo2_tests.cpp
+    swarm_notnogovdrain2_tests.cpp
+    swarm_notnoslotsone2_tests.cpp
+    swarm_notnohostrefuse2_tests.cpp
+    swarm_notnorvpub2_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
