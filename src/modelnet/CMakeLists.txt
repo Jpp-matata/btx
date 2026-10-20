@@ -160,6 +160,9 @@ add_library(bitcoin_modelnet STATIC
   swarm_preimage.cpp
   swarm_peerpath.cpp
   swarm_pareto.cpp
+  swarm_explore.cpp
+  swarm_community.cpp
+  swarm_poolepoch.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
