@@ -862,6 +862,7 @@ if(WITH_MODELNET)
     swarm_notfinetune_tests.cpp
     swarm_notmultinode_tests.cpp
     swarm_nottasklat_tests.cpp
+    swarm_notvram_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp
