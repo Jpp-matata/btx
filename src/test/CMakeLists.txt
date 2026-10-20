@@ -1463,6 +1463,8 @@ if(WITH_MODELNET)
     swarm_notnofiatquote2_tests.cpp
     swarm_notnomultihopqual2_tests.cpp
     swarm_notnoredistgrant2_tests.cpp
+    swarm_notnop95pub2_tests.cpp
+    swarm_notnotokspub2_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
