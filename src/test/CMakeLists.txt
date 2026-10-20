@@ -1696,6 +1696,8 @@ if(WITH_MODELNET)
     swarm_revoke_tests.cpp
     swarm_sealopen_tests.cpp
     swarm_prefetch_tests.cpp
+    swarm_eleccost_tests.cpp
+    swarm_wearcost_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
