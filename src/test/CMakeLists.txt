@@ -773,6 +773,8 @@ if(WITH_MODELNET)
     swarm_notdiloco_tests.cpp
     swarm_notp95_tests.cpp
     swarm_notttft_tests.cpp
+    swarm_notmooncake_tests.cpp
+    swarm_notcachehit_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp
