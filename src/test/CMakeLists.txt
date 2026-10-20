@@ -635,6 +635,11 @@ if(WITH_MODELNET)
     swarm_regress_tests.cpp
     swarm_dispute_tests.cpp
     swarm_revokegate_tests.cpp
+    swarm_gradleak_tests.cpp
+    swarm_holdout_tests.cpp
+    swarm_scaleexec_tests.cpp
+    swarm_meter_tests.cpp
+    swarm_trajectory_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp

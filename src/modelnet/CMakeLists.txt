@@ -71,6 +71,11 @@ add_library(bitcoin_modelnet STATIC
   swarm_regress.cpp
   swarm_dispute.cpp
   swarm_revokegate.cpp
+  swarm_gradleak.cpp
+  swarm_holdout.cpp
+  swarm_scaleexec.cpp
+  swarm_meter.cpp
+  swarm_trajectory.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp

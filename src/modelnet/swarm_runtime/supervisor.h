@@ -13,9 +13,9 @@
 namespace modelnet::swarm {
 std::filesystem::path ExecutableDirectory();
 std::vector<std::string> SanitizeEnvironment(char* const envp[]);
-/** Default sidecar lifecycle. Failure never changes chain or wallet state.
- * The override executable exists for local tests/packaging, not an RPC input.
- * This supervisor never launches a shell or an advertised model executable.
+/** This supervisor does not launch a sidecar. btxd is the control plane.
+ * Failure never changes chain or wallet state. The override executable is
+ * stored for local tests/packaging, is not an RPC input, and is never executed.
  */
 class Supervisor final {
 public:
