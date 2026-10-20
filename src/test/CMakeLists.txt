@@ -770,6 +770,7 @@ if(WITH_MODELNET)
     swarm_notnixl_tests.cpp
     swarm_notrdma_tests.cpp
     swarm_nocheckpoint_tests.cpp
+    swarm_notdiloco_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp
