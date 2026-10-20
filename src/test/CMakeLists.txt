@@ -1401,6 +1401,8 @@ if(WITH_MODELNET)
     swarm_notnoadminmove2_tests.cpp
     swarm_notnoprivate2_tests.cpp
     swarm_notnohostnote2_tests.cpp
+    swarm_notnoearnedstay2_tests.cpp
+    swarm_notnocostcharge2_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
