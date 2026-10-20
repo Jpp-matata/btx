@@ -747,6 +747,9 @@ if(WITH_MODELNET)
     swarm_notrealm_tests.cpp
     swarm_meter0_tests.cpp
     swarm_hforigin_tests.cpp
+    swarm_notreplay_tests.cpp
+    swarm_publishback_tests.cpp
+    swarm_agreement_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp
