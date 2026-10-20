@@ -1076,6 +1076,9 @@ add_library(bitcoin_modelnet STATIC
   swarm_hostnote.cpp
   swarm_hubcard.cpp
   swarm_qualitygrade.cpp
+  swarm_selfscore.cpp
+  swarm_downloadlic.cpp
+  swarm_votemaj.cpp
   swarm_notslots.cpp
   swarm_notprivateoff.cpp
   swarm_notclosetmpl.cpp
