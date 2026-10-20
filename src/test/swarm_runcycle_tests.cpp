@@ -77,6 +77,11 @@ BOOST_AUTO_TEST_CASE(a_cycle_measures_graduates_adopts_and_pays)
     BOOST_CHECK(!cycle.Experience("gen-1", "private_prompt", err));
     BOOST_CHECK_EQUAL(err, "PRIVATE_DATA");
     BOOST_REQUIRE(cycle.Experience("gen-1", "public_trajectory", err));
+    BOOST_CHECK(!cycle.Measure("gen-1", false, true, 10, err));
+    BOOST_CHECK_EQUAL(err, "TRAIN");
+    BOOST_REQUIRE(cycle.TrainJob("gen-1", err));
+    BOOST_CHECK_EQUAL(cycle.job_steps("gen-1"), 1U);
+    BOOST_CHECK(!cycle.job_state_hash("gen-1").empty());
     BOOST_CHECK(!cycle.Measure("gen-1", true, true, 10, err));
     BOOST_CHECK_EQUAL(err, "NOT_SCORED");
     BOOST_CHECK(!cycle.Measure("gen-1", false, false, 10, err));

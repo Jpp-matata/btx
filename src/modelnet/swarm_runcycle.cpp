@@ -7,6 +7,7 @@
 #include <modelnet/swarm_executor.h>
 #include <modelnet/swarm_frontier.h>
 #include <modelnet/swarm_paymesh.h>
+#include <modelnet/training_integer.h>
 
 namespace modelnet {
 
@@ -21,6 +22,21 @@ bool SwarmRunCycle::job_paid(const std::string& job_id) const
 {
     const auto it = m_jobs.find(job_id);
     return it != m_jobs.end() && it->second.paid;
+}
+
+uint64_t SwarmRunCycle::job_steps(const std::string& job_id) const
+{
+    const auto it = m_jobs.find(job_id);
+    if (it == m_jobs.end()) return 0;
+    return it->second.steps;
+}
+
+const std::string& SwarmRunCycle::job_state_hash(const std::string& job_id) const
+{
+    static const std::string empty;
+    const auto it = m_jobs.find(job_id);
+    if (it == m_jobs.end()) return empty;
+    return it->second.state_hash;
 }
 
 bool SwarmRunCycle::EnsureBook(std::string& err)
@@ -93,11 +109,35 @@ bool SwarmRunCycle::Experience(const std::string& job_id, const std::string& kin
     return true;
 }
 
-bool SwarmRunCycle::Measure(const std::string& job_id, bool author_is_evaluator, bool independent, int64_t score_ppm, std::string& err)
+bool SwarmRunCycle::TrainJob(const std::string& job_id, std::string& err)
 {
     Job* job = Find(job_id);
     if (job == nullptr || !job->experienced) {
         err = "EXPERIENCE";
+        return false;
+    }
+    if (IntegerDataset().size() != 8) {
+        err = "PAIRS";
+        return false;
+    }
+    IntegerTrainer trainer;
+    if (!trainer.Step(err)) return false;
+    if (trainer.State().step != 1 || trainer.State().state_hash.empty()) {
+        err = "STEP";
+        return false;
+    }
+    if (!trainer.ReplayMatches(trainer.State(), err)) return false;
+    job->steps = trainer.State().step;
+    job->state_hash = trainer.State().state_hash;
+    job->trained = true;
+    return true;
+}
+
+bool SwarmRunCycle::Measure(const std::string& job_id, bool author_is_evaluator, bool independent, int64_t score_ppm, std::string& err)
+{
+    Job* job = Find(job_id);
+    if (job == nullptr || !job->trained) {
+        err = "TRAIN";
         return false;
     }
     if (author_is_evaluator) {

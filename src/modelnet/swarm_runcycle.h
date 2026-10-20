@@ -26,6 +26,8 @@ public:
     bool Form(const std::string& node_id, bool modelnet_on, std::string& err);
     bool Admit(const std::string& job_id, int64_t threads, int64_t memory_mib, bool sandbox_present, std::string& err);
     bool Experience(const std::string& job_id, const std::string& kind, std::string& err);
+    /** One INTEGER_LINEAR step. The state hash is not a quality score and not a GPU result. */
+    bool TrainJob(const std::string& job_id, std::string& err);
     bool Measure(const std::string& job_id, bool author_is_evaluator, bool independent, int64_t score_ppm, std::string& err);
     bool GraduateJob(const std::string& job_id, bool safety_regression, bool broad_regression, std::string& err);
     bool AdoptJob(const std::string& job_id, bool local_compatible, std::string& err);
@@ -37,11 +39,16 @@ public:
     int64_t earned_atoms() const { return m_earned; }
     const std::string& active_model() const { return m_active; }
     bool job_paid(const std::string& job_id) const;
+    uint64_t job_steps(const std::string& job_id) const;
+    const std::string& job_state_hash(const std::string& job_id) const;
 
 private:
     struct Job {
         bool admitted{false};
         bool experienced{false};
+        bool trained{false};
+        uint64_t steps{0};
+        std::string state_hash;
         bool measured{false};
         bool graduated{false};
         bool adopted{false};
