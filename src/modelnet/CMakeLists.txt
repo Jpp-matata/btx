@@ -1199,6 +1199,11 @@ add_library(bitcoin_modelnet STATIC
   swarm_cohortincl.cpp
   swarm_witnessched.cpp
   swarm_mandatearm.cpp
+  swarm_ckpttrust.cpp
+  swarm_hostinterp.cpp
+  swarm_kvpage.cpp
+  swarm_rotgate.cpp
+  swarm_sandboxfs.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp

@@ -1763,6 +1763,11 @@ if(WITH_MODELNET)
     swarm_cohortincl_tests.cpp
     swarm_witnessched_tests.cpp
     swarm_mandatearm_tests.cpp
+    swarm_ckpttrust_tests.cpp
+    swarm_hostinterp_tests.cpp
+    swarm_kvpage_tests.cpp
+    swarm_rotgate_tests.cpp
+    swarm_sandboxfs_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp
