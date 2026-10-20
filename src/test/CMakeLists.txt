@@ -1495,6 +1495,10 @@ if(WITH_MODELNET)
     swarm_notnoleakgrad2_tests.cpp
     swarm_notnodisputeout2_tests.cpp
     swarm_notnoexactmine2_tests.cpp
+    swarm_notnopassthru2_tests.cpp
+    swarm_notnocallerate2_tests.cpp
+    swarm_notnoscriptroute2_tests.cpp
+    swarm_notnostaleisland2_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
