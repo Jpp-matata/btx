@@ -276,6 +276,16 @@ add_library(bitcoin_modelnet STATIC
   swarm_flag02.cpp
   swarm_flag07.cpp
   swarm_flag11.cpp
+  swarm_fault04.cpp
+  swarm_fault20.cpp
+  swarm_flag03.cpp
+  swarm_flag05.cpp
+  swarm_flag06.cpp
+  swarm_flag08.cpp
+  swarm_flag09.cpp
+  swarm_flag10.cpp
+  swarm_flag12.cpp
+  swarm_flag13.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
