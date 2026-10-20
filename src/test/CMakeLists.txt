@@ -1852,6 +1852,10 @@ if(WITH_MODELNET)
     swarm_workpay_quote_tests.cpp
     swarm_workpay_spend_tests.cpp
     swarm_workpay_tests.cpp
+    swarm_reorghold_exit_tests.cpp
+    swarm_reorghold_open_tests.cpp
+    swarm_reorghold_refund_tests.cpp
+    swarm_reorghold_reorg_tests.cpp
     swarm_evolve_graduate_tests.cpp
     swarm_evolve_measure_tests.cpp
     swarm_evolve_recover_tests.cpp

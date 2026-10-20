@@ -1364,6 +1364,16 @@ add_library(bitcoin_modelnet STATIC
   swarm_workpay/fiat_quote.cpp
   swarm_workpay/merge.cpp
   swarm_workpay/workpay.cpp
+  swarm_reorghold/channel.cpp
+  swarm_reorghold/atoms.cpp
+  swarm_reorghold/silence.cpp
+  swarm_reorghold/book.cpp
+  swarm_reorghold/snapshot.cpp
+  swarm_reorghold/open.cpp
+  swarm_reorghold/reorg.cpp
+  swarm_reorghold/exit.cpp
+  swarm_reorghold/refund.cpp
+  swarm_reorghold/swarm_reorghold.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
