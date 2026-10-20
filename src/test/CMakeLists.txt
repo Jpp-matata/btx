@@ -755,6 +755,8 @@ if(WITH_MODELNET)
     swarm_schedkey_tests.cpp
     swarm_frozenpairs_tests.cpp
     swarm_norealmoney_tests.cpp
+    swarm_notmine_tests.cpp
+    swarm_notbenchmark_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp
