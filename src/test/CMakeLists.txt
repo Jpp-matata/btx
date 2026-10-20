@@ -1262,6 +1262,7 @@ if(WITH_MODELNET)
     swarm_notnoheads_tests.cpp
     swarm_notnohwstage_tests.cpp
     swarm_notnokeymap_tests.cpp
+    swarm_notnoexplore2_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
