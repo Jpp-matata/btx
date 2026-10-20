@@ -1379,6 +1379,10 @@ if(WITH_MODELNET)
     swarm_notnospendkey2_tests.cpp
     swarm_notnofirstedge2_tests.cpp
     swarm_notno51vote2_tests.cpp
+    swarm_notnoinclude2_tests.cpp
+    swarm_notnomodelnet2_tests.cpp
+    swarm_notnofallback2_tests.cpp
+    swarm_notnospend02_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
