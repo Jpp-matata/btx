@@ -1218,6 +1218,9 @@ if(WITH_MODELNET)
     swarm_notnofsdprun_tests.cpp
     swarm_notnomultihop2_tests.cpp
     swarm_notnoshard_tests.cpp
+    swarm_notnoliveinj_tests.cpp
+    swarm_notnooutpoint_tests.cpp
+    swarm_notnogradsync_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
