@@ -190,6 +190,7 @@ add_library(bitcoin_modelnet STATIC
   swarm_nobroadcast.cpp
   swarm_schedkey.cpp
   swarm_frozenpairs.cpp
+  swarm_norealmoney.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
