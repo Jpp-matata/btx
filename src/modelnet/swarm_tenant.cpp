@@ -27,4 +27,14 @@ bool SwarmRotateKeyEpoch(bool shared_realm_key, bool& rotated, std::string& err)
     return false;
 }
 
+bool SwarmOpenPublicRendezvous(bool want_socket, std::string& err)
+{
+    if (want_socket) {
+        err = "NO_SOCKET";
+        return false;
+    }
+    err.clear();
+    return true;
+}
+
 } // namespace modelnet
