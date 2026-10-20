@@ -668,6 +668,8 @@ if(WITH_MODELNET)
     swarm_refundhold_tests.cpp
     swarm_ownergone_tests.cpp
     swarm_promohalt_tests.cpp
+    swarm_partial_tests.cpp
+    swarm_canaryhold_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp
