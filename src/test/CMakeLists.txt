@@ -1678,6 +1678,7 @@ if(WITH_MODELNET)
     swarm_lmcacheops_tests.cpp
     swarm_kvbench_tests.cpp
     swarm_fsdpheld_tests.cpp
+    swarm_mixedprec_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
