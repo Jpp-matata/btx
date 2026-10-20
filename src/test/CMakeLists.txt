@@ -799,6 +799,12 @@ if(WITH_MODELNET)
     swarm_notdup_tests.cpp
     swarm_notlease_tests.cpp
     swarm_notworker_tests.cpp
+    swarm_notstale_tests.cpp
+    swarm_notquorum_tests.cpp
+    swarm_notcollateral_tests.cpp
+    swarm_notrefundlive_tests.cpp
+    swarm_notrevoke_tests.cpp
+    swarm_notpaycrash_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp
