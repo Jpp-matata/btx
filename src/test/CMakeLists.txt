@@ -1879,6 +1879,13 @@ if(WITH_MODELNET)
     swarm_watchhold_quiet_tests.cpp
     swarm_watchhold_refund_tests.cpp
     swarm_watchhold_release_tests.cpp
+    swarm_familyadmit_admit_tests.cpp
+    swarm_familyadmit_compat_tests.cpp
+    swarm_familyadmit_link_tests.cpp
+    swarm_familyadmit_replay_tests.cpp
+    swarm_familyadmit_seed_tests.cpp
+    swarm_hashlock_claim_tests.cpp
+    swarm_hashlock_offer_tests.cpp
     swarm_evolve_graduate_tests.cpp
     swarm_evolve_measure_tests.cpp
     swarm_evolve_recover_tests.cpp

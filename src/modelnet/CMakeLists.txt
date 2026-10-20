@@ -1420,6 +1420,25 @@ add_library(bitcoin_modelnet STATIC
   swarm_watchhold/release.cpp
   swarm_watchhold/refund.cpp
   swarm_watchhold/swarm_watchhold.cpp
+  swarm_familyadmit/record.cpp
+  swarm_familyadmit/blank.cpp
+  swarm_familyadmit/match.cpp
+  swarm_familyadmit/compat.cpp
+  swarm_familyadmit/roster.cpp
+  swarm_familyadmit/replay.cpp
+  swarm_familyadmit/gate.cpp
+  swarm_familyadmit/admit.cpp
+  swarm_familyadmit/discover.cpp
+  swarm_familyadmit/link.cpp
+  swarm_familyadmit/seeds.cpp
+  swarm_familyadmit/quiet.cpp
+  swarm_familyadmit/swarm_familyadmit.cpp
+  swarm_hashlock/bind.cpp
+  swarm_hashlock/claim.cpp
+  swarm_hashlock/digest.cpp
+  swarm_hashlock/hashlock.cpp
+  swarm_hashlock/offer.cpp
+  swarm_hashlock/policy.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
