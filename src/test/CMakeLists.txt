@@ -850,6 +850,12 @@ if(WITH_MODELNET)
     swarm_flag10_tests.cpp
     swarm_flag12_tests.cpp
     swarm_flag13_tests.cpp
+    swarm_notp50_tests.cpp
+    swarm_notgpuhours_tests.cpp
+    swarm_notroute_tests.cpp
+    swarm_notthroughput_tests.cpp
+    swarm_notbaseline_tests.cpp
+    swarm_notfailover_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp
