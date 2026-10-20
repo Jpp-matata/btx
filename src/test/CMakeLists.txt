@@ -1024,6 +1024,9 @@ if(WITH_MODELNET)
     swarm_notnounfund_tests.cpp
     swarm_notnosecp_tests.cpp
     swarm_notnoprofit_tests.cpp
+    swarm_notnoavgfork_tests.cpp
+    swarm_notnovote_tests.cpp
+    swarm_notnosame_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
