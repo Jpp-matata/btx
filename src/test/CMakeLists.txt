@@ -2012,6 +2012,10 @@ if(WITH_MODELNET)
     swarm_minehold_blocks_tests.cpp
     swarm_minehold_empty_tests.cpp
     swarm_minehold_replay_tests.cpp
+    swarm_fsdphold_bytes_tests.cpp
+    swarm_fsdphold_empty_tests.cpp
+    swarm_fsdphold_replay_tests.cpp
+    swarm_fsdphold_request_tests.cpp
     swarm_minehold_request_tests.cpp
     swarm_ckptsave_request_tests.cpp
     swarm_mixedhold_request_tests.cpp
