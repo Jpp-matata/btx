@@ -990,6 +990,9 @@ if(WITH_MODELNET)
     swarm_notnosess_tests.cpp
     swarm_notnockpt_tests.cpp
     swarm_notoneproc_tests.cpp
+    swarm_notcudaops_tests.cpp
+    swarm_notnordma_tests.cpp
+    swarm_notmoonabs_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
