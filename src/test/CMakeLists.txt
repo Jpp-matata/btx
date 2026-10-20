@@ -1636,6 +1636,8 @@ if(WITH_MODELNET)
     swarm_nichesep_tests.cpp
     swarm_openlic_tests.cpp
     swarm_currencykeep_tests.cpp
+    swarm_profitshare_tests.cpp
+    swarm_hostnote_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
