@@ -810,6 +810,7 @@ if(WITH_MODELNET)
     swarm_notgone_tests.cpp
     swarm_notowner_tests.cpp
     swarm_notsurvivor_tests.cpp
+    swarm_notpartial_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp
