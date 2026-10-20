@@ -1667,6 +1667,8 @@ if(WITH_MODELNET)
     swarm_selfsign_tests.cpp
     swarm_l2one_tests.cpp
     swarm_exactstall_tests.cpp
+    swarm_passthru_tests.cpp
+    swarm_windowslife_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
