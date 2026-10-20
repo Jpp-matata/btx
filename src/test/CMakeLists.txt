@@ -775,6 +775,8 @@ if(WITH_MODELNET)
     swarm_notttft_tests.cpp
     swarm_notmooncake_tests.cpp
     swarm_notcachehit_tests.cpp
+    swarm_notbytes_tests.cpp
+    swarm_nottwonode_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp
