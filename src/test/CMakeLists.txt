@@ -1170,6 +1170,7 @@ if(WITH_MODELNET)
     swarm_notnoadvert_tests.cpp
     swarm_notnochild_tests.cpp
     swarm_notnoactivate_tests.cpp
+    swarm_notnoassurance_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
