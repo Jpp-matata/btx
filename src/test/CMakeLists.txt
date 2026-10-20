@@ -1753,6 +1753,8 @@ if(WITH_MODELNET)
     swarm_watchseq_tests.cpp
     swarm_piecejoin_tests.cpp
     swarm_anchorbind_tests.cpp
+    swarm_canaryroll_tests.cpp
+    swarm_datasetgate_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp
