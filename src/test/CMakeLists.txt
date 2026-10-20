@@ -1288,6 +1288,12 @@ if(WITH_MODELNET)
     swarm_notnosignerkey_tests.cpp
     swarm_notnohostname_tests.cpp
     swarm_notnoextra_tests.cpp
+    swarm_notnounfunded_tests.cpp
+    swarm_notnogovzero_tests.cpp
+    swarm_notnohashroute_tests.cpp
+    swarm_notnojoinon_tests.cpp
+    swarm_notnopoolmany_tests.cpp
+    swarm_notnogovbat_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
