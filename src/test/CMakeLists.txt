@@ -717,6 +717,8 @@ if(WITH_MODELNET)
     swarm_piece32_tests.cpp
     swarm_fwdfee_tests.cpp
     swarm_dnsempty_tests.cpp
+    swarm_voucher_tests.cpp
+    swarm_manifestcap_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp
