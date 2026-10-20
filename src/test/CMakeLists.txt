@@ -660,6 +660,8 @@ if(WITH_MODELNET)
     swarm_tokfp_tests.cpp
     swarm_reward_tests.cpp
     swarm_fsjail_tests.cpp
+    swarm_catalogevt_tests.cpp
+    swarm_enckv_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp

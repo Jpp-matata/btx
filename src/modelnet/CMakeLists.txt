@@ -96,6 +96,8 @@ add_library(bitcoin_modelnet STATIC
   swarm_tokfp.cpp
   swarm_reward.cpp
   swarm_fsjail.cpp
+  swarm_catalogevt.cpp
+  swarm_enckv.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
