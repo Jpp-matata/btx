@@ -1190,6 +1190,9 @@ if(WITH_MODELNET)
     swarm_notnogpucrash_tests.cpp
     swarm_notnofalsecompat_tests.cpp
     swarm_notnorevcache_tests.cpp
+    swarm_notnoidremap_tests.cpp
+    swarm_notnopoison_tests.cpp
+    swarm_notnoreorg2_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
