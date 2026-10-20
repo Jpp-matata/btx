@@ -76,6 +76,7 @@ add_library(bitcoin_modelnet STATIC
   swarm_scaleexec.cpp
   swarm_meter.cpp
   swarm_trajectory.cpp
+  swarm_agentproto.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
