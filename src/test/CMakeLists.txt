@@ -876,6 +876,7 @@ if(WITH_MODELNET)
     swarm_notablation_tests.cpp
     swarm_notframework_tests.cpp
     swarm_notplaceoff_tests.cpp
+    swarm_notisland_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp
