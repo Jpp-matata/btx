@@ -733,6 +733,7 @@ if(WITH_MODELNET)
     swarm_vram_tests.cpp
     swarm_cpueval_tests.cpp
     swarm_kvshare_tests.cpp
+    swarm_fallback_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp
