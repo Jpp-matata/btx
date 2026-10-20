@@ -940,6 +940,9 @@ if(WITH_MODELNET)
     swarm_notneighborhood_tests.cpp
     swarm_notunfunded_tests.cpp
     swarm_notkvpage_tests.cpp
+    swarm_notsameatoms_tests.cpp
+    swarm_notmesh_tests.cpp
+    swarm_notresearchkey_tests.cpp
     swarm_notmandate_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
