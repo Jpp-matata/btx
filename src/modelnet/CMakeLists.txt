@@ -400,6 +400,10 @@ add_library(bitcoin_modelnet STATIC
   swarm_notjoinon.cpp
   swarm_notmodelon.cpp
   swarm_notrefundfirst.cpp
+  swarm_notvramzero.cpp
+  swarm_notslots.cpp
+  swarm_notprivateoff.cpp
+  swarm_notclosetmpl.cpp
   swarm_notmandate.cpp
   free_grant.cpp
   router.cpp

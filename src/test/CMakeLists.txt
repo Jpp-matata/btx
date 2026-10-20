@@ -964,6 +964,10 @@ if(WITH_MODELNET)
     swarm_notjoinon_tests.cpp
     swarm_notmodelon_tests.cpp
     swarm_notrefundfirst_tests.cpp
+    swarm_notvramzero_tests.cpp
+    swarm_notslots_tests.cpp
+    swarm_notprivateoff_tests.cpp
+    swarm_notclosetmpl_tests.cpp
     swarm_notmandate_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
