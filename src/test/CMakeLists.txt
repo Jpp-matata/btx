@@ -1594,6 +1594,7 @@ if(WITH_MODELNET)
     swarm_winbook_tests.cpp
     swarm_canarygate_tests.cpp
     swarm_natrec_tests.cpp
+    swarm_rolladmit_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
