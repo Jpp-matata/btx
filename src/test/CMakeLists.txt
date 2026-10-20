@@ -1720,6 +1720,8 @@ if(WITH_MODELNET)
     swarm_rewardloop_tests.cpp
     swarm_evalengine_tests.cpp
     swarm_islandopt_tests.cpp
+    swarm_leasefence_tests.cpp
+    swarm_lineage_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp
