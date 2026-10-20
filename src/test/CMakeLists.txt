@@ -833,6 +833,13 @@ if(WITH_MODELNET)
     swarm_fault18_tests.cpp
     swarm_fault19_tests.cpp
     swarm_flag04_tests.cpp
+    swarm_fault08_tests.cpp
+    swarm_fault12_tests.cpp
+    swarm_fault13_tests.cpp
+    swarm_flag01_tests.cpp
+    swarm_flag02_tests.cpp
+    swarm_flag07_tests.cpp
+    swarm_flag11_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp
