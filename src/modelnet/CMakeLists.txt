@@ -379,6 +379,7 @@ add_library(bitcoin_modelnet STATIC
   swarm_notsameatoms.cpp
   swarm_notmesh.cpp
   swarm_notresearchkey.cpp
+  swarm_notfourbal.cpp
   swarm_notmandate.cpp
   free_grant.cpp
   router.cpp
