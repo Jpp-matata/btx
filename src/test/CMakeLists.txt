@@ -1068,6 +1068,11 @@ if(WITH_MODELNET)
     swarm_notnotail_tests.cpp
     swarm_notnoplace_tests.cpp
     swarm_notnoframe_tests.cpp
+    swarm_notnobase_tests.cpp
+    swarm_notnocache_tests.cpp
+    swarm_notnokwh_tests.cpp
+    swarm_notnolearn_tests.cpp
+    swarm_notnomed_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
