@@ -1158,6 +1158,7 @@ if(WITH_MODELNET)
     swarm_notnopreimage_tests.cpp
     swarm_notnoclaimkey_tests.cpp
     swarm_notnopinpub_tests.cpp
+    swarm_notnovalid_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
