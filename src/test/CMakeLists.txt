@@ -1785,6 +1785,16 @@ if(WITH_MODELNET)
     swarm_agents_shared_tests.cpp
     swarm_agents_trace_tests.cpp
     swarm_traincohort_tests.cpp
+    swarm_form_directory_tests.cpp
+    swarm_form_discovery_tests.cpp
+    swarm_form_election_tests.cpp
+    swarm_form_limits_tests.cpp
+    swarm_form_membership_tests.cpp
+    swarm_form_plane_tests.cpp
+    swarm_infer_bind_tests.cpp
+    swarm_infer_publish_tests.cpp
+    swarm_infer_session_tests.cpp
+    swarm_infer_text_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp

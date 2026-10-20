@@ -1231,6 +1231,20 @@ add_library(bitcoin_modelnet STATIC
   swarm_traincohort/member.cpp
   swarm_traincohort/remote.cpp
   swarm_traincohort/step.cpp
+  swarm_form/atomic.cpp
+  swarm_form/codec.cpp
+  swarm_form/directory.cpp
+  swarm_form/discovery.cpp
+  swarm_form/election.cpp
+  swarm_form/limits.cpp
+  swarm_form/membership.cpp
+  swarm_form/plane.cpp
+  swarm_infer/engine_bind.cpp
+  swarm_infer/metrics.cpp
+  swarm_infer/publish.cpp
+  swarm_infer/runtime.cpp
+  swarm_infer/session.cpp
+  swarm_infer/text_slot.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp

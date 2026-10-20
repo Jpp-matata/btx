@@ -2,6 +2,7 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or https://opensource.org/license/mit/.
 
+#include <modelnet/swarm_form/plane.h>
 #include <modelnet/swarm_lifecycle.h>
 #include <modelnet/swarm_live.h>
 #include <modelnet/swarm_node.h>
@@ -284,6 +285,10 @@ void StartSwarmObserver(const fs::path& modeldir)
                     std::string join_err;
                     if (!SwarmIntegrateCatalog(modeldir, join_err)) {
                         LogPrintf("swarm join: %s (monetary node continues)\n", join_err);
+                    }
+                    std::string form_err;
+                    if (!SwarmFormPlane(modeldir, form_err)) {
+                        LogPrintf("swarm form: %s (monetary node continues)\n", form_err);
                     }
                     std::string live_err;
                     if (!SwarmPublishLive(modeldir, live_err)) {
