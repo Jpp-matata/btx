@@ -1118,6 +1118,7 @@ add_library(bitcoin_modelnet STATIC
   swarm_shardheld.cpp
   swarm_ckptsave.cpp
   swarm_gradsync.cpp
+  swarm_ablation.cpp
   swarm_notslots.cpp
   swarm_notprivateoff.cpp
   swarm_notclosetmpl.cpp
