@@ -1125,6 +1125,9 @@ add_library(bitcoin_modelnet STATIC
   swarm_familydir.cpp
   swarm_learnerheld.cpp
   swarm_natpub.cpp
+  swarm_rpcpage.cpp
+  swarm_wanupdate.cpp
+  swarm_staleisland.cpp
   swarm_notslots.cpp
   swarm_notprivateoff.cpp
   swarm_notclosetmpl.cpp
