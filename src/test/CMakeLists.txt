@@ -1997,6 +1997,10 @@ if(WITH_MODELNET)
     swarm_synchold_empty_tests.cpp
     swarm_synchold_replay_tests.cpp
     swarm_synchold_request_tests.cpp
+    swarm_ablatehold_bytes_tests.cpp
+    swarm_ablatehold_empty_tests.cpp
+    swarm_ablatehold_replay_tests.cpp
+    swarm_ablatehold_request_tests.cpp
     swarm_ckptsave_request_tests.cpp
     swarm_mixedhold_request_tests.cpp
     swarm_evolve_graduate_tests.cpp
