@@ -1527,6 +1527,8 @@ if(WITH_MODELNET)
     swarm_notnosideexec2_tests.cpp
     swarm_notnoresearchkey2_tests.cpp
     swarm_notno51hide2_tests.cpp
+    swarm_notnosolvable2_tests.cpp
+    swarm_notnounfundad2_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
