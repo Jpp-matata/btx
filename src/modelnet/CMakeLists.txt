@@ -1192,6 +1192,7 @@ add_library(bitcoin_modelnet STATIC
   swarm_canaryroll.cpp
   swarm_datasetgate.cpp
   swarm_staleupdate.cpp
+  swarm_debitcap.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
