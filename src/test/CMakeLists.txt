@@ -1979,6 +1979,14 @@ if(WITH_MODELNET)
     swarm_wearhold_measure_tests.cpp
     swarm_wearhold_quiet_tests.cpp
     swarm_wearhold_replay_tests.cpp
+    swarm_shardhold_bytes_tests.cpp
+    swarm_shardhold_empty_tests.cpp
+    swarm_shardhold_replay_tests.cpp
+    swarm_shardhold_request_tests.cpp
+    swarm_natpub_bytes_tests.cpp
+    swarm_natpub_claim_tests.cpp
+    swarm_natpub_empty_tests.cpp
+    swarm_natpub_replay_tests.cpp
     swarm_evolve_graduate_tests.cpp
     swarm_evolve_measure_tests.cpp
     swarm_evolve_recover_tests.cpp

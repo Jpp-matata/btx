@@ -1662,6 +1662,32 @@ add_library(bitcoin_modelnet STATIC
   swarm_wearhold/atoms.cpp
   swarm_wearhold/quiet.cpp
   swarm_wearhold/swarm_wearhold.cpp
+  swarm_shardhold/blank.cpp
+  swarm_shardhold/name.cpp
+  swarm_shardhold/record.cpp
+  swarm_shardhold/book.cpp
+  swarm_shardhold/replay.cpp
+  swarm_shardhold/gate.cpp
+  swarm_shardhold/stay.cpp
+  swarm_shardhold/request.cpp
+  swarm_shardhold/keep.cpp
+  swarm_shardhold/quiet.cpp
+  swarm_shardhold/swarm_shardhold.cpp
+  swarm_natpub/blank.cpp
+  swarm_natpub/name.cpp
+  swarm_natpub/record.cpp
+  swarm_natpub/book.cpp
+  swarm_natpub/replay.cpp
+  swarm_natpub/gate.cpp
+  swarm_natpub/hold.cpp
+  swarm_natpub/shelf.cpp
+  swarm_natpub/claim.cpp
+  swarm_natpub/keep.cpp
+  swarm_natpub/discover.cpp
+  swarm_natpub/link.cpp
+  swarm_natpub/seeds.cpp
+  swarm_natpub/quiet.cpp
+  swarm_natpub/swarm_natpub.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
