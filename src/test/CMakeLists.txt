@@ -1146,6 +1146,7 @@ if(WITH_MODELNET)
     swarm_notnoholdout_tests.cpp
     swarm_notnoreplayadm_tests.cpp
     swarm_notnobalance_tests.cpp
+    swarm_notnoseedoff_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
