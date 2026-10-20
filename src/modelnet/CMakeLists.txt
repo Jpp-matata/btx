@@ -976,6 +976,10 @@ add_library(bitcoin_modelnet STATIC
   swarm_notnoautospent2.cpp
   swarm_notnointeger82.cpp
   swarm_notnomodelneton2.cpp
+  swarm_notnobatterydrain2.cpp
+  swarm_notnothermdrain2.cpp
+  swarm_notnometerdrain2.cpp
+  swarm_notnofallconn2.cpp
   swarm_notslots.cpp
   swarm_notprivateoff.cpp
   swarm_notclosetmpl.cpp

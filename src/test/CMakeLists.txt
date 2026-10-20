@@ -1540,6 +1540,10 @@ if(WITH_MODELNET)
     swarm_notnoautospent2_tests.cpp
     swarm_notnointeger82_tests.cpp
     swarm_notnomodelneton2_tests.cpp
+    swarm_notnobatterydrain2_tests.cpp
+    swarm_notnothermdrain2_tests.cpp
+    swarm_notnometerdrain2_tests.cpp
+    swarm_notnofallconn2_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
