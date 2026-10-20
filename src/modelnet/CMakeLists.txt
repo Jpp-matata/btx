@@ -353,6 +353,8 @@ add_library(bitcoin_modelnet STATIC
   swarm_notrealmoney.cpp
   swarm_notrotate.cpp
   swarm_notselfeval.cpp
+  swarm_notsecp.cpp
+  swarm_notagreement.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp

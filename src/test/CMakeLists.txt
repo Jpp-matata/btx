@@ -917,6 +917,8 @@ if(WITH_MODELNET)
     swarm_notrealmoney_tests.cpp
     swarm_notrotate_tests.cpp
     swarm_notselfeval_tests.cpp
+    swarm_notsecp_tests.cpp
+    swarm_notagreement_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp
