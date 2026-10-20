@@ -1703,6 +1703,7 @@ if(WITH_MODELNET)
     swarm_ckptonly_tests.cpp
     swarm_holdrot_tests.cpp
     swarm_engineflag_tests.cpp
+    swarm_fallconn_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
