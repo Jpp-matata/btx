@@ -856,6 +856,9 @@ if(WITH_MODELNET)
     swarm_notthroughput_tests.cpp
     swarm_notbaseline_tests.cpp
     swarm_notfailover_tests.cpp
+    swarm_notckpttime_tests.cpp
+    swarm_notuseful_tests.cpp
+    swarm_notplacement_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp

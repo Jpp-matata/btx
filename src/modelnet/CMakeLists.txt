@@ -292,6 +292,9 @@ add_library(bitcoin_modelnet STATIC
   swarm_notthroughput.cpp
   swarm_notbaseline.cpp
   swarm_notfailover.cpp
+  swarm_notckpttime.cpp
+  swarm_notuseful.cpp
+  swarm_notplacement.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
