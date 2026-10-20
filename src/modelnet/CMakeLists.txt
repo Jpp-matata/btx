@@ -70,6 +70,7 @@ add_library(bitcoin_modelnet STATIC
   swarm_propose.cpp
   swarm_regress.cpp
   swarm_dispute.cpp
+  swarm_revokegate.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
