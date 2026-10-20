@@ -1609,6 +1609,7 @@ if(WITH_MODELNET)
     swarm_neighbor_tests.cpp
     swarm_paytemplate_tests.cpp
     swarm_refundbind_tests.cpp
+    swarm_watchstate_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
