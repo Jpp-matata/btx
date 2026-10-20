@@ -91,6 +91,7 @@ add_library(bitcoin_modelnet STATIC
   swarm_opportunity.cpp
   swarm_distill.cpp
   swarm_lora.cpp
+  swarm_routecheck.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
