@@ -193,6 +193,7 @@ add_library(bitcoin_modelnet STATIC
   swarm_norealmoney.cpp
   swarm_notmine.cpp
   swarm_notbenchmark.cpp
+  swarm_safetyblock.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
