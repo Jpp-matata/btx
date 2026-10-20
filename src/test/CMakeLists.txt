@@ -1042,6 +1042,12 @@ if(WITH_MODELNET)
     swarm_notnorevoke_tests.cpp
     swarm_notnoablate_tests.cpp
     swarm_notnohold_tests.cpp
+    swarm_notnorotate_tests.cpp
+    swarm_notnoexec_tests.cpp
+    swarm_notnoclear_tests.cpp
+    swarm_notnosub_tests.cpp
+    swarm_notnoowner_tests.cpp
+    swarm_notnocrash_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
