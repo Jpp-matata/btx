@@ -1364,6 +1364,7 @@ if(WITH_MODELNET)
     swarm_notnowrongtype2_tests.cpp
     swarm_notno90blk2_tests.cpp
     swarm_notnofiat2_tests.cpp
+    swarm_notnoleak2_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
