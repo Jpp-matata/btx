@@ -988,6 +988,8 @@ if(WITH_MODELNET)
     swarm_notnoseal_tests.cpp
     swarm_notstall_tests.cpp
     swarm_notnosess_tests.cpp
+    swarm_notnockpt_tests.cpp
+    swarm_notoneproc_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
