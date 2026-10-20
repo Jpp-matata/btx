@@ -1802,6 +1802,7 @@ if(WITH_MODELNET)
     swarm_paystage_quote_tests.cpp
     swarm_paystage_spend_tests.cpp
     swarm_paystage_tests.cpp
+    swarm_faultseq_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp

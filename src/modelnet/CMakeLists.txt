@@ -1254,6 +1254,15 @@ add_library(bitcoin_modelnet STATIC
   swarm_paystage/profit_split.cpp
   swarm_paystage/invoice_path.cpp
   swarm_paystage/paystage.cpp
+  swarm_faultseq/hold.cpp
+  swarm_faultseq/cursor.cpp
+  swarm_faultseq/refusal.cpp
+  swarm_faultseq/arm.cpp
+  swarm_faultseq/record.cpp
+  swarm_faultseq/apply.cpp
+  swarm_faultseq/continue_work.cpp
+  swarm_faultseq/restart.cpp
+  swarm_faultseq/swarm_faultseq.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
