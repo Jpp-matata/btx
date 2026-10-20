@@ -811,6 +811,16 @@ if(WITH_MODELNET)
     swarm_notowner_tests.cpp
     swarm_notsurvivor_tests.cpp
     swarm_notpartial_tests.cpp
+    swarm_fault01_tests.cpp
+    swarm_fault02_tests.cpp
+    swarm_fault10_tests.cpp
+    swarm_fault11_tests.cpp
+    swarm_notraft_tests.cpp
+    swarm_notmtls_tests.cpp
+    swarm_notaes_tests.cpp
+    swarm_notwitness_tests.cpp
+    swarm_notguest_tests.cpp
+    swarm_notfalsecompat_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp
