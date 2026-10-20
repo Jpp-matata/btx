@@ -805,6 +805,7 @@ if(WITH_MODELNET)
     swarm_notrefundlive_tests.cpp
     swarm_notrevoke_tests.cpp
     swarm_notpaycrash_tests.cpp
+    swarm_notdataset_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp
