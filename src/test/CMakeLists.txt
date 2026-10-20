@@ -2009,6 +2009,10 @@ if(WITH_MODELNET)
     swarm_guesthold_check_tests.cpp
     swarm_guesthold_empty_tests.cpp
     swarm_guesthold_replay_tests.cpp
+    swarm_minehold_blocks_tests.cpp
+    swarm_minehold_empty_tests.cpp
+    swarm_minehold_replay_tests.cpp
+    swarm_minehold_request_tests.cpp
     swarm_ckptsave_request_tests.cpp
     swarm_mixedhold_request_tests.cpp
     swarm_evolve_graduate_tests.cpp

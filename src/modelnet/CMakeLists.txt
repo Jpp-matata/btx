@@ -1754,6 +1754,18 @@ add_library(bitcoin_modelnet STATIC
   swarm_guesthold/keep.cpp
   swarm_guesthold/quiet.cpp
   swarm_guesthold/swarm_guesthold.cpp
+  swarm_minehold/blank.cpp
+  swarm_minehold/name.cpp
+  swarm_minehold/record.cpp
+  swarm_minehold/book.cpp
+  swarm_minehold/replay.cpp
+  swarm_minehold/gate.cpp
+  swarm_minehold/stay.cpp
+  swarm_minehold/mine.cpp
+  swarm_minehold/request.cpp
+  swarm_minehold/keep.cpp
+  swarm_minehold/quiet.cpp
+  swarm_minehold/swarm_minehold.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
