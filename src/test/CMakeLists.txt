@@ -1806,6 +1806,7 @@ if(WITH_MODELNET)
     swarm_evolve_adopt_tests.cpp
     swarm_evolve_continue_tests.cpp
     swarm_evolve_experience_tests.cpp
+    swarm_evolve_generation_tests.cpp
     swarm_evolve_graduate_tests.cpp
     swarm_evolve_measure_tests.cpp
     swarm_evolve_recover_tests.cpp
