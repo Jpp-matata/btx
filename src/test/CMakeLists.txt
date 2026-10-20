@@ -1730,6 +1730,9 @@ if(WITH_MODELNET)
     swarm_trace_tests.cpp
     swarm_jobcancel_tests.cpp
     swarm_leaderepoch_tests.cpp
+    swarm_resultcache_tests.cpp
+    swarm_resultshare_tests.cpp
+    swarm_rollback_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp
