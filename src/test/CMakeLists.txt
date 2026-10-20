@@ -1413,6 +1413,8 @@ if(WITH_MODELNET)
     swarm_notnoisland2_tests.cpp
     swarm_notnodispute2_tests.cpp
     swarm_notnoleakpage2_tests.cpp
+    swarm_notnostale2_tests.cpp
+    swarm_notnoglobalckpt2_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
