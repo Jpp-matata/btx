@@ -1332,6 +1332,8 @@ if(WITH_MODELNET)
     swarm_notnooutpoint2_tests.cpp
     swarm_notnoshard2_tests.cpp
     swarm_notnogradsync2_tests.cpp
+    swarm_notnop502_tests.cpp
+    swarm_notnoqual2_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
