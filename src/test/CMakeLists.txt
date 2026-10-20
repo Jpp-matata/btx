@@ -1860,6 +1860,15 @@ if(WITH_MODELNET)
     swarm_nicheslots_open_tests.cpp
     swarm_nicheslots_quiet_tests.cpp
     swarm_nicheslots_spend_tests.cpp
+    swarm_collatbook_merge_tests.cpp
+    swarm_collatbook_reserve_tests.cpp
+    swarm_collatbook_same_tests.cpp
+    swarm_collatbook_tests.cpp
+    swarm_leasework_claim_tests.cpp
+    swarm_leasework_commit_tests.cpp
+    swarm_leasework_epoch_tests.cpp
+    swarm_leasework_expiry_tests.cpp
+    swarm_leasework_grant_tests.cpp
     swarm_evolve_graduate_tests.cpp
     swarm_evolve_measure_tests.cpp
     swarm_evolve_recover_tests.cpp

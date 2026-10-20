@@ -1381,6 +1381,24 @@ add_library(bitcoin_modelnet STATIC
   swarm_nicheslots/move.cpp
   swarm_nicheslots/quiet.cpp
   swarm_nicheslots/nicheslots.cpp
+  swarm_collatbook/bucket.cpp
+  swarm_collatbook/table.cpp
+  swarm_collatbook/same.cpp
+  swarm_collatbook/merge.cpp
+  swarm_collatbook/quiet.cpp
+  swarm_collatbook/collatbook.cpp
+  swarm_leasework/record.cpp
+  swarm_leasework/expiry.cpp
+  swarm_leasework/epoch.cpp
+  swarm_leasework/leader.cpp
+  swarm_leasework/book.cpp
+  swarm_leasework/silence.cpp
+  swarm_leasework/hash.cpp
+  swarm_leasework/grant.cpp
+  swarm_leasework/claim.cpp
+  swarm_leasework/commit.cpp
+  swarm_leasework/bump.cpp
+  swarm_leasework/swarm_leasework.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
