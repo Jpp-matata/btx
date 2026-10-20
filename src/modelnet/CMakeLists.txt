@@ -1283,6 +1283,21 @@ add_library(bitcoin_modelnet STATIC
   swarm_scriptmesh/refund.cpp
   swarm_scriptmesh/replay.cpp
   swarm_scriptmesh/scriptmesh.cpp
+  swarm_descendants/niche.cpp
+  swarm_descendants/book.cpp
+  swarm_descendants/average.cpp
+  swarm_descendants/score.cpp
+  swarm_descendants/integer_bound.cpp
+  swarm_descendants/realm.cpp
+  swarm_descendants/descendants.cpp
+  swarm_remedy/hold.cpp
+  swarm_remedy/open.cpp
+  swarm_remedy/supersede.cpp
+  swarm_remedy/book.cpp
+  swarm_remedy/members.cpp
+  swarm_remedy/leaf.cpp
+  swarm_remedy/watch.cpp
+  swarm_remedy/remedy.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp

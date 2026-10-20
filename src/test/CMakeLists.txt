@@ -1811,6 +1811,13 @@ if(WITH_MODELNET)
     swarm_scriptmesh_admit_tests.cpp
     swarm_scriptmesh_build_tests.cpp
     swarm_scriptmesh_refund_tests.cpp
+    swarm_descendants_tests.cpp
+    swarm_remedy_hold_tests.cpp
+    swarm_remedy_open_tests.cpp
+    swarm_remedy_read_tests.cpp
+    swarm_remedy_script_tests.cpp
+    swarm_remedy_supersede_tests.cpp
+    swarm_remedy_watch_tests.cpp
     swarm_evolve_graduate_tests.cpp
     swarm_evolve_measure_tests.cpp
     swarm_evolve_recover_tests.cpp
