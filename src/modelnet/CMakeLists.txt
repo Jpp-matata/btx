@@ -1651,6 +1651,17 @@ add_library(bitcoin_modelnet STATIC
   swarm_disputestay/settle.cpp
   swarm_disputestay/quiet.cpp
   swarm_disputestay/swarm_disputestay.cpp
+  swarm_wearhold/joule.cpp
+  swarm_wearhold/under.cpp
+  swarm_wearhold/record.cpp
+  swarm_wearhold/book.cpp
+  swarm_wearhold/replay.cpp
+  swarm_wearhold/gate.cpp
+  swarm_wearhold/meter.cpp
+  swarm_wearhold/charge.cpp
+  swarm_wearhold/atoms.cpp
+  swarm_wearhold/quiet.cpp
+  swarm_wearhold/swarm_wearhold.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp

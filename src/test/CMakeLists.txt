@@ -1973,6 +1973,12 @@ if(WITH_MODELNET)
     swarm_disputestay_quiet_tests.cpp
     swarm_disputestay_replay_tests.cpp
     swarm_disputestay_settle_tests.cpp
+    swarm_wearhold_atoms_tests.cpp
+    swarm_wearhold_below_tests.cpp
+    swarm_wearhold_charge_tests.cpp
+    swarm_wearhold_measure_tests.cpp
+    swarm_wearhold_quiet_tests.cpp
+    swarm_wearhold_replay_tests.cpp
     swarm_evolve_graduate_tests.cpp
     swarm_evolve_measure_tests.cpp
     swarm_evolve_recover_tests.cpp
