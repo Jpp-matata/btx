@@ -764,6 +764,7 @@ if(WITH_MODELNET)
     swarm_assumedclose_tests.cpp
     swarm_familyonly_tests.cpp
     swarm_notfsdp_tests.cpp
+    swarm_notsglang_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp
