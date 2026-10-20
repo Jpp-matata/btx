@@ -1225,6 +1225,8 @@ if(WITH_MODELNET)
     swarm_notnostagepass_tests.cpp
     swarm_notnop95_tests.cpp
     swarm_notnoxferred_tests.cpp
+    swarm_notnohitrate_tests.cpp
+    swarm_notnoopenlic_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
