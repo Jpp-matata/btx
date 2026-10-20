@@ -1041,6 +1041,10 @@ add_library(bitcoin_modelnet STATIC
   swarm_sealkeep.cpp
   swarm_datasetgrant.cpp
   swarm_presence.cpp
+  swarm_memorycap.cpp
+  swarm_neighbor.cpp
+  swarm_paytemplate.cpp
+  swarm_refundbind.cpp
   swarm_notslots.cpp
   swarm_notprivateoff.cpp
   swarm_notclosetmpl.cpp

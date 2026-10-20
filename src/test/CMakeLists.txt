@@ -1605,6 +1605,10 @@ if(WITH_MODELNET)
     swarm_sealkeep_tests.cpp
     swarm_datasetgrant_tests.cpp
     swarm_presence_tests.cpp
+    swarm_memorycap_tests.cpp
+    swarm_neighbor_tests.cpp
+    swarm_paytemplate_tests.cpp
+    swarm_refundbind_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
