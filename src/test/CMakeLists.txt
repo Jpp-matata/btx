@@ -904,6 +904,8 @@ if(WITH_MODELNET)
     swarm_notmcp_tests.cpp
     swarm_notreport_tests.cpp
     swarm_notscripthop_tests.cpp
+    swarm_notdispute_tests.cpp
+    swarm_notlaterpage_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp
