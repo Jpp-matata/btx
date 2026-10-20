@@ -1134,6 +1134,7 @@ add_library(bitcoin_modelnet STATIC
   swarm_prefetch.cpp
   swarm_eleccost.cpp
   swarm_wearcost.cpp
+  swarm_compatfam.cpp
   swarm_notslots.cpp
   swarm_notprivateoff.cpp
   swarm_notclosetmpl.cpp
