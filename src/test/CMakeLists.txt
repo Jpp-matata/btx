@@ -1338,6 +1338,10 @@ if(WITH_MODELNET)
     swarm_notnolineage2_tests.cpp
     swarm_notnodownlic2_tests.cpp
     swarm_notnoopenlic2_tests.cpp
+    swarm_notnopiece4b_tests.cpp
+    swarm_notnowan2_tests.cpp
+    swarm_notnohitrate2_tests.cpp
+    swarm_notnottft2_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
