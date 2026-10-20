@@ -1563,6 +1563,9 @@ if(WITH_MODELNET)
     swarm_notnocoordstay2_tests.cpp
     swarm_notnotaxopen2_tests.cpp
     swarm_notnoprofitref2_tests.cpp
+    swarm_notnohfcard2_tests.cpp
+    swarm_notnorefundkey2_tests.cpp
+    swarm_notnoauthorrep2_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
