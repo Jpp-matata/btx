@@ -1671,6 +1671,8 @@ if(WITH_MODELNET)
     swarm_windowslife_tests.cpp
     swarm_loginpath_tests.cpp
     swarm_realmoney_tests.cpp
+    swarm_sglangtok_tests.cpp
+    swarm_mooncakeabs_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
