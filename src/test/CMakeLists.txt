@@ -664,6 +664,8 @@ if(WITH_MODELNET)
     swarm_enckv_tests.cpp
     swarm_receipt_tests.cpp
     swarm_unsettle_tests.cpp
+    swarm_ckptpub_tests.cpp
+    swarm_refundhold_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp
