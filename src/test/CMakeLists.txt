@@ -1108,6 +1108,7 @@ if(WITH_MODELNET)
     swarm_notnostream_tests.cpp
     swarm_notnohop_tests.cpp
     swarm_notnoagree_tests.cpp
+    swarm_notnoabsent_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
