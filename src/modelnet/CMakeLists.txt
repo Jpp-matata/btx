@@ -1464,6 +1464,17 @@ add_library(bitcoin_modelnet STATIC
   swarm_cursorfence/commit.cpp
   swarm_cursorfence/mine.cpp
   swarm_cursorfence/swarm_cursorfence.cpp
+  swarm_earlyhalt/seat.cpp
+  swarm_earlyhalt/remain.cpp
+  swarm_earlyhalt/score.cpp
+  swarm_earlyhalt/mark.cpp
+  swarm_earlyhalt/budget.cpp
+  swarm_earlyhalt/open.cpp
+  swarm_earlyhalt/stop.cpp
+  swarm_earlyhalt/step.cpp
+  swarm_earlyhalt/promote.cpp
+  swarm_earlyhalt/realm.cpp
+  swarm_earlyhalt/earlyhalt.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp

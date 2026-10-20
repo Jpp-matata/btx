@@ -1896,6 +1896,10 @@ if(WITH_MODELNET)
     swarm_cursorfence_gap_tests.cpp
     swarm_cursorfence_mine_tests.cpp
     swarm_cursorfence_stale_tests.cpp
+    swarm_earlyhalt_open_tests.cpp
+    swarm_earlyhalt_promote_tests.cpp
+    swarm_earlyhalt_realm_tests.cpp
+    swarm_earlyhalt_step_tests.cpp
     swarm_evolve_graduate_tests.cpp
     swarm_evolve_measure_tests.cpp
     swarm_evolve_recover_tests.cpp
