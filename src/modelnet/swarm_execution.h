@@ -61,7 +61,7 @@ SwarmPlacement SwarmChooseExecution(int64_t prefill_ms, int64_t remote_queue_ms,
                                     int64_t bytes_to_move, int64_t bandwidth_bps, int64_t rtt_ms,
                                     int64_t decode_remote_ms, int64_t decode_local_ms);
 
-/** A transfer without an engine moves nothing and returns ENGINE_ABSENT. */
+/** A transfer without an engine is ENGINE_ABSENT. With an engine the code is LOCAL and no bytes move. */
 SwarmPlacement SwarmExecutePlacement(const SwarmPlacement& choice, bool engine_present);
 
 struct SwarmCohort {

@@ -164,8 +164,9 @@ SwarmPlacement SwarmExecutePlacement(const SwarmPlacement& choice, bool engine_p
         out.code = "ENGINE_ABSENT";
         return out;
     }
-    out.bytes_moved = true;
-    out.code = "TRANSFERRED";
+    // An engine flag is not a completed tensor transfer.
+    out.bytes_moved = false;
+    out.code = "LOCAL";
     return out;
 }
 

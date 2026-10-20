@@ -152,6 +152,10 @@ BOOST_AUTO_TEST_CASE(kv_pages_cohorts_and_the_reference_trainer)
     BOOST_CHECK(!missing.ok);
     BOOST_CHECK_EQUAL(missing.code, "ENGINE_ABSENT");
     BOOST_CHECK(!missing.bytes_moved);
+    const modelnet::SwarmPlacement present = modelnet::SwarmExecutePlacement(transfer, true);
+    BOOST_CHECK(present.ok);
+    BOOST_CHECK_EQUAL(present.code, "LOCAL");
+    BOOST_CHECK(!present.bytes_moved);
 
     modelnet::SwarmCohort left{"ckpt", "recipe", true};
     modelnet::SwarmCohort right{"ckpt", "other", true};
