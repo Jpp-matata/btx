@@ -1990,6 +1990,10 @@ if(WITH_MODELNET)
     swarm_mixedhold_bytes_tests.cpp
     swarm_mixedhold_empty_tests.cpp
     swarm_mixedhold_replay_tests.cpp
+    swarm_ckptsave_bytes_tests.cpp
+    swarm_ckptsave_empty_tests.cpp
+    swarm_ckptsave_replay_tests.cpp
+    swarm_ckptsave_request_tests.cpp
     swarm_mixedhold_request_tests.cpp
     swarm_evolve_graduate_tests.cpp
     swarm_evolve_measure_tests.cpp
