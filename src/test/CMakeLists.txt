@@ -1719,6 +1719,7 @@ if(WITH_MODELNET)
     swarm_taskdag_tests.cpp
     swarm_rewardloop_tests.cpp
     swarm_evalengine_tests.cpp
+    swarm_islandopt_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp

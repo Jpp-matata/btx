@@ -1155,6 +1155,7 @@ add_library(bitcoin_modelnet STATIC
   swarm_taskdag.cpp
   swarm_rewardloop.cpp
   swarm_evalengine.cpp
+  swarm_islandopt.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
