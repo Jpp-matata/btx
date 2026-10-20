@@ -1399,6 +1399,27 @@ add_library(bitcoin_modelnet STATIC
   swarm_leasework/commit.cpp
   swarm_leasework/bump.cpp
   swarm_leasework/swarm_leasework.cpp
+  swarm_promotegate/active.cpp
+  swarm_promotegate/candidate.cpp
+  swarm_promotegate/memory.cpp
+  swarm_promotegate/flag.cpp
+  swarm_promotegate/begin.cpp
+  swarm_promotegate/interrupt.cpp
+  swarm_promotegate/finish.cpp
+  swarm_promotegate/resume.cpp
+  swarm_promotegate/clear.cpp
+  swarm_promotegate/rollback.cpp
+  swarm_promotegate/realm.cpp
+  swarm_promotegate/promotegate.cpp
+  swarm_watchhold/silence.cpp
+  swarm_watchhold/secret.cpp
+  swarm_watchhold/cursor.cpp
+  swarm_watchhold/margin.cpp
+  swarm_watchhold/note.cpp
+  swarm_watchhold/observe.cpp
+  swarm_watchhold/release.cpp
+  swarm_watchhold/refund.cpp
+  swarm_watchhold/swarm_watchhold.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp

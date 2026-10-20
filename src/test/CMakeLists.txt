@@ -1869,6 +1869,16 @@ if(WITH_MODELNET)
     swarm_leasework_epoch_tests.cpp
     swarm_leasework_expiry_tests.cpp
     swarm_leasework_grant_tests.cpp
+    swarm_promotegate_begin_tests.cpp
+    swarm_promotegate_clear_tests.cpp
+    swarm_promotegate_interrupt_tests.cpp
+    swarm_promotegate_realm_tests.cpp
+    swarm_promotegate_resume_tests.cpp
+    swarm_promotegate_rollback_tests.cpp
+    swarm_watchhold_observe_tests.cpp
+    swarm_watchhold_quiet_tests.cpp
+    swarm_watchhold_refund_tests.cpp
+    swarm_watchhold_release_tests.cpp
     swarm_evolve_graduate_tests.cpp
     swarm_evolve_measure_tests.cpp
     swarm_evolve_recover_tests.cpp
