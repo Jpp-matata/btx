@@ -1631,6 +1631,7 @@ if(WITH_MODELNET)
     swarm_adminheight_tests.cpp
     swarm_fourbal_tests.cpp
     swarm_scanabort_tests.cpp
+    swarm_firstcltv_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
