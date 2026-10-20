@@ -1137,6 +1137,7 @@ add_library(bitcoin_modelnet STATIC
   swarm_compatfam.cpp
   swarm_disputeout.cpp
   swarm_ckptonly.cpp
+  swarm_holdrot.cpp
   swarm_notslots.cpp
   swarm_notprivateoff.cpp
   swarm_notclosetmpl.cpp
