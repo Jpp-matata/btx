@@ -1258,6 +1258,10 @@ if(WITH_MODELNET)
     swarm_notnocollat_tests.cpp
     swarm_notnoearnpre_tests.cpp
     swarm_notnoduprcpt_tests.cpp
+    swarm_notnofalsekv_tests.cpp
+    swarm_notnoheads_tests.cpp
+    swarm_notnohwstage_tests.cpp
+    swarm_notnokeymap_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
