@@ -1540,6 +1540,22 @@ add_library(bitcoin_modelnet STATIC
   swarm_adminhold/movekey.cpp
   swarm_adminhold/quiet.cpp
   swarm_adminhold/swarm_adminhold.cpp
+  swarm_cachepair/blank.cpp
+  swarm_cachepair/page.cpp
+  swarm_cachepair/member.cpp
+  swarm_cachepair/seat.cpp
+  swarm_cachepair/roster.cpp
+  swarm_cachepair/record.cpp
+  swarm_cachepair/book.cpp
+  swarm_cachepair/replay.cpp
+  swarm_cachepair/gate.cpp
+  swarm_cachepair/place.cpp
+  swarm_cachepair/known.cpp
+  swarm_cachepair/alone.cpp
+  swarm_cachepair/pair.cpp
+  swarm_cachepair/share.cpp
+  swarm_cachepair/quiet.cpp
+  swarm_cachepair/swarm_cachepair.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp

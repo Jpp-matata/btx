@@ -1927,6 +1927,9 @@ if(WITH_MODELNET)
     swarm_adminhold_movekey_tests.cpp
     swarm_adminhold_open_tests.cpp
     swarm_adminhold_replay_tests.cpp
+    swarm_cachepair_bytes_tests.cpp
+    swarm_cachepair_place_tests.cpp
+    swarm_cachepair_share_tests.cpp
     swarm_evolve_graduate_tests.cpp
     swarm_evolve_measure_tests.cpp
     swarm_evolve_recover_tests.cpp
