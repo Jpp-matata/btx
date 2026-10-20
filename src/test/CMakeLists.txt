@@ -993,6 +993,7 @@ if(WITH_MODELNET)
     swarm_notcudaops_tests.cpp
     swarm_notnordma_tests.cpp
     swarm_notmoonabs_tests.cpp
+    swarm_notnofsdp_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
