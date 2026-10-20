@@ -1300,6 +1300,8 @@ if(WITH_MODELNET)
     swarm_notnoforkavg_tests.cpp
     swarm_notnomodelon_tests.cpp
     swarm_notnosponsor_tests.cpp
+    swarm_notnofee2_tests.cpp
+    swarm_notnodomain2_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
