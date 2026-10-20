@@ -58,6 +58,7 @@ add_library(bitcoin_modelnet STATIC
   swarm_pressure.cpp
   swarm_quota.cpp
   swarm_taskfence.cpp
+  swarm_cycle.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
