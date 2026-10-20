@@ -622,6 +622,8 @@ add_library(bitcoin_modelnet STATIC
   swarm_notnoconflict.cpp
   swarm_notnodupreceipt.cpp
   swarm_notnocanaryreg.cpp
+  swarm_notnocollateral2.cpp
+  swarm_notnogpucrash.cpp
   swarm_notslots.cpp
   swarm_notprivateoff.cpp
   swarm_notclosetmpl.cpp
