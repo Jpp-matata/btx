@@ -71,7 +71,8 @@ BOOST_AUTO_TEST_CASE(flags_refuse_before_atoms_move)
     BOOST_CHECK_EQUAL(stage.Remaining("channel-1"), 9);
 
     err = "prior";
-    BOOST_REQUIRE(stage.Settle(Pay("open", false, false), err));
+    BOOST_REQUIRE(stage.Settle(Pay("sched", false, false), err));
+    BOOST_CHECK(err.empty());
     BOOST_CHECK_EQUAL(stage.Balance("earned"), 12);
     BOOST_CHECK_EQUAL(stage.Balance("escrow"), 3);
     BOOST_CHECK_EQUAL(stage.Balance("collateral"), 0);

@@ -143,4 +143,30 @@ BOOST_AUTO_TEST_CASE(invoice_fields_add_nothing)
     BOOST_CHECK_EQUAL(stage.Balance("collateral"), 0);
 }
 
+BOOST_AUTO_TEST_CASE(settle_does_not_copy_a_memo_into_a_second_bucket)
+{
+    modelnet::SwarmPayStage stage;
+    std::string err = "prior";
+    BOOST_REQUIRE(stage.Credit("escrow", 5, "inv-memo", err));
+    BOOST_CHECK(!stage.Settle(Pay("inv-memo", 5, 0x45), err));
+    BOOST_CHECK_EQUAL(err, "REPLAY");
+    BOOST_CHECK_EQUAL(stage.Balance("escrow"), 5);
+    BOOST_CHECK_EQUAL(stage.Balance("earned"), 0);
+    BOOST_CHECK_EQUAL(stage.Balance("collateral"), 0);
+    BOOST_CHECK_EQUAL(stage.Balance("fees"), 0);
+}
+
+BOOST_AUTO_TEST_CASE(settle_overflow_leaves_earned)
+{
+    modelnet::SwarmPayStage stage;
+    std::string err = "prior";
+    BOOST_REQUIRE(stage.Credit("earned", std::numeric_limits<int64_t>::max(), "fill", err));
+    BOOST_CHECK(!stage.Settle(Pay("inv-over", 1, 0x44), err));
+    BOOST_CHECK_EQUAL(err, "ATOMS");
+    BOOST_CHECK_EQUAL(stage.Balance("earned"), std::numeric_limits<int64_t>::max());
+    BOOST_CHECK_EQUAL(stage.Balance("escrow"), 0);
+    BOOST_CHECK_EQUAL(stage.Balance("collateral"), 0);
+    BOOST_CHECK_EQUAL(stage.Balance("fees"), 0);
+}
+
 BOOST_AUTO_TEST_SUITE_END()
