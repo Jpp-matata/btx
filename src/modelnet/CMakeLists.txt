@@ -1069,6 +1069,9 @@ add_library(bitcoin_modelnet STATIC
   swarm_scanabort.cpp
   swarm_firstcltv.cpp
   swarm_hashroute.cpp
+  swarm_nichesep.cpp
+  swarm_openlic.cpp
+  swarm_currencykeep.cpp
   swarm_notslots.cpp
   swarm_notprivateoff.cpp
   swarm_notclosetmpl.cpp
