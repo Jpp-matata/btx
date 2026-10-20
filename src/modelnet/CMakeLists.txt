@@ -1194,6 +1194,11 @@ add_library(bitcoin_modelnet STATIC
   swarm_staleupdate.cpp
   swarm_debitcap.cpp
   swarm_manifestok.cpp
+  swarm_hoodcap.cpp
+  swarm_piecelen.cpp
+  swarm_cohortincl.cpp
+  swarm_witnessched.cpp
+  swarm_mandatearm.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp

@@ -1758,6 +1758,11 @@ if(WITH_MODELNET)
     swarm_staleupdate_tests.cpp
     swarm_debitcap_tests.cpp
     swarm_manifestok_tests.cpp
+    swarm_hoodcap_tests.cpp
+    swarm_piecelen_tests.cpp
+    swarm_cohortincl_tests.cpp
+    swarm_witnessched_tests.cpp
+    swarm_mandatearm_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp
