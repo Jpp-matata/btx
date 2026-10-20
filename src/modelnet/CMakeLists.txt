@@ -81,6 +81,7 @@ add_library(bitcoin_modelnet STATIC
   swarm_directory.cpp
   swarm_bench.cpp
   swarm_specbranch.cpp
+  swarm_fundscript.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
