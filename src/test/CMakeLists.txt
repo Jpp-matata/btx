@@ -1950,6 +1950,12 @@ if(WITH_MODELNET)
     swarm_quotefiat_notbalance_tests.cpp
     swarm_quotefiat_quiet_tests.cpp
     swarm_quotefiat_replay_tests.cpp
+    swarm_clockspan_bytes_tests.cpp
+    swarm_clockspan_deadline_tests.cpp
+    swarm_clockspan_note_tests.cpp
+    swarm_clockspan_range_tests.cpp
+    swarm_clockspan_replay_tests.cpp
+    swarm_clockspan_spacing_tests.cpp
     swarm_evolve_graduate_tests.cpp
     swarm_evolve_measure_tests.cpp
     swarm_evolve_recover_tests.cpp

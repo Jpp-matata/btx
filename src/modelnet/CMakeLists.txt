@@ -1601,6 +1601,18 @@ add_library(bitcoin_modelnet STATIC
   swarm_quotefiat/quote.cpp
   swarm_quotefiat/quiet.cpp
   swarm_quotefiat/swarm_quotefiat.cpp
+  swarm_clockspan/span.cpp
+  swarm_clockspan/range.cpp
+  swarm_clockspan/width.cpp
+  swarm_clockspan/record.cpp
+  swarm_clockspan/book.cpp
+  swarm_clockspan/replay.cpp
+  swarm_clockspan/gate.cpp
+  swarm_clockspan/note.cpp
+  swarm_clockspan/deadline.cpp
+  swarm_clockspan/mine.cpp
+  swarm_clockspan/quiet.cpp
+  swarm_clockspan/swarm_clockspan.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
