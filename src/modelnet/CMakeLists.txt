@@ -1066,6 +1066,7 @@ add_library(bitcoin_modelnet STATIC
   swarm_overlaphold.cpp
   swarm_adminheight.cpp
   swarm_fourbal.cpp
+  swarm_scanabort.cpp
   swarm_notslots.cpp
   swarm_notprivateoff.cpp
   swarm_notclosetmpl.cpp
