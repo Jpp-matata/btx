@@ -1657,6 +1657,7 @@ if(WITH_MODELNET)
     swarm_flatcap_tests.cpp
     swarm_pqmesh_tests.cpp
     swarm_exploreill_tests.cpp
+    swarm_revenueill_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
