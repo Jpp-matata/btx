@@ -1628,6 +1628,8 @@ if(WITH_MODELNET)
     swarm_agreehold_tests.cpp
     swarm_forkavg_tests.cpp
     swarm_overlaphold_tests.cpp
+    swarm_adminheight_tests.cpp
+    swarm_fourbal_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
