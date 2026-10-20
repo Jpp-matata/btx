@@ -750,6 +750,8 @@ if(WITH_MODELNET)
     swarm_notreplay_tests.cpp
     swarm_publishback_tests.cpp
     swarm_agreement_tests.cpp
+    swarm_launchprof_tests.cpp
+    swarm_nobroadcast_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp
