@@ -1407,6 +1407,12 @@ if(WITH_MODELNET)
     swarm_notnonataddr2_tests.cpp
     swarm_notnosandboxcap2_tests.cpp
     swarm_notnosigner2_tests.cpp
+    swarm_notnopqmesh2_tests.cpp
+    swarm_notnojoinacq2_tests.cpp
+    swarm_notnoadvert2_tests.cpp
+    swarm_notnoisland2_tests.cpp
+    swarm_notnodispute2_tests.cpp
+    swarm_notnoleakpage2_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
