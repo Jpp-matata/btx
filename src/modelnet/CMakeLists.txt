@@ -1743,6 +1743,17 @@ add_library(bitcoin_modelnet STATIC
   swarm_passhold/keep.cpp
   swarm_passhold/quiet.cpp
   swarm_passhold/swarm_passhold.cpp
+  swarm_guesthold/blank.cpp
+  swarm_guesthold/name.cpp
+  swarm_guesthold/record.cpp
+  swarm_guesthold/book.cpp
+  swarm_guesthold/replay.cpp
+  swarm_guesthold/gate.cpp
+  swarm_guesthold/stay.cpp
+  swarm_guesthold/check.cpp
+  swarm_guesthold/keep.cpp
+  swarm_guesthold/quiet.cpp
+  swarm_guesthold/swarm_guesthold.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
