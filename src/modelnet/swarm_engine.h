@@ -13,9 +13,9 @@ namespace modelnet {
 
 /**
  * Runtime advertisement. A missing binary is ENGINE_ABSENT and is not
- * advertised. An executable file is INSTALLED and still unqualified until a
- * finite positive measurement is supplied. This function does not start the
- * engine and does not move tensors.
+ * advertised. An executable file is INSTALLED. A caller-supplied token rate
+ * is not a measurement, so the engine stays unadvertised. This function does
+ * not start the engine and does not move tensors.
  */
 struct SwarmEngineStatus {
     std::string name;

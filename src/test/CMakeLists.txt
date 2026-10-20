@@ -1569,6 +1569,13 @@ if(WITH_MODELNET)
     swarm_notnoevalself2_tests.cpp
     swarm_notnofiatbal2_tests.cpp
     swarm_notnoredist2_tests.cpp
+    swarm_notnobodycap2_tests.cpp
+    swarm_notnochannelone2_tests.cpp
+    swarm_notnoflat16384_tests.cpp
+    swarm_notnoincludepath2_tests.cpp
+    swarm_notnojoindefault2_tests.cpp
+    swarm_notnoseedempty2_tests.cpp
+    swarm_notnospawnside2_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp

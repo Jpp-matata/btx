@@ -37,15 +37,11 @@ bool SwarmQualifyEngine(SwarmEngineStatus& status, bool measurement_supplied, do
         err = "ENGINE_ABSENT";
         return false;
     }
-    if (!measurement_supplied || !std::isfinite(tokens_per_sec) || tokens_per_sec <= 0.0) {
-        err = "UNQUALIFIED";
-        return false;
-    }
-    status.qualified = true;
-    status.advertised = true;
-    status.code = "QUALIFIED";
-    err.clear();
-    return true;
+    // A caller-supplied rate does not come from a running engine.
+    (void)measurement_supplied;
+    (void)tokens_per_sec;
+    err = "UNQUALIFIED";
+    return false;
 }
 
 } // namespace modelnet

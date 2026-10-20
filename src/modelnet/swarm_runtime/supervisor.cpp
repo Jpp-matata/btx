@@ -51,8 +51,8 @@ std::vector<std::string> SanitizeEnvironment(char* const envp[])
 Supervisor::Supervisor(std::filesystem::path modeldir, std::filesystem::path executable)
     : m_modeldir(std::move(modeldir)), m_executable(std::move(executable))
 {
-    // Stored only. The worker thread waits; it does not execute this path.
-    if (m_executable.empty()) m_executable = ExecutableDirectory() / "btx-swarmd";
+    // Stored only. An empty path stays empty. The worker thread does not
+    // launch a sidecar, and btxd does not default that path to a second binary.
     m_thread = std::thread([this] { Run(); });
 }
 Supervisor::~Supervisor() { Stop(); }

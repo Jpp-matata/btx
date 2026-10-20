@@ -49,9 +49,11 @@ BOOST_AUTO_TEST_CASE(an_unmeasured_engine_is_not_advertised)
     BOOST_CHECK(!modelnet::SwarmQualifyEngine(installed, false, 0.0, err));
     BOOST_CHECK_EQUAL(err, "UNQUALIFIED");
     BOOST_CHECK(!installed.advertised);
-    BOOST_CHECK(modelnet::SwarmQualifyEngine(installed, true, 12.5, err));
-    BOOST_CHECK(installed.qualified);
-    BOOST_CHECK(installed.advertised);
+    BOOST_CHECK(!installed.qualified);
+    BOOST_CHECK(!modelnet::SwarmQualifyEngine(installed, true, 12.5, err));
+    BOOST_CHECK(!installed.qualified);
+    BOOST_CHECK(!installed.advertised);
+    BOOST_CHECK_EQUAL(err, "UNQUALIFIED");
     fs::remove(bin);
 }
 
