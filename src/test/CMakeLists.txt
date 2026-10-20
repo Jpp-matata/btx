@@ -1649,6 +1649,7 @@ if(WITH_MODELNET)
     swarm_escrowboth_tests.cpp
     swarm_modelneton_tests.cpp
     swarm_integerkeep_tests.cpp
+    swarm_autospent_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
