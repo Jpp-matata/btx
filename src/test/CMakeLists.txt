@@ -696,6 +696,11 @@ if(WITH_MODELNET)
     swarm_refundkey_tests.cpp
     swarm_researchkey_tests.cpp
     swarm_onetemplate_tests.cpp
+    swarm_mandate0_tests.cpp
+    swarm_chalgate_tests.cpp
+    swarm_nopenalty_tests.cpp
+    swarm_joinflag_tests.cpp
+    swarm_seqonce_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp
