@@ -1469,6 +1469,8 @@ if(WITH_MODELNET)
     swarm_notnop50pub2_tests.cpp
     swarm_notnonixlabsent2_tests.cpp
     swarm_notnomooncakeabs2_tests.cpp
+    swarm_notnolmcacheops2_tests.cpp
+    swarm_notnordmaabsent2_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
