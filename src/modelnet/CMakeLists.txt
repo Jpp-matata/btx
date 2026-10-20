@@ -157,6 +157,8 @@ add_library(bitcoin_modelnet STATIC
   swarm_manifestcap.cpp
   swarm_rewardmix.cpp
   swarm_workcycle.cpp
+  swarm_preimage.cpp
+  swarm_peerpath.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp

@@ -721,6 +721,8 @@ if(WITH_MODELNET)
     swarm_manifestcap_tests.cpp
     swarm_rewardmix_tests.cpp
     swarm_workcycle_tests.cpp
+    swarm_preimage_tests.cpp
+    swarm_peerpath_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp
