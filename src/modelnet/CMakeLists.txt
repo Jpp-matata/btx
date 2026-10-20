@@ -115,6 +115,7 @@ add_library(bitcoin_modelnet STATIC
   swarm_domaingap.cpp
   swarm_replaystall.cpp
   swarm_untaxed.cpp
+  swarm_visiblehead.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
