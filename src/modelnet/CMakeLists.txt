@@ -1177,6 +1177,7 @@ add_library(bitcoin_modelnet STATIC
   swarm_earlystop.cpp
   swarm_quorumgate.cpp
   swarm_receiptbind.cpp
+  swarm_distillrec.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
