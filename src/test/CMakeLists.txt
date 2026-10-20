@@ -1624,6 +1624,7 @@ if(WITH_MODELNET)
     swarm_gradexport_tests.cpp
     swarm_launchkeep_tests.cpp
     swarm_rvhold_tests.cpp
+    swarm_quorumdom_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
