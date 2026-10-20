@@ -919,6 +919,9 @@ if(WITH_MODELNET)
     swarm_notselfeval_tests.cpp
     swarm_notsecp_tests.cpp
     swarm_notagreement_tests.cpp
+    swarm_notadmin_tests.cpp
+    swarm_notfork_tests.cpp
+    swarm_notprofit_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp
