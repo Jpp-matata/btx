@@ -1715,6 +1715,10 @@ if(WITH_MODELNET)
     swarm_runcycle_tests.cpp
     swarm_faultjournal_tests.cpp
     swarm_scriptroute_tests.cpp
+    swarm_popniche_tests.cpp
+    swarm_taskdag_tests.cpp
+    swarm_rewardloop_tests.cpp
+    swarm_evalengine_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp

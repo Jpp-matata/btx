@@ -1151,6 +1151,10 @@ add_library(bitcoin_modelnet STATIC
   swarm_runcycle.cpp
   swarm_faultjournal.cpp
   swarm_scriptroute.cpp
+  swarm_popniche.cpp
+  swarm_taskdag.cpp
+  swarm_rewardloop.cpp
+  swarm_evalengine.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
