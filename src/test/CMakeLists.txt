@@ -683,6 +683,9 @@ if(WITH_MODELNET)
     swarm_dlgrant_tests.cpp
     swarm_originnote_tests.cpp
     swarm_profit_tests.cpp
+    swarm_masshold_tests.cpp
+    swarm_spendgate_tests.cpp
+    swarm_gradrealm_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp
