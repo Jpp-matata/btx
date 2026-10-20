@@ -1618,6 +1618,9 @@ if(WITH_MODELNET)
     swarm_closerefund_tests.cpp
     swarm_cachestand_tests.cpp
     swarm_deduphold_tests.cpp
+    swarm_receiptbook_tests.cpp
+    swarm_capcover_tests.cpp
+    swarm_schedwit_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
