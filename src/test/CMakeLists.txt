@@ -1183,6 +1183,9 @@ if(WITH_MODELNET)
     swarm_notnoplaintext_tests.cpp
     swarm_notnorefundmat_tests.cpp
     swarm_notnotruncache_tests.cpp
+    swarm_notnoconflict_tests.cpp
+    swarm_notnodupreceipt_tests.cpp
+    swarm_notnocanaryreg_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
