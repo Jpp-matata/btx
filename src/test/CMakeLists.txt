@@ -1632,6 +1632,7 @@ if(WITH_MODELNET)
     swarm_fourbal_tests.cpp
     swarm_scanabort_tests.cpp
     swarm_firstcltv_tests.cpp
+    swarm_hashroute_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
