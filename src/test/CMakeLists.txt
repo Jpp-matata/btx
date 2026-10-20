@@ -913,6 +913,10 @@ if(WITH_MODELNET)
     swarm_notnetcost_tests.cpp
     swarm_notprompt_tests.cpp
     swarm_notspendkey_tests.cpp
+    swarm_notmainnet_tests.cpp
+    swarm_notrealmoney_tests.cpp
+    swarm_notrotate_tests.cpp
+    swarm_notselfeval_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp
