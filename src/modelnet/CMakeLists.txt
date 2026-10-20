@@ -147,6 +147,7 @@ add_library(bitcoin_modelnet STATIC
   swarm_senderedge.cpp
   swarm_poolref.cpp
   swarm_wallclock.cpp
+  swarm_watchalert.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp

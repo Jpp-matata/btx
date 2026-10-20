@@ -711,6 +711,7 @@ if(WITH_MODELNET)
     swarm_senderedge_tests.cpp
     swarm_poolref_tests.cpp
     swarm_wallclock_tests.cpp
+    swarm_watchalert_tests.cpp
     modelnet_035_ancestry_tests.cpp
     modelnet_035_session_tests.cpp
     modelnet_035_grant_tests.cpp
