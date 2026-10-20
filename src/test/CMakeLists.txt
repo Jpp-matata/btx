@@ -1348,6 +1348,7 @@ if(WITH_MODELNET)
     swarm_notnoablate2_tests.cpp
     swarm_notnomixed2_tests.cpp
     swarm_notnotokps2_tests.cpp
+    swarm_notnosglang2_tests.cpp
     swarm_notslots_tests.cpp
     swarm_notprivateoff_tests.cpp
     swarm_notclosetmpl_tests.cpp
