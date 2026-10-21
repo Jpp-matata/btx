@@ -2098,6 +2098,12 @@ if(WITH_MODELNET)
     swarm_paycycle_quote_tests.cpp
     swarm_paycycle_reserve_tests.cpp
     swarm_paycycle_split_tests.cpp
+    swarm_kvplace_choose_tests.cpp
+    swarm_kvplace_offer_tests.cpp
+    swarm_kvplace_prefetch_tests.cpp
+    swarm_kvplace_prefix_tests.cpp
+    swarm_kvplace_share_tests.cpp
+    swarm_kvplace_tie_tests.cpp
     swarm_minehold_request_tests.cpp
     swarm_ckptsave_request_tests.cpp
     swarm_mixedhold_request_tests.cpp

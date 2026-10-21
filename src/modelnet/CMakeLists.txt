@@ -1955,6 +1955,15 @@ add_library(bitcoin_modelnet STATIC
   swarm_paycycle/collateral.cpp
   swarm_paycycle/transfer.cpp
   swarm_paycycle/swarm_paycycle.cpp
+  swarm_kvplace/motion.cpp
+  swarm_kvplace/quantization.cpp
+  swarm_kvplace/offer.cpp
+  swarm_kvplace/prefix.cpp
+  swarm_kvplace/cost.cpp
+  swarm_kvplace/decision.cpp
+  swarm_kvplace/share.cpp
+  swarm_kvplace/prefetch.cpp
+  swarm_kvplace/swarm_kvplace.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
