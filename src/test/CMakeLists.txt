@@ -2085,6 +2085,11 @@ if(WITH_MODELNET)
     swarm_faultboard_promote_tests.cpp
     swarm_faultboard_reorg_tests.cpp
     swarm_faultboard_worker_tests.cpp
+    swarm_piecepipe_accept_tests.cpp
+    swarm_piecepipe_limit_tests.cpp
+    swarm_piecepipe_resume_tests.cpp
+    swarm_piecepipe_sealed_tests.cpp
+    swarm_piecepipe_split_tests.cpp
     swarm_minehold_request_tests.cpp
     swarm_ckptsave_request_tests.cpp
     swarm_mixedhold_request_tests.cpp

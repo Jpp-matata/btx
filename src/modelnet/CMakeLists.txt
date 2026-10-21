@@ -1939,6 +1939,14 @@ add_library(bitcoin_modelnet STATIC
   swarm_faultboard/reorg.cpp
   swarm_faultboard/admit.cpp
   swarm_faultboard/swarm_faultboard.cpp
+  swarm_piecepipe/digest.cpp
+  swarm_piecepipe/store.cpp
+  swarm_piecepipe/manifest.cpp
+  swarm_piecepipe/split.cpp
+  swarm_piecepipe/resume.cpp
+  swarm_piecepipe/drop.cpp
+  swarm_piecepipe/sealed.cpp
+  swarm_piecepipe/swarm_piecepipe.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
