@@ -2131,6 +2131,11 @@ if(WITH_MODELNET)
     swarm_tokgate_measure_tests.cpp
     swarm_tokgate_open_tests.cpp
     swarm_tokgate_prompt_tests.cpp
+    swarm_flagship_order_tests.cpp
+    swarm_flagship_pass_tests.cpp
+    swarm_flagship_record_tests.cpp
+    swarm_flagship_replay_tests.cpp
+    swarm_flagship_rollback_tests.cpp
     swarm_minehold_request_tests.cpp
     swarm_ckptsave_request_tests.cpp
     swarm_mixedhold_request_tests.cpp

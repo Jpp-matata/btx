@@ -2031,6 +2031,16 @@ add_library(bitcoin_modelnet STATIC
   swarm_tokgate/quiet.cpp
   swarm_tokgate/inspect.cpp
   swarm_tokgate/swarm_tokgate.cpp
+  swarm_flagship/catalog.cpp
+  swarm_flagship/slot.cpp
+  swarm_flagship/ledger.cpp
+  swarm_flagship/decide.cpp
+  swarm_flagship/record.cpp
+  swarm_flagship/pass.cpp
+  swarm_flagship/rollback.cpp
+  swarm_flagship/inspect.cpp
+  swarm_flagship/quiet.cpp
+  swarm_flagship/cursor.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
