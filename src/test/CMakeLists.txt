@@ -2104,6 +2104,12 @@ if(WITH_MODELNET)
     swarm_kvplace_prefix_tests.cpp
     swarm_kvplace_share_tests.cpp
     swarm_kvplace_tie_tests.cpp
+    swarm_execnbhd_fallback_tests.cpp
+    swarm_execnbhd_identity_tests.cpp
+    swarm_execnbhd_offer_tests.cpp
+    swarm_execnbhd_remote_tests.cpp
+    swarm_execnbhd_seat_tests.cpp
+    swarm_execnbhd_share_tests.cpp
     swarm_minehold_request_tests.cpp
     swarm_ckptsave_request_tests.cpp
     swarm_mixedhold_request_tests.cpp

@@ -1964,6 +1964,16 @@ add_library(bitcoin_modelnet STATIC
   swarm_kvplace/share.cpp
   swarm_kvplace/prefetch.cpp
   swarm_kvplace/swarm_kvplace.cpp
+  swarm_execnbhd/order.cpp
+  swarm_execnbhd/offer.cpp
+  swarm_execnbhd/nearby.cpp
+  swarm_execnbhd/remote.cpp
+  swarm_execnbhd/seating.cpp
+  swarm_execnbhd/share.cpp
+  swarm_execnbhd/identity.cpp
+  swarm_execnbhd/fallback.cpp
+  swarm_execnbhd/quiet.cpp
+  swarm_execnbhd/swarm_execnbhd.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
