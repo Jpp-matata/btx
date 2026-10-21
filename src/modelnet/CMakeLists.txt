@@ -2125,6 +2125,7 @@ add_library(bitcoin_modelnet STATIC
   swarm_disttrain/swarm_disttrain.cpp
   swarm_measure/swarm_measure.cpp
   swarm_inferlink/swarm_inferlink.cpp
+  swarm_twelve/swarm_twelve.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
