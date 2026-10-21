@@ -275,7 +275,10 @@ class VerifyReleaseBtxdTest(unittest.TestCase):
             path = pathlib.Path(tmpdir) / "btxd"
             path.write_bytes(header)
             self.assertEqual(self.mod.classify(path), "macho")
-            with self.assertRaises(self.mod.VerifyError) as caught:
+            # codesign cannot parse a header-only Mach-O and would fail first on a
+            # Mac; test_macos_signature_mismatch_is_rejected covers that step.
+            with mock.patch.object(self.mod, "verify_macos_signature"), \
+                    self.assertRaises(self.mod.VerifyError) as caught:
                 self.mod.verify_macos(path, require_zmq=True)
             self.assertIn("ENABLE_ZMQ help text", str(caught.exception))
 
