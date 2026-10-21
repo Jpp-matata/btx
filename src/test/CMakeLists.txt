@@ -2126,6 +2126,11 @@ if(WITH_MODELNET)
     swarm_dedup_digest_tests.cpp
     swarm_dedup_drop_tests.cpp
     swarm_dedup_pull_tests.cpp
+    swarm_tokgate_decode_tests.cpp
+    swarm_tokgate_engine_tests.cpp
+    swarm_tokgate_measure_tests.cpp
+    swarm_tokgate_open_tests.cpp
+    swarm_tokgate_prompt_tests.cpp
     swarm_minehold_request_tests.cpp
     swarm_ckptsave_request_tests.cpp
     swarm_mixedhold_request_tests.cpp
