@@ -2223,6 +2223,19 @@ if(WITH_MODELNET)
     nif_island_tests.cpp
     nif_sandbox_tests.cpp
     dt_precision_tests.cpp
+    nif_pages_tests.cpp
+    dt_phase_tests.cpp
+    dt_sync_tests.cpp
+    nif_token_tests.cpp
+    dt_lineage_tests.cpp
+    dt_distill_tests.cpp
+    nif_observe_tests.cpp
+    dt_budget_tests.cpp
+    dt_mask_tests.cpp
+    dt_recipe_tests.cpp
+    dt_schedsim_tests.cpp
+    nif_image_tests.cpp
+    nif_text_tests.cpp
     swarm_minehold_request_tests.cpp
     swarm_ckptsave_request_tests.cpp
     swarm_mixedhold_request_tests.cpp

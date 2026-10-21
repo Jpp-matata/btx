@@ -2158,6 +2158,19 @@ add_library(bitcoin_modelnet STATIC
   nif_island/nif_island.cpp
   nif_sandbox/nif_sandbox.cpp
   dt_precision/dt_precision.cpp
+  nif_pages/nif_pages.cpp
+  dt_phase/dt_phase.cpp
+  dt_sync/dt_sync.cpp
+  nif_token/nif_token.cpp
+  dt_lineage/dt_lineage.cpp
+  dt_distill/dt_distill.cpp
+  nif_observe/nif_observe.cpp
+  dt_budget/dt_budget.cpp
+  dt_mask/dt_mask.cpp
+  dt_recipe/dt_recipe.cpp
+  dt_schedsim/dt_schedsim.cpp
+  nif_image/nif_image.cpp
+  nif_text/nif_text.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
