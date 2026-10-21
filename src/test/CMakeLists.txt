@@ -2059,6 +2059,18 @@ if(WITH_MODELNET)
     swarm_agentrun_result_tests.cpp
     swarm_agentrun_sandbox_tests.cpp
     swarm_agentrun_tool_tests.cpp
+    swarm_generation_allocate_tests.cpp
+    swarm_generation_candidate_tests.cpp
+    swarm_generation_continue_tests.cpp
+    swarm_generation_eligible_tests.cpp
+    swarm_generation_evaluate_tests.cpp
+    swarm_generation_execute_tests.cpp
+    swarm_generation_fork_tests.cpp
+    swarm_generation_identify_tests.cpp
+    swarm_generation_negative_tests.cpp
+    swarm_generation_promote_tests.cpp
+    swarm_generation_propose_tests.cpp
+    swarm_generation_stage_tests.cpp
     swarm_minehold_request_tests.cpp
     swarm_ckptsave_request_tests.cpp
     swarm_mixedhold_request_tests.cpp
