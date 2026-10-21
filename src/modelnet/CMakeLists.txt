@@ -2182,6 +2182,24 @@ add_library(bitcoin_modelnet STATIC
   dt_delay/dt_delay.cpp
   dt_reshard/dt_reshard.cpp
   nif_status/nif_status.cpp
+  nif_pqpeer/nif_pqpeer.cpp
+  nif_drain/nif_drain.cpp
+  nif_media/nif_media.cpp
+  nif_memprof/nif_memprof.cpp
+  dt_numprof/dt_numprof.cpp
+  dt_gradagree/dt_gradagree.cpp
+  dt_outer/dt_outer.cpp
+  nif_chunk/nif_chunk.cpp
+  grp01/grp01.cpp
+  grp02/grp02.cpp
+  grp03/grp03.cpp
+  grp04/grp04.cpp
+  grp05/grp05.cpp
+  grp06/grp06.cpp
+  grp07/grp07.cpp
+  grp08/grp08.cpp
+  grp09/grp09.cpp
+  grp10/grp10.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp

@@ -2247,6 +2247,24 @@ if(WITH_MODELNET)
     dt_delay_tests.cpp
     dt_reshard_tests.cpp
     nif_status_tests.cpp
+    nif_pqpeer_tests.cpp
+    nif_drain_tests.cpp
+    nif_media_tests.cpp
+    nif_memprof_tests.cpp
+    dt_numprof_tests.cpp
+    dt_gradagree_tests.cpp
+    dt_outer_tests.cpp
+    nif_chunk_tests.cpp
+    grp01_tests.cpp
+    grp02_tests.cpp
+    grp03_tests.cpp
+    grp04_tests.cpp
+    grp05_tests.cpp
+    grp06_tests.cpp
+    grp07_tests.cpp
+    grp08_tests.cpp
+    grp09_tests.cpp
+    grp10_tests.cpp
     swarm_minehold_request_tests.cpp
     swarm_ckptsave_request_tests.cpp
     swarm_mixedhold_request_tests.cpp
