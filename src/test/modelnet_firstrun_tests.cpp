@@ -149,4 +149,41 @@ BOOST_AUTO_TEST_CASE(env_has_positive_storage_budget)
     BOOST_CHECK_EQUAL(bytes, 80ULL << 30);
 }
 
+BOOST_AUTO_TEST_CASE(headless_storage_needs_consent)
+{
+    EnvRestore env("BTX_MODEL_STORAGE");
+    env.Unset();
+    const fs::path path = m_args.GetDataDirNet() / "modelnet" / "firstrun.json";
+    fs::create_directories(path.parent_path());
+    fs::remove(path);
+
+    // No consent: the "auto" default is held at 0, an explicit 0 stays 0.
+    BOOST_CHECK_EQUAL(modelnet::ResolveHeadlessStorageArg("auto", false, path), "0");
+    BOOST_CHECK_EQUAL(modelnet::ResolveHeadlessStorageArg("80GiB", false, path), "0");
+    BOOST_CHECK_EQUAL(modelnet::ResolveHeadlessStorageArg("0", false, path), "0");
+
+    // An explicit operator choice is its own consent.
+    BOOST_CHECK_EQUAL(modelnet::ResolveHeadlessStorageArg("auto", true, path), "auto");
+    BOOST_CHECK_EQUAL(modelnet::ResolveHeadlessStorageArg("80GiB", true, path), "80GiB");
+
+    // BTX_MODEL_STORAGE with a positive budget counts; zero does not.
+    env.Set("0");
+    BOOST_CHECK_EQUAL(modelnet::ResolveHeadlessStorageArg("auto", false, path), "0");
+    env.Set("80GiB");
+    BOOST_CHECK_EQUAL(modelnet::ResolveHeadlessStorageArg("auto", false, path), "auto");
+    env.Unset();
+
+    // A consent file that disallows payload storage does not unlock it.
+    modelnet::FirstRunConsent none;
+    std::string err;
+    BOOST_REQUIRE_MESSAGE(modelnet::SaveFirstRunConsent(path, none, err), err);
+    BOOST_CHECK_EQUAL(modelnet::ResolveHeadlessStorageArg("auto", false, path), "0");
+
+    // One that allows it does.
+    modelnet::FirstRunConsent yes;
+    yes.storage_mode = modelnet::StorageMode::AUTO;
+    BOOST_REQUIRE_MESSAGE(modelnet::SaveFirstRunConsent(path, yes, err), err);
+    BOOST_CHECK_EQUAL(modelnet::ResolveHeadlessStorageArg("auto", false, path), "auto");
+}
+
 BOOST_AUTO_TEST_SUITE_END()

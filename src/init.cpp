@@ -122,6 +122,7 @@
 #include <uint256.h>
 
 #ifdef ENABLE_MODELNET
+#include <modelnet/firstrun.h>
 #include <modelnet/model_nat.h>
 #include <modelnet/policy.h>
 #include <modelnet/profile.h>
@@ -4403,6 +4404,19 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
             }
             if (apply_profile) {
                 modelnet::ApplyProfileToLaunchConfig(policy, hcfg);
+            }
+            // The default budget is "auto" (up to 512 GiB). Hold it at 0 until
+            // the operator has consented the way the GUI and btx-open ask:
+            // an explicit -modelstorage/-modelprofile, a saved profile, the
+            // first-run consent file, or BTX_MODEL_STORAGE.
+            const std::string requested_storage = hcfg.storage_arg;
+            hcfg.storage_arg = modelnet::ResolveHeadlessStorageArg(
+                requested_storage,
+                args.IsArgSet("-modelstorage") || args.IsArgSet("-modelprofile") || apply_profile,
+                modelnet::FirstRunConsentPath(args.GetDataDirNet()));
+            if (hcfg.storage_arg != requested_storage) {
+                LogPrintf("model storage: no first-run consent for a payload budget (%s); keeping 0. "
+                          "Set -modelstorage=<size|auto> or record consent to enable it.\n", requested_storage);
             }
         }
         const std::string modeld_arg = args.IsArgSet("-modelhelper") ? args.GetArg("-modelhelper", "") :

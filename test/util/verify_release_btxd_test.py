@@ -314,6 +314,30 @@ class VerifyReleaseBtxdTest(unittest.TestCase):
             self.assertNotEqual(proc.returncode, 0, proc.stderr.decode())
             self.assertIn(b"FAIL", proc.stderr)
 
+    def test_glibc_ceiling_rejects_newer_packaged_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = pathlib.Path(tmpdir)
+            for rel in ("bin/btxd", "bin/btx-qt", "lib/libgnutls.so.30"):
+                path = root / rel
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b"x")
+            floors = {
+                "btxd": {"GLIBC": "2.38"},
+                "btx-qt": {"GLIBC": "2.43"},
+                "libgnutls.so.30": {"GLIBC": "2.43"},
+            }
+            with mock.patch.object(
+                self.mod, "elf_required_versions", side_effect=lambda p: floors[p.name]
+            ):
+                with self.assertRaises(self.mod.VerifyError) as ctx:
+                    self.mod.verify_glibc_ceiling(root)
+                message = str(ctx.exception)
+                self.assertIn("btx-qt needs GLIBC_2.43", message)
+                self.assertIn("libgnutls.so.30 needs GLIBC_2.43", message)
+                self.assertNotIn("btxd needs", message)
+                # A ceiling at or above the highest requirement passes.
+                self.mod.verify_glibc_ceiling(root, ceiling="2.43")
+
     def test_cli_requires_binary_or_archive(self) -> None:
         proc = subprocess.run(
             [sys.executable, str(SCRIPT)],

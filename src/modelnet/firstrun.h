@@ -40,6 +40,15 @@ bool AllowPayloadStorageFile(const fs::path& path);
 /** Same parser as -modelstorage / -modelcache (`80GiB`, raw bytes). */
 bool ParseStorageBudget(const std::string& in, uint64_t& out, std::string& err);
 
+/** Headless start: the payload budget the helper may be launched with.
+ *  `requested` is the budget the launch config would use ("auto", "0", "80GiB", ...).
+ *  It is kept when the operator consented: `explicit_operator_choice` (an
+ *  explicit -modelstorage / -modelprofile, or a profile the operator saved),
+ *  a first-run consent file that allows payload storage, or a positive
+ *  BTX_MODEL_STORAGE. Otherwise it is "0", the documented fresh-install default.
+ *  The GUI and btx-open ask through the same consent file. */
+std::string ResolveHeadlessStorageArg(const std::string& requested, bool explicit_operator_choice, const fs::path& consent_path);
+
 /** `BTX_MODEL_STORAGE`. False if unset, empty, zero, or unparsable. */
 bool EnvHasPositiveStorageBudget(uint64_t& bytes, std::string& err);
 

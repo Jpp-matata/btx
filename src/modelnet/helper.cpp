@@ -4915,7 +4915,11 @@ bool AllowModelSeedBytes(const ModelCatalog& cat, size_t n)
         if (g_seed_last_ms <= 0) g_seed_last_ms = now;
         const int64_t dt = std::max<int64_t>(0, now - g_seed_last_ms);
         g_seed_last_ms = now;
-        g_seed_tokens = std::min(cap_i, g_seed_tokens + cap_i * dt / 1000);
+        // cap_i * dt can exceed int64 for a huge cap after a long idle gap.
+        const int64_t refill = (dt > 0 && cap_i > std::numeric_limits<int64_t>::max() / dt) ?
+                                   cap_i :
+                                   cap_i * dt / 1000;
+        g_seed_tokens = std::min(cap_i, g_seed_tokens > cap_i - refill ? cap_i : g_seed_tokens + refill);
         if (n > static_cast<size_t>(std::numeric_limits<int64_t>::max())) return false;
         wait_ms = SeedPaceWaitMs(g_seed_tokens, static_cast<int64_t>(n), cap_i);
         // Too far behind to finish inside a fetcher's request deadline: refuse
