@@ -2273,6 +2273,20 @@ if(WITH_MODELNET)
     dt_pieceout_tests.cpp
     nif_gate_tests.cpp
     dt_schedlive_tests.cpp
+    grp11_tests.cpp
+    grp12_tests.cpp
+    grp13_tests.cpp
+    grp14_tests.cpp
+    grp15_tests.cpp
+    grp16_tests.cpp
+    grp17_tests.cpp
+    grp18_tests.cpp
+    grp19_tests.cpp
+    grp20_tests.cpp
+    grp21_tests.cpp
+    grp22_tests.cpp
+    grp23_tests.cpp
+    grp24_tests.cpp
     swarm_minehold_request_tests.cpp
     swarm_ckptsave_request_tests.cpp
     swarm_mixedhold_request_tests.cpp

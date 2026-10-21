@@ -2208,6 +2208,20 @@ add_library(bitcoin_modelnet STATIC
   dt_pieceout/dt_pieceout.cpp
   nif_gate/nif_gate.cpp
   dt_schedlive/dt_schedlive.cpp
+  grp11/grp11.cpp
+  grp12/grp12.cpp
+  grp13/grp13.cpp
+  grp14/grp14.cpp
+  grp15/grp15.cpp
+  grp16/grp16.cpp
+  grp17/grp17.cpp
+  grp18/grp18.cpp
+  grp19/grp19.cpp
+  grp20/grp20.cpp
+  grp21/grp21.cpp
+  grp22/grp22.cpp
+  grp23/grp23.cpp
+  grp24/grp24.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
