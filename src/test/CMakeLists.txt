@@ -2312,6 +2312,24 @@ if(WITH_MODELNET)
     migrate_safe_tests.cpp
     pay_regtest_tests.cpp
     doc_claim_tests.cpp
+    grp33_tests.cpp
+    grp34_tests.cpp
+    grp35_tests.cpp
+    grp36_tests.cpp
+    grp37_tests.cpp
+    grp38_tests.cpp
+    grp39_tests.cpp
+    grp40_tests.cpp
+    grp41_tests.cpp
+    grp42_tests.cpp
+    grp43_tests.cpp
+    grp44_tests.cpp
+    grp45_tests.cpp
+    grp46_tests.cpp
+    grp47_tests.cpp
+    grp48_tests.cpp
+    grp49_tests.cpp
+    grp50_tests.cpp
     swarm_minehold_request_tests.cpp
     swarm_ckptsave_request_tests.cpp
     swarm_mixedhold_request_tests.cpp

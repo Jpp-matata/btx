@@ -2247,6 +2247,24 @@ add_library(bitcoin_modelnet STATIC
   migrate_safe/migrate_safe.cpp
   pay_regtest/pay_regtest.cpp
   doc_claim/doc_claim.cpp
+  grp33/grp33.cpp
+  grp34/grp34.cpp
+  grp35/grp35.cpp
+  grp36/grp36.cpp
+  grp37/grp37.cpp
+  grp38/grp38.cpp
+  grp39/grp39.cpp
+  grp40/grp40.cpp
+  grp41/grp41.cpp
+  grp42/grp42.cpp
+  grp43/grp43.cpp
+  grp44/grp44.cpp
+  grp45/grp45.cpp
+  grp46/grp46.cpp
+  grp47/grp47.cpp
+  grp48/grp48.cpp
+  grp49/grp49.cpp
+  grp50/grp50.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
