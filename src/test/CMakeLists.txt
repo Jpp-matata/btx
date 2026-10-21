@@ -2295,6 +2295,23 @@ if(WITH_MODELNET)
     grp30_tests.cpp
     grp31_tests.cpp
     grp32_tests.cpp
+    research_records_tests.cpp
+    identity_chain_tests.cpp
+    research_capsule_tests.cpp
+    model_trust_tests.cpp
+    research_views_tests.cpp
+    snapshot_pull_tests.cpp
+    replay_check_tests.cpp
+    admit_paths_tests.cpp
+    guard_permit_tests.cpp
+    realm_roles_tests.cpp
+    node_cycle_tests.cpp
+    graph_views_tests.cpp
+    std_gate_tests.cpp
+    ops_drill_tests.cpp
+    migrate_safe_tests.cpp
+    pay_regtest_tests.cpp
+    doc_claim_tests.cpp
     swarm_minehold_request_tests.cpp
     swarm_ckptsave_request_tests.cpp
     swarm_mixedhold_request_tests.cpp

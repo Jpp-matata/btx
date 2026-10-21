@@ -2230,6 +2230,23 @@ add_library(bitcoin_modelnet STATIC
   grp30/grp30.cpp
   grp31/grp31.cpp
   grp32/grp32.cpp
+  research_records/research_records.cpp
+  identity_chain/identity_chain.cpp
+  research_capsule/research_capsule.cpp
+  model_trust/model_trust.cpp
+  research_views/research_views.cpp
+  snapshot_pull/snapshot_pull.cpp
+  replay_check/replay_check.cpp
+  admit_paths/admit_paths.cpp
+  guard_permit/guard_permit.cpp
+  realm_roles/realm_roles.cpp
+  node_cycle/node_cycle.cpp
+  graph_views/graph_views.cpp
+  std_gate/std_gate.cpp
+  ops_drill/ops_drill.cpp
+  migrate_safe/migrate_safe.cpp
+  pay_regtest/pay_regtest.cpp
+  doc_claim/doc_claim.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
