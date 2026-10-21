@@ -643,7 +643,7 @@ bool EnvelopePreimage(const UniValue& body, std::vector<unsigned char>& preimage
             return false;
         }
     }
-    if (!body["envelope_version"].isNum() || body["envelope_version"].getInt<int>() != 1) {
+    if (!body["envelope_version"].isNum() || body["envelope_version"].getValStr() != "1") {
         err = "envelope version";
         return false;
     }
