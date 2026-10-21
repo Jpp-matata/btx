@@ -64,11 +64,11 @@ End-to-end swap flow (BTX leg of a trustless BTX<->EVM atomic swap)::
     dep = find_deposits(rpc_wallet, addr)[0]
     # Recipient claims BTX using the preimage that was revealed when the funder claimed EVM:
     revealed_preimage = secret_from_evm_claim
-    raw = build_claim(rpc_wallet, desc, dep, revealed_preimage, recipient_dest_addr, fee_sat=1000)
+    raw = build_claim(rpc_wallet, desc, dep, revealed_preimage, recipient_dest_addr)
     rpc("sendrawtransaction", raw)
 
     # OR, if the swap is abandoned, the funder refunds after refund_locktime:
-    raw = build_refund(rpc_wallet, desc, dep, funder_dest_addr, btx_refund_height, fee_sat=1000)
+    raw = build_refund(rpc_wallet, desc, dep, funder_dest_addr, btx_refund_height)
     rpc("sendrawtransaction", raw)
 """
 from __future__ import annotations
@@ -146,6 +146,12 @@ def btx_hash160_hex(preimage: bytes) -> str:
 BTX_TARGET_BLOCK_SECONDS = 90
 MAX_REASONABLE_MIN_BLOCK_SECONDS = BTX_TARGET_BLOCK_SECONDS
 
+# An ML-DSA-44 claim or refund is about 3,945 vB (1,312-byte key in the leaf, 2,420-byte
+# signature), so the old 1,000 sat default was below the min relay fee and the spend was
+# refused exactly when it was time critical. contrib/otc/btx_otc.py also defaults to 20,000.
+DEFAULT_SPEND_FEE_SAT = 20_000
+
+
 def check_timeout_ordering(
     btx_refund_height: int,
     evm_timeout_unix: int,
@@ -209,12 +215,18 @@ def assert_timeout_ordering_at_tip(
     evm_timeout_unix: int,
     min_block_seconds: int,
     reorg_margin_blocks: int,
+    now_unix: Optional[int] = None,
 ) -> int:
     """Re-run timeout ordering against the live tip immediately before funding.
 
     This check is REQUIRED right before broadcasting funding for the BTX leg; descriptor-time
     checks alone can go stale while heights/timestamps advance. Uses live tip height and tip block
     time from the connected node and raises ValueError on unsafe ordering.
+
+    "Now" is min(tip block time, local clock). Consensus accepts a block dated up to two hours
+    ahead of a node's clock, and a later "now" would place the estimated BTX refund later than it
+    really is; a stale tip only makes the check stricter. `now_unix` overrides the local clock
+    (for tests).
     """
     tip_height = rpc("getblockcount")
     if type(tip_height) is not int or tip_height < 0:
@@ -231,7 +243,7 @@ def assert_timeout_ordering_at_tip(
     return check_timeout_ordering(
         btx_refund_height=btx_refund_height,
         evm_timeout_unix=evm_timeout_unix,
-        now_unix=tip_time,
+        now_unix=min(tip_time, int(time.time()) if now_unix is None else now_unix),
         current_btx_height=tip_height,
         min_block_seconds=min_block_seconds,
         reorg_margin_blocks=reorg_margin_blocks,
@@ -369,7 +381,7 @@ def _is_unknown_method(exc: Exception) -> bool:
 
 
 def build_claim(rpc_wallet: Rpc, descriptor_with_checksum: str, deposit: Deposit,
-                preimage: bytes, dest_address: str, fee_sat: int = 1000) -> str:
+                preimage: bytes, dest_address: str, fee_sat: int = DEFAULT_SPEND_FEE_SAT) -> str:
     """
     Build+sign the HTLC CLAIM (recipient) spending `deposit` to `dest_address`, revealing `preimage`.
 
@@ -403,7 +415,7 @@ def build_claim(rpc_wallet: Rpc, descriptor_with_checksum: str, deposit: Deposit
 
 
 def build_refund(rpc_wallet: Rpc, descriptor_with_checksum: str, deposit: Deposit,
-                 dest_address: str, locktime: int, fee_sat: int = 1000) -> str:
+                 dest_address: str, locktime: int, fee_sat: int = DEFAULT_SPEND_FEE_SAT) -> str:
     """
     Build+sign the HTLC REFUND (sender) reclaiming `deposit` to `dest_address` after `locktime`.
 
@@ -506,6 +518,32 @@ if __name__ == "__main__":
     else:
         raise SystemExit("self-check failed: timestamp-domain btx_refund_height was accepted")
     print("locktime-domain self-check OK")
+
+    if DEFAULT_SPEND_FEE_SAT < 3_945:
+        raise SystemExit("self-check failed: default spend fee is below the claim's relay fee")
+    import inspect
+    for fn in (build_claim, build_refund):
+        if inspect.signature(fn).parameters["fee_sat"].default != DEFAULT_SPEND_FEE_SAT:
+            raise SystemExit(f"self-check failed: {fn.__name__} does not use DEFAULT_SPEND_FEE_SAT")
+    print("default spend fee self-check OK")
+
+    # A tip dated ahead of the local clock must not move "now" later.
+    def _rpc_future_tip(method: str, *_params):
+        if method == "getblockcount":
+            return 1_000_000
+        if method == "getblockhash":
+            return "ab" * 32
+        return {"time": now + 7_000}
+    # BTX refund ~1 h before the EVM timeout by the wall clock: unsafe.
+    unsafe = dict(btx_refund_height=1_000_000 + 40, evm_timeout_unix=now + 5_000,
+                  min_block_seconds=90, reorg_margin_blocks=2)
+    try:
+        assert_timeout_ordering_at_tip(_rpc_future_tip, now_unix=now, **unsafe)
+    except ValueError:
+        pass
+    else:
+        raise SystemExit("self-check failed: a future-dated tip let an unsafe ordering through")
+    print("future-dated tip self-check OK")
 
     if to_sat("1e-08") != 1:
         raise SystemExit("self-check failed: to_sat('1e-08') != 1")

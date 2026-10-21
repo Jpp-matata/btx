@@ -51,6 +51,7 @@ import argparse
 import os
 import platform
 import re
+import shutil
 import struct
 import subprocess
 import sys
@@ -211,6 +212,7 @@ def verify_windows(path: Path) -> None:
 
 
 def verify_macos_portable(path: Path, dylibs: list[str] | None = None) -> None:
+    verify_macos_signature(path)
     if dylibs is None:
         dylibs = macho_dylibs(path)
     forbidden = homebrew_loads(dylibs)
@@ -218,6 +220,33 @@ def verify_macos_portable(path: Path, dylibs: list[str] | None = None) -> None:
         raise VerifyError(
             f"{path}: macOS release binary must not load Homebrew dylibs "
             f"(clean Mac without brew will not launch). Found: {forbidden}"
+        )
+
+
+def verify_macos_signature(path: Path) -> None:
+    """Fail a Mach-O whose code signature no longer matches its bytes.
+
+    rc1's bin/btxd had compiled-in Metal kernel paths rewritten after linking
+    and was not re-signed, so Apple Silicon killed it at launch (SIGKILL, exit
+    137) while the dylib checks passed. Only a host with `codesign` can check;
+    elsewhere this is a no-op and the release checklist must record a native run.
+    """
+    codesign = shutil.which("codesign")
+    if codesign is None:
+        return
+    result = subprocess.run(
+        [codesign, "--verify", "--strict", str(path)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        if "not signed at all" in detail:
+            return  # never signed is a distribution choice; a broken seal is the bug
+        raise VerifyError(
+            f"{path}: codesign --verify --strict failed (the binary was modified "
+            f"after signing; re-sign it or set the paths at configure time): {detail}"
         )
 
 

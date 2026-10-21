@@ -338,6 +338,22 @@ class VerifyReleaseBtxdTest(unittest.TestCase):
                 # A ceiling at or above the highest requirement passes.
                 self.mod.verify_glibc_ceiling(root, ceiling="2.43")
 
+    def test_macos_signature_mismatch_is_rejected(self) -> None:
+        bad = subprocess.CompletedProcess(
+            args=[], returncode=1, stdout="", stderr="invalid signature (code or signature have been modified)"
+        )
+        with mock.patch.object(self.mod.shutil, "which", return_value="/usr/bin/codesign"), \
+                mock.patch.object(self.mod.subprocess, "run", return_value=bad):
+            with self.assertRaises(self.mod.VerifyError) as ctx:
+                self.mod.verify_macos_signature(pathlib.Path("bin/btxd"))
+        self.assertIn("modified after signing", str(ctx.exception))
+        good = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+        with mock.patch.object(self.mod.shutil, "which", return_value="/usr/bin/codesign"), \
+                mock.patch.object(self.mod.subprocess, "run", return_value=good):
+            self.mod.verify_macos_signature(pathlib.Path("bin/btxd"))
+        with mock.patch.object(self.mod.shutil, "which", return_value=None):
+            self.mod.verify_macos_signature(pathlib.Path("bin/btxd"))
+
     def test_cli_requires_binary_or_archive(self) -> None:
         proc = subprocess.run(
             [sys.executable, str(SCRIPT)],
