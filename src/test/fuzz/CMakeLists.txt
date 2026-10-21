@@ -180,6 +180,7 @@ if(WITH_MODELNET)
   target_sources(fuzz
     PRIVATE
       modelnet_canonical_codec.cpp
+      modelnet_lab_api.cpp
       modelnet_lab_peer.cpp
       modelnet_typed_records.cpp
   )
