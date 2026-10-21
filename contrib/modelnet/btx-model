@@ -2,9 +2,9 @@
 """btx-model — first-run unix JSON-RPC client for a scratch btx-modeld.
 
 Verbs: init, doctor, host, preview, search, get, pull, show, ls, files, path,
-open, share, transfers, check, pins, alias, rm-alias, unhost, link, bounty-draft
-(title, JSON, or @FILE), watch-scan, plus 0.34.9-dev cloud/follow/events/mirror/
-profile (fail closed if the helper lacks the method).
+open, share, transfers, check, pins, alias, rm-alias, unhost, rm, link,
+bounty-draft (title, JSON, or @FILE), watch-scan, plus 0.34.9-dev
+cloud/follow/events/mirror/profile (fail closed if the helper lacks the method).
 
 Human door: stderr one_liners / next hints. Agent door: stdout JSON; --json
 suppresses stderr extras. Dual-door docs: HUMANS.md vs AGENTS.md.
@@ -50,6 +50,7 @@ VERBS = (
     "alias",
     "rm-alias",
     "unhost",
+    "rm",
     "link",
     "bounty-draft",
     "watch-scan",
@@ -197,6 +198,8 @@ verbs:
   alias [ID [NAME]]              getmodelaliases / setmodelalias
   rm-alias ALIAS [ID]            removemodelalias (alias lives in the signed card)
   unhost NAME                    unhostmodel: unpin + unseed in one call
+  rm NAME                        removemodel: delete the local pieces and the
+                                 runnable checkout (refused while in use)
   link NAME [PATH|--out PATH] [--stdout] [--force]
                                  exportmodellink: .btx magnet analog
                                  (canonical uri + copy_text; never weights)
@@ -1563,6 +1566,25 @@ def cmd_unhost(sock: str, args: list[str]) -> None:
     )
 
 
+def cmd_rm(sock: str, args: list[str]) -> None:
+    """`ollama rm`: delete a local model's pieces and its runnable checkout.
+    unhost only stops serving; this frees the disk. The helper refuses with
+    IN_USE while a retrieve for the model is queued or running."""
+    if len(args) != 1:
+        _die("rm requires exactly one model name, alias, id, or btx:// URI", 2)
+    ref = args[0]
+    resolved = _resolve_user(sock, ref)
+    if resolved["how"] == "unresolved":
+        _die(f"rm {ref!r}: no local alias, model name, id, or btx:// URI; run 'btx-model ls'")
+    result, err = _rpc_any(sock, "removemodel", [[ref], [_target(resolved)]], timeout=GET_TIMEOUT_S)
+    if result is not None:
+        _print(result, "removemodel")
+        return
+    if _missing_method(err):
+        _die("rm: this helper has no removemodel; 'unhost' stops serving but keeps the bytes")
+    _die(f"removemodel: {_err_text(err)}")
+
+
 def cmd_link(sock: str, args: list[str]) -> None:
     """`qBittorrent .torrent`-style magnet file: canonical uri + copy_text only."""
     if not args:
@@ -2729,6 +2751,7 @@ COMMANDS = {
     "alias": cmd_alias,
     "rm-alias": cmd_rm_alias,
     "unhost": cmd_unhost,
+    "rm": cmd_rm,
     "link": cmd_link,
     "bounty-draft": cmd_bounty_draft,
     "watch-scan": cmd_watch_scan,

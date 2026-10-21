@@ -10918,7 +10918,7 @@ int UnixRpcReplyTimeoutMs(const std::string& method)
     if (method == "waitformodelevent" || method == "importmodel" || method == "hostmodel" ||
         method == "getmodel" || method == "scanmodelwatch" || method == "executemodelimport" ||
         method == "importbtxpackage" || method == "exportmodelpath" || method == "loadmodel" ||
-        method == "unloadmodel" || method == "generatemodel") {
+        method == "unloadmodel" || method == "generatemodel" || method == "removemodel") {
         return UNIX_RPC_LONG_REPLY_MS;
     }
     return UNIX_RPC_REPLY_MS;
