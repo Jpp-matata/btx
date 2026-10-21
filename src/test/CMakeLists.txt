@@ -2026,6 +2026,10 @@ if(WITH_MODELNET)
     swarm_elechold_measure_tests.cpp
     swarm_elechold_quiet_tests.cpp
     swarm_elechold_replay_tests.cpp
+    swarm_schedwit_empty_tests.cpp
+    swarm_schedwit_quiet_tests.cpp
+    swarm_schedwit_replay_tests.cpp
+    swarm_schedwit_sign_tests.cpp
     swarm_minehold_request_tests.cpp
     swarm_ckptsave_request_tests.cpp
     swarm_mixedhold_request_tests.cpp

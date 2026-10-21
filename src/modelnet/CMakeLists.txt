@@ -1799,6 +1799,17 @@ add_library(bitcoin_modelnet STATIC
   swarm_elechold/atoms.cpp
   swarm_elechold/quiet.cpp
   swarm_elechold/swarm_elechold.cpp
+  swarm_schedwit/blank.cpp
+  swarm_schedwit/name.cpp
+  swarm_schedwit/record.cpp
+  swarm_schedwit/book.cpp
+  swarm_schedwit/replay.cpp
+  swarm_schedwit/gate.cpp
+  swarm_schedwit/stay.cpp
+  swarm_schedwit/request.cpp
+  swarm_schedwit/keep.cpp
+  swarm_schedwit/quiet.cpp
+  swarm_schedwit/swarm_schedwitness.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
