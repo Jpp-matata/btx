@@ -52,3 +52,30 @@ For evolution demonstrate a real eligible open model with data rights, multiple 
 Every result must include requirement ID, source commit/diff hash, executable hashes, platform, runtime versions, hardware/topology, exact command, start/end time, outcome, raw evidence locations and limitations. Valid outcomes include PASS, FAIL, NOT_RUN, NOT_IMPLEMENTED and BLOCKED. Documentation of an acceptance recipe is not PASS.
 
 `evidence/execution.json` and JUnit XML are generated from the actual included tests. `IMPLEMENTATION_STATUS.json` lists scope blockers independently. Passing tests cannot turn an absent GPU backend or absent native payment transaction builder into a release-qualified capability.
+
+## What this tree runs
+
+The objectives, matrix, and large-system experiments above are the measurement contract. This section records the runs this tree has completed. A recipe written here is not a PASS.
+
+`btxd` starts `StartSwarmObserver` in-process after the model helper. The branch includes the 0.35 lab tip through merge commit `ee9648fd` on top of `b35d1b9d`.
+
+Two process-local suites have already exited 0:
+
+- In-process bind suites on `b35d1b9d`: 14 cases, exit 0.
+- Earlier journal and requirement suites on `56f00405`: 62 cases, exit 0.
+
+The live pass is latched: an 8-byte memory echo of `abcdefgh`, vllm `ENGINE_ABSENT`, one CPU AdamW step, a one-host two-rank loopback exchange, 8 integer replay pairs, one snapshot, one realm seat, then the requirement and cycle checks. Spend is `0`. Release is `UNQUALIFIED`. `passed()`, `gpu_passed()`, and `windows_passed()` stay false.
+
+A one-GPU two-process script on one machine has exchanged two ranks and reported `RELEASE_QUALIFIED 0`. That run is one machine. A release requires two hosts, so the release stays `UNQUALIFIED`. The outcome of that script is not a PASS for a multi-host or GPU-scale claim.
+
+## Later releases
+
+Later releases move toward a fully autonomous network. Until the verification named with a claim has been completed, that claim stays `NOT_RUN`.
+
+- Peer discovery and local admission require two physical hosts, with every privileged peer absent.
+- Acquiring a verified model from another participant requires a signed artifact moving between two processes that are not the same snapshot object.
+- A submitted task or prompt returning model work requires a user-supplied prompt on a linked execution engine. The latched echo is the fixed internal text `abcdefgh`, and that text does not meet this claim.
+- Authorized training checked by a second machine requires a second physical host and, for a GPU claim, a second GPU. One device and two ranks do not qualify.
+- A private defensive case requires an explicit customer grant. Private prompts stay off until that grant exists.
+- Settlement requires an operator-signed mandate and an isolated-regtest payment. Until then spend stays `0`.
+- Windows, macOS, an offline release image, the hardware profiles, and the sealed acceptance catalogue stay unverified.

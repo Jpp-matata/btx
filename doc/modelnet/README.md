@@ -101,7 +101,12 @@ treats any contact as canonical, and a peer count is only this node's
 observation. Which contacts, if any, ship as defaults is a community decision,
 not something this tree hard-codes.
 
-## Architecture (two processes)
+## Architecture
+
+`btx-modeld` can still be a supervised child of `btxd`. That child is the
+catalog, piece, and PQ1 helper. It is separate from the swarm thread. The
+swarm control plane is a thread inside `btxd`. `btxd` starts that thread
+when `-modelnet` is on. `btxd` does not start `btx-swarmd` or `btx-paynetd`.
 
 ```
   researcher / CLI / btx-qt
@@ -109,18 +114,41 @@ not something this tree hard-codes.
            v
       btx-modeld                 btxd (monetary)
       catalog, pieces, PQ1      ExactReplay, mempool, wallet
+      supervised child          swarm observer thread
       /btx-model/2/              sendmodels hints only
            |                     |
            +-- never BanMan, AddrMan, cs_main, fork choice, issuance
 ```
 
-- `btxd` — monetary node. Optional `-modelnet` introduction bridge. Model
-  methods proxy to the helper; they do not execute models.
-- `btx-modeld` — isolated helper. Strict **PQ1** or fail closed. If this
-  process dies, monetary BTX stays up.
+- `btxd` — monetary node. Model introduction stays on the `sendmodels` hint
+  path. Model methods proxy to the helper; they do not execute models. When
+  `-modelnet` is on (default 1), `src/init.cpp` calls
+  `modelnet::StartSwarmObserver` after the model helper. The observer is a
+  thread in `btxd`. `-modelnet=0` disables it. Monetary consensus continues
+  if the swarm pass fails. `btxd` does not start `btx-swarmd` or
+  `btx-paynetd`.
+- `btx-modeld` — isolated helper. It can still be a supervised child. That
+  process is separate from the swarm thread. Strict **PQ1** or fail closed.
+  If this process dies, monetary BTX stays up.
 - `btx-modelcheck` — header-only SafeTensors/GGUF structure check. Never
   executes pickle, `.pt`, Python, `.so`, or CUDA kernels.
 - `btx-open` — preview-only URI dispatcher (exactly one argument, no shell).
+
+`SwarmObserveCatalog` merges a usable `catalog.json` into
+`modeldir/swarm/observers.json`. Subscriptions are observers only: no compute
+grant, no seeding, no spend.
+
+`SwarmFormPlane` does not exec a sidecar, open a socket, add a DNS seed,
+broadcast, or spend.
+
+The first observer pass, then latched, is an internal conformance pass:
+memory echo of `abcdefgh` for 8 bytes, vllm returns `ENGINE_ABSENT`, one CPU
+AdamW step (sequence 4, hidden 8), loopback two-rank exchange with
+`physical_hosts` 1, integer replay of 8 pairs, one snapshot, one realm seat.
+`Hosts(2)` is refused.
+
+`TickBind` then runs the in-process checks once. `passed()`, `gpu_passed()`,
+and `windows_passed()` stay false. Spend is `"0"`. Release is `UNQUALIFIED`.
 
 **0.34.9-dev Hosted Control Plane** (`IS_RELEASE=false`; code is in this
 tree): `btx-hcpd` is a loopback
@@ -255,3 +283,16 @@ In-tree capability bits are not CSV PASS and not a B0 rewrite. The bar is
 Reference codecs and schema checks: [contrib/modelnet/](../../contrib/modelnet/README.md).
 `contrib/modelnet/validate-doc-examples.sh` runs the examples. Dependency pin:
 `contrib/modelnet/dependency-lock.md` (DOC-02; not an SPDX dump, not CSV PASS).
+
+## Later releases
+
+These are the next releases toward a fully autonomous network:
+
+- Peers discover and admit a local group.
+- A participant acquires a verified model from another participant.
+- A person submits a task or prompt and receives model work.
+- A qualified machine trains on an authorized recipe and a second machine checks it.
+- A private defensive case runs under an explicit customer grant.
+- Accepted work settles in BTX only under an operator-signed mandate.
+
+The verifications still required before those claims are two physical hosts, a second GPU, Windows, macOS, a linked remote execution engine, an offline release image, the hardware profiles, and the sealed acceptance catalogue. Two local ranks are not two hosts. Spend stays 0 until a mandate exists.

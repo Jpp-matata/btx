@@ -19,19 +19,34 @@ fetch, `.btx` / `btx://` retrieve, checkout, optional GPU **load**, and
 has compute; the Native Model Network delivers models to it. Inference is
 **local after acquire**. BTX is not a remote inference marketplace.
 
-ModelNet starts with `btxd`. No second program and no extra startup flag is
-required. A byte-verified complete model joins its lineage in this process.
-The same process selects a small-world neighborhood and, when the operator
-has not written a device file, offers two useful roles: seeding models whose
-catalog row says they are public, and CPU evaluation. It does not assume a
-GPU, so it does not train. It does not read private prompts. `automatic_spend_atoms`
-stays `"0"` until an operator wallet signs a bounded mandate. The scheduler
-never holds a spend key. The reference package under `contrib/swarm` is not
-launched. Lineage records, evaluation boards, promotion heads, and payment
-templates are part of the same process. A download license is not a training
-grant and is not a redistribution grant. An open-license local run is not
-taxed, and attaching a revenue manifest to a model file creates no obligation.
-A profit-share instrument is refused. Nothing in this path broadcasts.
+When ModelNet is compiled, `-modelnet` defaults on. `btxd` supervises the
+model helper, then calls `modelnet::StartSwarmObserver` in `src/init.cpp`.
+The observer is a thread inside `btxd`. `-modelnet=0` turns it off. A swarm
+failure does not stop the monetary node.
+
+About every two seconds the thread reads `catalog.json` into
+`modeldir/swarm/observers.json` when the catalog is usable. Those rows are
+observers only: no compute grant, no seeding, and no spend. A missing catalog
+changes nothing.
+
+The thread refreshes the local mesh, integrates the catalog, runs
+`SwarmFormPlane`, and publishes the live record. `FormationPlane` does not
+exec a sidecar, open a socket, add a DNS seed, broadcast, or spend.
+
+Once, then latched: a memory decode of the fixed public text `abcdefgh` for
+8 bytes; a vllm pull returns `ENGINE_ABSENT`; one CPU AdamW step on a
+sequence-4 hidden-8 network; a loopback exchange of two ranks on one host;
+an integer replay of 8 pairs; one snapshot; one realm seat. A second host is
+refused.
+
+Once, then latched: `TickBind` runs the in-process requirement, the 12-step
+node cycle, the module check, and the safe-slice check. `passed()`,
+`gpu_passed()`, and `windows_passed()` stay false. Spend returns the string
+`0`. Release returns `UNQUALIFIED`.
+
+`btx-swarmd` and `btx-paynetd` are not started by `btxd`. Model RPCs still go
+to the model helper. Retrieval is `FREE_ONLY` and automatic spend atoms stay
+`0`. Detail: [doc/btx-agent-swarm.md](doc/btx-agent-swarm.md).
 
 Two markets sit on the model plane:
 
@@ -55,9 +70,23 @@ This working tree is **0.34.15** (`CLIENT_VERSION_BUILD=15`,
 `CLIENT_VERSION_RC=0`, `CLIENT_VERSION_IS_RELEASE=true`). Shipping tag
 **v0.34.15**. Do not recut `v0.34.14`, `v0.34.13`, `v0.34.12`, or `v0.34.10`.
 
-The private branch `private/btx-035/integration` also contains unpublished
-0.35 research gates. They are not a release and they do not change the
-version numbers above. Read [doc/modelnet/035/PRIVATE.md](doc/modelnet/035/PRIVATE.md).
+This branch also contains the current 0.35 lab tip, including the wallet
+balance-watch RPCs `getbalancewatch` and `getbalanceatheight`, model and
+bounty funding updates, and the `htlc_sha256` presign path. The shipping
+version numbers above stay **0.34.15**.
+
+## Later releases
+
+The next releases are the path to a fully autonomous network.
+
+- Peers find each other and admit a local group.
+- A participant acquires a verified model from another participant.
+- A person submits a task or a prompt and receives work from a model on an admitted machine.
+- A qualified machine trains on an authorized recipe, and a second machine checks the result.
+- A private defensive case runs under an explicit customer grant.
+- Accepted work settles in BTX only under a mandate the operator signed.
+
+Before any of those are claimed, the verifications still required are two physical hosts, a second GPU, Windows, macOS, a linked remote execution engine, an offline release image, the hardware profiles, and the sealed acceptance catalogue. Two local ranks on one machine are not two hosts. Spend stays 0 until a mandate exists.
 
 ## Start here
 
@@ -88,6 +117,7 @@ fabric stay in the passport's capability vector. Details:
 
 ## Table of Contents
 
+- [Later releases](#later-releases)
 - [Start here](#start-here)
 - [Pay With Compute](#pay-with-compute)
 - [Current release — v0.34.15](#current-release--v03415)

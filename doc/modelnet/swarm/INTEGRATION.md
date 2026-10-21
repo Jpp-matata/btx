@@ -1,11 +1,40 @@
 # Swarm integration in this tree
 
-`btxd` watches `catalog.json` while ModelNet is enabled. A byte-verified complete model becomes an observer subscription in `modeldir/swarm/observers.json` and a mesh record in `modeldir/swarm/mesh-state.json`.
+The swarm is integrated as a thread inside `btxd`.
 
-The lineage id is not the artifact id or the checkpoint id. A provisional lineage stays private. A local mapping is the only public advertisement. Neighborhood selection, role eligibility, and the device governor run in this process. With no `swarm/device.json`, the node offers public seeding and CPU evaluation, records zero VRAM, and does not train. GPU training, private prompts, and private data stay off until that file grants them. `automatic_spend_atoms` stays the string `"0"`. The scheduler has no spend key. There is no swarm startup flag and no second swarm binary. Many pools share one channel. A clearing batch nets every payment in that batch and advances the channel sequence once. The update builds no layer-1 transaction. A reservation of the same atoms by a second pool is refused, and a reorg freezes new reservations. One close template lists each positive pool balance. A promise, an observed output, an escrow lot, channel capacity, earned credit, and a confirmed settlement stay separate, and a certificate is not a balance. Findings, strategies, adapters, and candidates append to separate timescale arrays. The committee log writes a vote before it returns and refuses to truncate a committed prefix. A mandate reserve cannot exceed remaining collateral. An attempt lease refuses another result until the worker is quiescent and expires without resetting accepted work. A KV prefix mismatch is not an absent engine, and a prefetch without an engine moves no bytes. A LAN card verifies an ML-DSA signature and refuses a private membership advertisement. Follow stages a compatible candidate without changing the active head. This process can bind a refund and cannot broadcast the funding transaction. A watchtower appointment requires a contest window of at least 160 blocks and refuses a native remedy and a secp256k1 penalty. A transport pin does not authorize a payment. Joining a work realm does not join the controller committee. A poisoning freeze keeps the prior checkpoint, and a key compromise does not remap identity history. A ciphertext piece is `REALM_SEALED` and is not decrypted. An invalid eviction deletes nothing. A remote manifest does not start a host interpreter, and this process does not launch a sandbox child. An artifact splits into 4 MiB SHA-384 pieces and stays unusable until every piece verifies. A work-graph prefetch without an engine moves no bytes. A causal append leaves the existing prefix unchanged. A peer may stay passive or follow an older generation, and the community continues while another peer is active.
+`src/init.cpp` calls `modelnet::StartSwarmObserver` after the model helper when `-modelnet` defaults on. `-modelnet=0` skips that call and logs that the model network is disabled. The monetary node still starts. The observer runs on a `std::thread` owned by the `btxd` process. Shutdown calls `StopSwarmObserver` and joins that thread. If a step throws or returns an error, the thread logs the error with the monetary node continuing. A swarm failure does not stop consensus.
 
-Exact KV placement, cohort averaging, the reference integer trainer check, Hoeffding qualification, niche allocation, channel stage and rollback, SEP pool balances, contributor HTLC lots, the cumulative channel, and routed payment plans are library calls inside `bitcoin_modelnet`. A missing GPU or transfer engine returns `ENGINE_ABSENT` and moves no bytes. HTLC scripts are the existing P2MR claim and refund leaves. Nothing in this path broadcasts a transaction.
+## Current behavior
 
-`contrib/swarm` remains the reference package. `btxd` does not start it. The sidecar patch is not applied.
+About every two seconds, while the thread is running:
 
-A quality graduation does not promote a realm and does not admit ExactReplay. Lineage ancestry, presence, knowledge records, learner-island forks, SEP/1 manifests, reward splits, refund and payout templates, hashlock remedies, sponsor lots, evaluator thresholds, and recovery checks live in this process. A second policy epoch does not move old obligations. The same outpoint cannot fund two pools. This host can run the Linux unit suites. A Windows or GPU run is recorded only when that command is executed on that machine.
+1. The catalog is written to `modeldir/swarm/observers.json`. The file is observers only. It records no grant, no seed, and no spend. `automatic_spend_atoms` in that file is the string `"0"`, and payment authority is false.
+2. The local mesh is refreshed.
+3. The catalog is integrated.
+4. `SwarmFormPlane` runs. `FormationPlane` does not exec a sidecar, open a socket, add a DNS seed, broadcast, or spend.
+5. `SwarmPublishLive` runs. A missing contribution file succeeds and spends nothing.
+
+The same wake then calls `NifObserve::Tick`, then `SwarmBound::Pass` once, then `TickBind::Pass` once. Later wakes see the bound and the tick bind already latched. They do not repeat the pass.
+
+`SwarmBound::Pass` uses the fixed prompt `abcdefgh`, an 8-byte memory echo, and vLLM `ENGINE_ABSENT`. It takes one CPU AdamW step on a 4 by 8 dense net, exchanges two ranks over loopback on one host, checks eight integer replay pairs, publishes one snapshot, and seats one realm role. A second host is refused. The decode path does not launch a process and does not use a GPU.
+
+`TickBind::Pass` runs the requirement binders, a 12-step node cycle with generation 0 and `passed()` false, the local module stores, and the safe slices. It does not quarantine a live model and does not start a guard process.
+
+`Spend` returns `"0"`. `Release` returns `UNQUALIFIED`. `passed()`, `gpu_passed()`, and `windows_passed()` stay false.
+
+`btxd` does not launch `btx-swarmd` or `btx-paynetd`. `contrib/swarm` remains the reference Python package. `btxd` does not start it. That package is not the running control plane.
+
+Libraries elsewhere in `bitcoin_modelnet` can be called by tests. They are not this control plane. The latched pass is not a peer network, a qualified release, or a settlement. One machine and two local ranks are not two hosts. This host can compile and run the Linux unit suites. A Windows, macOS, or GPU result is recorded only when that run happens on that machine.
+
+## Later releases
+
+Follow-on work toward a fully autonomous network:
+
+- Network peer discovery and admission of a local group.
+- Acquiring a verified model from another participant.
+- Submitting a task or prompt and receiving model work.
+- Authorized training checked by a second machine.
+- A private defensive case under an explicit customer grant.
+- Settlement of accepted work in BTX only under an operator-signed mandate.
+
+Those claims wait on verification with two physical hosts, a second GPU, Windows, macOS, a linked remote execution engine, an offline release image, the hardware profiles, and the sealed acceptance catalogue. One machine and two local ranks are not two hosts. Spend stays 0 until a mandate exists.

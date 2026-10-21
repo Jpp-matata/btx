@@ -23,6 +23,35 @@ btx://pqwy06q0q7wwzy70aeq45sxnlvq3mr067yt4jzphzvnfn2c4zc24zxz665zdprf0nwgskvqq9c
 Last shipping tag is **v0.34.8**. This tree is **0.34.9-dev**
 (`CLIENT_VERSION_IS_RELEASE=false`).
 
+## Swarm inside btxd
+
+The steps below use the model helper. `btx-modeld` can still be a supervised
+child of packaged `btxd`, and a standalone helper
+(`contrib/modelnet/btx-model init`) is still the catalog and PQ1 door. That
+helper is separate from the swarm thread.
+
+The swarm control plane is a thread in `btxd`. `src/init.cpp` calls
+`modelnet::StartSwarmObserver` after the model helper when `-modelnet` is on
+(default 1). The observer is a thread in `btxd`. `-modelnet=0` disables it.
+Monetary consensus continues if the swarm pass fails. `btxd` does not start
+`btx-swarmd` or `btx-paynetd`.
+
+`SwarmObserveCatalog` merges a usable `catalog.json` into
+`modeldir/swarm/observers.json`. Subscriptions are observers only: no compute
+grant, no seeding, no spend.
+
+`SwarmFormPlane` does not exec a sidecar, open a socket, add a DNS seed,
+broadcast, or spend.
+
+The first observer pass, then latched, is an internal conformance pass:
+memory echo of `abcdefgh` for 8 bytes, vllm returns `ENGINE_ABSENT`, one CPU
+AdamW step (sequence 4, hidden 8), loopback two-rank exchange with
+`physical_hosts` 1, integer replay of 8 pairs, one snapshot, one realm seat.
+`Hosts(2)` is refused.
+
+`TickBind` then runs the in-process checks once. `passed()`, `gpu_passed()`,
+and `windows_passed()` stay false. Spend is `"0"`. Release is `UNQUALIFIED`.
+
 ## What you are about to do
 
 | Step | Human meaning | Analog |
@@ -518,3 +547,16 @@ contrib/modelnet/btx-model --json fetch @contrib/modelnet/recipes/registry-indep
 - Do not `getmodel` large fixtures into a live attestor datadir.
 - Do not put `dn=` (or any query string) on the `btx://` URI.
 - Do not pass cloud secrets on argv; use `--credential-ref env:BTX_CLOUD_CREDENTIAL` or `--secret-file`.
+
+## Later releases
+
+These are the next releases toward a fully autonomous network:
+
+- Peers discover and admit a local group.
+- A participant acquires a verified model from another participant.
+- A person submits a task or prompt and receives model work.
+- A qualified machine trains on an authorized recipe and a second machine checks it.
+- A private defensive case runs under an explicit customer grant.
+- Accepted work settles in BTX only under an operator-signed mandate.
+
+The verifications still required before those claims are two physical hosts, a second GPU, Windows, macOS, a linked remote execution engine, an offline release image, the hardware profiles, and the sealed acceptance catalogue. Two local ranks are not two hosts. Spend stays 0 until a mandate exists.

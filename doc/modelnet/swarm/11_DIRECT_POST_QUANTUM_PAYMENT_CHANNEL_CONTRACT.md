@@ -63,3 +63,15 @@ A sponsor can refuse to issue a higher payout after receiving work unless an ind
 Implement native funding/refund builders, full PSBT checks, payer/worker signing services with separate custody, transaction interpreter tests, persistent latest-claim storage, confirmation monitoring, unilateral exit, fee rescue and refund handling. Test malformed scripts, wrong keys, mixed networks, replacement funding IDs, signer refusal, restart before acknowledgment, sponsor disappearance, premature refund, stale payout attempts and mass exits on regtest.
 
 Until these pass and are independently reviewed, the package advertises accounting/model status only. Mainnet exit code is absent, not disabled by a hidden feature switch. This document specifies what must be built; it must not be presented as evidence that it already exists.
+
+## What btxd runs now
+
+The swarm thread inside btxd returns Spend as the string "0". `automatic_spend_atoms` stays 0. Release returns `UNQUALIFIED`. btxd does not start `btx-paynetd`. The reference paynet program, if someone runs it by hand, reports `ACCOUNTING_ONLY`, payment signing false, and automatic spend 0.
+
+No channel is opened by the observer. No mainnet broadcast is made. The research path and the scheduler do not receive a spend key. Wallet work already on this branch includes `getbalancewatch`, `getbalanceatheight`, model and bounty funding updates, and presign of the `htlc_sha256` claim leaf. Helper approval is not a chain spend. Presign of that claim leaf does not advance the opening state machine, does not satisfy `REFUND_SIGNED_AND_INTERPRETER_VERIFIED`, and does not authorize `FUNDING_BROADCAST`. A broadcast attempt remains `BROADCAST_FORBIDDEN`. This process still does not sign with a spend key.
+
+## Later releases
+
+Toward a fully autonomous network, accepted work can settle in BTX only under a mandate the operator signed. A funded objective can pay a bounded amount through the existing payment facilities. A routed payment still has to pass the hash-locked claim checks, including the 32-byte preimage pin on the claim leaf. Currency remains BTX.
+
+Verifications required before a payment claim: an operator-signed mandate, isolated-regtest settlement, and no change to the rule that an unsigned or absent mandate spends nothing. Two physical hosts, a second GPU, Windows, macOS, a linked remote engine, an offline release image, the hardware profiles, and the sealed acceptance catalogue remain separate qualifications and are not implied by a zero spend result. PAY-001 through PAY-006 and the mandatory test packet above remain in force. Mainnet exit code stays absent until that packet passes independent review. A Spend value of "0" is not that review.

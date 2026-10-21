@@ -22,11 +22,11 @@ The reference layout is `[batch, heads, tokens, head_dimension]` for each layer'
 
 **KV-004.** Appending a causal token does not invalidate existing prefix KV. Altering an earlier token or any compatibility-bound model parameter invalidates dependent state. The consumer must either recompute or use a specifically validated transformation; it may not reinterpret incompatible tensors as memory.
 
-The implementation transfers actual SafeTensors KV pages over authenticated network endpoints and validates geometry before use. Two separately identified workers in the network test generate identical completion bytes while the second reuses fifteen of sixteen input-prefix tokens. The final input token is recomputed when needed because the portable handle does not include trusted final logits. This verifies reuse correctness; it is not a throughput benchmark.
+The specified transfer moves SafeTensors KV pages over authenticated network endpoints and validates geometry before use. A reuse check recomputes the final input token because the portable handle does not include trusted final logits. That check is a correctness target for a later release. It is a design for reuse correctness, and it is not a throughput benchmark.
 
 ## Producer assurance and privacy
 
-A content hash proves byte identity, not that those bytes were computed from the promised weights and prefix. A malicious producer can publish a self-consistent poisoned tensor. The current worker only accepts exact caches from explicitly trusted producer identities and identifies locator assurance as producer-asserted, not compute-proven. A model author's signature does not by itself authorize executable compiler caches or runtime software.
+A content hash proves byte identity, not that those bytes were computed from the promised weights and prefix. A malicious producer can publish a self-consistent poisoned tensor. A worker accepts exact caches only from explicitly trusted producer identities, and locator assurance stays producer-asserted. A model author's signature does not by itself authorize executable compiler caches or runtime software.
 
 **KV-005.** Cache pages do not replace Lab replay/admission, work evidence, a fresh execution grant or independent evaluation. A cache is disposable. Missing, expired, corrupted or incompatible pages cause recomputation, not reduced admission assurance.
 
@@ -38,7 +38,7 @@ Compare three alternatives: execute near an already resident compatible cache, t
 
 A model-independent cost estimate for conventional attention KV is `2 × layers × KV_heads × head_dim × prefix_tokens × bytes_per_element`, excluding replication, allocator padding and quantization metadata. It is a sizing tool, not a performance result. Do not multiply unrelated published speedups together.
 
-Work graphs should provide next-use hints: retain a parent context while a tool runs, prefetch for known children, demote inactive branches, and preferentially retain shared ancestors. Runtime allocators retain authority over actual memory residency. Current code includes exact reuse and placement helpers; full engine-integrated workflow prefetch is an outstanding adapter requirement.
+Work graphs should provide next-use hints: retain a parent context while a tool runs, prefetch for known children, demote inactive branches, and preferentially retain shared ancestors. Runtime allocators retain authority over actual memory residency. Exact reuse, placement, and engine-integrated workflow prefetch remain design.
 
 ## Production acceleration profiles
 
@@ -53,3 +53,15 @@ Work graphs should provide next-use hints: retain a parent context while a tool 
 | Compiled/runtime caches | Trusted builder, exact runtime/compiler/shape and source binding | A signed model is not a builder. Incomplete bytes are `INCOMPLETE` |
 
 A high-performance feature is automatically eligible only when a compatible, locally authorized and empirically qualified implementation exists. Availability of an importable module is discovery, not qualification.
+
+## What btxd runs now
+
+The swarm thread inside `btxd`, once, publishes and pulls one local snapshot body and refuses a second host. KV movement in this pass is the 8-byte memory echo. A named remote engine returns `ENGINE_ABSENT` and moves no remote bytes.
+
+Two ranks exchange 4 bytes on one host through a loopback socket. `physical_hosts()` is 1. This is not a second machine and not a shared-memory fabric across a network. Piece checks, realm sealing, prefix mismatch, and an absent prefetch stay on this host. They do not acquire a verified model from another participant, and they do not move compatible state to an admitted machine.
+
+## Later releases
+
+Toward a fully autonomous network, a participant acquires a verified model from another participant. Compatible state can move to an admitted machine. A qualified machine trains an authorized recipe and a second machine checks it. Evaluated descendants can be staged and adopted under a local policy. A private defensive case runs under an explicit customer grant.
+
+Verifications required first: two physical hosts, a second GPU, Windows, macOS, a linked remote execution engine, an offline release image, the hardware profiles, and the sealed acceptance catalogue. The 8-byte memory echo and the one-host 4-byte exchange are not those verifications. KV-001 through KV-005 and the acceleration profiles above stay design until that catalogue accepts them.

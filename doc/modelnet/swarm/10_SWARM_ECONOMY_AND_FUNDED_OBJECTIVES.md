@@ -60,3 +60,15 @@ Service revenue may be allocated by explicit contracts to operators, evaluation 
 ## Required release qualification
 
 Before accepting secured work: independently audit collateral control, cross-pool reservations, reorg handling, native unilateral exits, withheld acceptance, reused preimages, stale states, watcher outages and simultaneous exits. Verify that a disappeared coordinator cannot confiscate an already enforceable worker claim. The current randomized conservation and restart tests qualify local accounting only.
+
+## What btxd runs now
+
+The swarm thread inside btxd returns Spend as the string "0". `automatic_spend_atoms` stays 0. Release returns `UNQUALIFIED`. btxd does not start `btx-paynetd`. The reference paynet program, if someone runs it by hand, reports `ACCOUNTING_ONLY`, payment signing false, and automatic spend 0.
+
+No channel is opened by the observer. No mainnet broadcast is made. The research path and the scheduler do not receive a spend key. Wallet work already on this branch includes `getbalancewatch`, `getbalanceatheight`, model and bounty funding updates, and presign of the `htlc_sha256` claim leaf. Helper approval is not a chain spend. Those wallet calls leave `immediately_payable_l2_atoms` and `enforceable_channel_claim_atoms` at zero. A local budget reservation remains an accounting record. SEP-003 still applies: no command in this service signs or broadcasts a transaction.
+
+## Later releases
+
+Toward a fully autonomous network, accepted work can settle in BTX only under a mandate the operator signed. A funded objective can pay a bounded amount through the existing payment facilities. A routed payment still has to pass the hash-locked claim checks, including the 32-byte preimage pin on the claim leaf. Currency remains BTX.
+
+Verifications required before a payment claim: an operator-signed mandate, isolated-regtest settlement, and no change to the rule that an unsigned or absent mandate spends nothing. Two physical hosts, a second GPU, Windows, macOS, a linked remote engine, an offline release image, the hardware profiles, and the sealed acceptance catalogue remain separate qualifications and are not implied by a zero spend result. The release qualification above still binds before secured work is accepted. A Spend value of "0" does not retire that qualification.

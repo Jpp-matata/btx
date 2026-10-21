@@ -53,3 +53,15 @@ A single channel's available balance cannot be reserved for two pools. Reservati
 ## Qualification gates
 
 A routed release requires a complete audited native channel class, persistent two-party commitment exchange, safe HTLC add/fulfill/fail ordering, routing reservations, invoices, watchtower appointments, exit fee handling and native regtest/malicious-peer tests. Run failed-hop, expired-hop, route probing, replayed preimage, stale-state, simultaneous close, prolonged partition and reorg scenarios. None of this can be marked PASS because the abstract route/HTLC unit tests pass.
+
+## What btxd runs now
+
+The swarm thread inside btxd returns Spend as the string "0". `automatic_spend_atoms` stays 0. Release returns `UNQUALIFIED`. btxd does not start `btx-paynetd`. The reference paynet program, if someone runs it by hand, reports `ACCOUNTING_ONLY`, payment signing false, and automatic spend 0.
+
+No channel is opened by the observer. No mainnet broadcast is made. The research path and the scheduler do not receive a spend key. Wallet work already on this branch includes `getbalancewatch`, `getbalanceatheight`, model and bounty funding updates, and presign of the `htlc_sha256` claim leaf. Helper approval is not a chain spend. Presign of that claim leaf does not lock liquidity, does not release a preimage, and does not move a route out of `ROUTE_PLAN_ONLY`. Nothing in this path broadcasts. `native_remedy_available` stays false.
+
+## Later releases
+
+Toward a fully autonomous network, accepted work can settle in BTX only under a mandate the operator signed. A funded objective can pay a bounded amount through the existing payment facilities. A routed payment still has to pass the hash-locked claim checks, including the 32-byte preimage pin on the claim leaf. Currency remains BTX.
+
+Verifications required before a payment claim: an operator-signed mandate, isolated-regtest settlement, and no change to the rule that an unsigned or absent mandate spends nothing. Two physical hosts, a second GPU, Windows, macOS, a linked remote engine, an offline release image, the hardware profiles, and the sealed acceptance catalogue remain separate qualifications and are not implied by a zero spend result. The qualification gates above stay closed. A Spend value of "0" does not mark a routed release PASS, and it does not relax the 32-byte preimage pin on the claim leaf.
