@@ -2136,6 +2136,11 @@ if(WITH_MODELNET)
     swarm_flagship_record_tests.cpp
     swarm_flagship_replay_tests.cpp
     swarm_flagship_rollback_tests.cpp
+    swarm_parentage_bind_tests.cpp
+    swarm_parentage_claim_tests.cpp
+    swarm_parentage_hub_tests.cpp
+    swarm_parentage_promote_tests.cpp
+    swarm_parentage_trust_tests.cpp
     swarm_minehold_request_tests.cpp
     swarm_ckptsave_request_tests.cpp
     swarm_mixedhold_request_tests.cpp

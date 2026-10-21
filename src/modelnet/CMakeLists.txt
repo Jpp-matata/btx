@@ -2041,6 +2041,15 @@ add_library(bitcoin_modelnet STATIC
   swarm_flagship/inspect.cpp
   swarm_flagship/quiet.cpp
   swarm_flagship/cursor.cpp
+  swarm_parentage/record.cpp
+  swarm_parentage/bind.cpp
+  swarm_parentage/ledger.cpp
+  swarm_parentage/hub.cpp
+  swarm_parentage/claim.cpp
+  swarm_parentage/trust.cpp
+  swarm_parentage/promote.cpp
+  swarm_parentage/flags.cpp
+  swarm_parentage/swarm_parentage.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
