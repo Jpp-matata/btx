@@ -2140,6 +2140,16 @@ add_library(bitcoin_modelnet STATIC
   swarm_kvwire/pair.cpp
   swarm_kvwire/swarm_kvwire.cpp
   swarm_lanwire/swarm_lanwire.cpp
+  nif_lifecycle/journal.cpp
+  nif_lifecycle/nif_lifecycle.cpp
+  nif_exec/nif_exec.cpp
+  nif_continue/nif_continue.cpp
+  nif_scope/nif_scope.cpp
+  dt_dense/dt_dense.cpp
+  dt_ckpt/dt_ckpt.cpp
+  dt_export/dt_export.cpp
+  dt_cohort/dt_cohort.cpp
+  dt_twonode/dt_twonode.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp

@@ -2206,6 +2206,15 @@ if(WITH_MODELNET)
     swarm_trainwire_tests.cpp
     swarm_kvwire_tests.cpp
     swarm_lanwire_tests.cpp
+    nif_lifecycle_tests.cpp
+    nif_exec_tests.cpp
+    nif_continue_tests.cpp
+    nif_scope_tests.cpp
+    dt_dense_tests.cpp
+    dt_ckpt_tests.cpp
+    dt_export_tests.cpp
+    dt_cohort_tests.cpp
+    dt_twonode_tests.cpp
     swarm_minehold_request_tests.cpp
     swarm_ckptsave_request_tests.cpp
     swarm_mixedhold_request_tests.cpp
