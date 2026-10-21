@@ -2001,6 +2001,15 @@ add_library(bitcoin_modelnet STATIC
   swarm_sandboxgate/quiet.cpp
   swarm_sandboxgate/inspect.cpp
   swarm_sandboxgate/swarm_sandboxgate.cpp
+  swarm_dedup/index.cpp
+  swarm_dedup/binding.cpp
+  swarm_dedup/gate.cpp
+  swarm_dedup/announce.cpp
+  swarm_dedup/digest.cpp
+  swarm_dedup/pull.cpp
+  swarm_dedup/drop.cpp
+  swarm_dedup/quiet.cpp
+  swarm_dedup/swarm_dedup.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp

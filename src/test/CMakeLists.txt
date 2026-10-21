@@ -2121,6 +2121,11 @@ if(WITH_MODELNET)
     swarm_sandboxgate_net_tests.cpp
     swarm_sandboxgate_private_tests.cpp
     swarm_sandboxgate_run_tests.cpp
+    swarm_dedup_alone_tests.cpp
+    swarm_dedup_announce_tests.cpp
+    swarm_dedup_digest_tests.cpp
+    swarm_dedup_drop_tests.cpp
+    swarm_dedup_pull_tests.cpp
     swarm_minehold_request_tests.cpp
     swarm_ckptsave_request_tests.cpp
     swarm_mixedhold_request_tests.cpp
