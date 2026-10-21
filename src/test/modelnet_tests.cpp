@@ -174,6 +174,27 @@ BOOST_AUTO_TEST_CASE(record_vectors)
     }
 }
 
+BOOST_AUTO_TEST_CASE(typed_record_expiry_above_int64_is_refused)
+{
+    std::vector<unsigned char> pk, sk;
+    std::string err;
+    BOOST_REQUIRE(modelnet::GenerateMlDsa44(pk, sk, err));
+    UniValue body(UniValue::VOBJ);
+    modelnet::FillRecordCommon(body, 1, modelnet::ResearchIdentityId(pk), 1700000000, 0);
+    body.pushKV("expires_at", uint64_t{1} << 63);
+    body.pushKV("display_name", "card");
+    body.pushKV("description", "");
+    std::vector<unsigned char> payload, sig;
+    modelnet::Digest48 rid;
+    BOOST_REQUIRE(modelnet::SignTypedRecord(modelnet::RECORD_IDENTITY_CARD, body, sk, payload, sig, rid, err));
+    UniValue decoded;
+    modelnet::Digest48 got;
+    bool ok{true};
+    BOOST_CHECK_NO_THROW(ok = modelnet::VerifyTypedRecord(modelnet::RECORD_IDENTITY_CARD, payload, sig, pk, 1700000000, decoded, got, err));
+    BOOST_CHECK(!ok);
+    BOOST_CHECK_EQUAL(err, "expiry out of range");
+}
+
 BOOST_AUTO_TEST_CASE(free_first_and_reciprocity)
 {
     modelnet::PaidPlan paid;

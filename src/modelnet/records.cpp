@@ -11,6 +11,7 @@
 #include <util/strencodings.h>
 
 #include <algorithm>
+#include <limits>
 #include <map>
 #include <memory>
 #include <regex>
@@ -721,8 +722,13 @@ bool VerifyTypedRecord(uint8_t kind,
         err = "signer identity mismatch";
         return false;
     }
-    const int64_t exp = body.exists("expires_at") ? body["expires_at"].getInt<int64_t>() : 0;
-    if (exp && now > 0 && exp < now) {
+    // expires_at is a u64 field, but callers such as AcceptSignedAnnounce hold it as int64.
+    const uint64_t exp = body.exists("expires_at") ? body["expires_at"].getInt<uint64_t>() : 0;
+    if (exp > static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
+        err = "expiry out of range";
+        return false;
+    }
+    if (exp && now > 0 && static_cast<int64_t>(exp) < now) {
         err = "expired record";
         return false;
     }
