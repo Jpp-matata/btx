@@ -2199,6 +2199,8 @@ if(WITH_MODELNET)
     swarm_planner_tests.cpp
     swarm_evidence_tests.cpp
     swarm_progress_tests.cpp
+    swarm_artifactrun_tests.cpp
+    swarm_payreg_tests.cpp
     swarm_minehold_request_tests.cpp
     swarm_ckptsave_request_tests.cpp
     swarm_mixedhold_request_tests.cpp
