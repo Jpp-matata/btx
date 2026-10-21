@@ -2060,6 +2060,17 @@ add_library(bitcoin_modelnet STATIC
   swarm_sigcover/ledger.cpp
   swarm_sigcover/flags.cpp
   swarm_sigcover/swarm_sigcover.cpp
+  swarm_intcycle/swarm_intcycle.cpp
+  swarm_onechannel/record.cpp
+  swarm_onechannel/atoms.cpp
+  swarm_onechannel/reserve.cpp
+  swarm_onechannel/bind.cpp
+  swarm_onechannel/fund.cpp
+  swarm_onechannel/open.cpp
+  swarm_onechannel/quote.cpp
+  swarm_onechannel/ledger.cpp
+  swarm_onechannel/flags.cpp
+  swarm_onechannel/swarm_onechannel.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp

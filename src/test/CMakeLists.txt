@@ -2146,6 +2146,16 @@ if(WITH_MODELNET)
     swarm_sigcover_key_tests.cpp
     swarm_sigcover_preimage_tests.cpp
     swarm_sigcover_skip_tests.cpp
+    swarm_intcycle_export_tests.cpp
+    swarm_intcycle_gpu_tests.cpp
+    swarm_intcycle_replay_tests.cpp
+    swarm_intcycle_resume_tests.cpp
+    swarm_intcycle_run_tests.cpp
+    swarm_onechannel_bind_tests.cpp
+    swarm_onechannel_fund_tests.cpp
+    swarm_onechannel_open_tests.cpp
+    swarm_onechannel_quote_tests.cpp
+    swarm_onechannel_reserve_tests.cpp
     swarm_minehold_request_tests.cpp
     swarm_ckptsave_request_tests.cpp
     swarm_mixedhold_request_tests.cpp
