@@ -2071,6 +2071,13 @@ if(WITH_MODELNET)
     swarm_generation_promote_tests.cpp
     swarm_generation_propose_tests.cpp
     swarm_generation_stage_tests.cpp
+    swarm_evalengine_adopt_tests.cpp
+    swarm_evalengine_challenge_tests.cpp
+    swarm_evalengine_holdout_tests.cpp
+    swarm_evalengine_promote_tests.cpp
+    swarm_evalengine_regression_tests.cpp
+    swarm_evalengine_report_tests.cpp
+    swarm_evalengine_suite_tests.cpp
     swarm_minehold_request_tests.cpp
     swarm_ckptsave_request_tests.cpp
     swarm_mixedhold_request_tests.cpp

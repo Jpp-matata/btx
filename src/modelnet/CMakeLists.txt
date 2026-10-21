@@ -1909,6 +1909,20 @@ add_library(bitcoin_modelnet STATIC
   swarm_generation/strategy.cpp
   swarm_generation/task.cpp
   swarm_generation/training.cpp
+  swarm_evalengine/quiet.cpp
+  swarm_evalengine/manifest.cpp
+  swarm_evalengine/checkpoint.cpp
+  swarm_evalengine/plan.cpp
+  swarm_evalengine/suite.cpp
+  swarm_evalengine/report.cpp
+  swarm_evalengine/regression.cpp
+  swarm_evalengine/challenge.cpp
+  swarm_evalengine/validation.cpp
+  swarm_evalengine/certificate.cpp
+  swarm_evalengine/channel.cpp
+  swarm_evalengine/adoption.cpp
+  swarm_evalengine/qualify.cpp
+  swarm_evalengine/engine.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
