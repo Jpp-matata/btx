@@ -2078,6 +2078,13 @@ if(WITH_MODELNET)
     swarm_evalengine_regression_tests.cpp
     swarm_evalengine_report_tests.cpp
     swarm_evalengine_suite_tests.cpp
+    swarm_faultboard_admit_tests.cpp
+    swarm_faultboard_cache_tests.cpp
+    swarm_faultboard_coordinator_tests.cpp
+    swarm_faultboard_pay_tests.cpp
+    swarm_faultboard_promote_tests.cpp
+    swarm_faultboard_reorg_tests.cpp
+    swarm_faultboard_worker_tests.cpp
     swarm_minehold_request_tests.cpp
     swarm_ckptsave_request_tests.cpp
     swarm_mixedhold_request_tests.cpp
