@@ -176,6 +176,14 @@ if(UNIX AND NOT APPLE)
   endif()
 endif()
 
+if(WITH_MODELNET)
+  target_sources(fuzz
+    PRIVATE
+      modelnet_lab_peer.cpp
+  )
+  target_link_libraries(fuzz bitcoin_modelnet)
+endif()
+
 if(ENABLE_WALLET)
   add_subdirectory(${PROJECT_SOURCE_DIR}/src/wallet/test/fuzz wallet)
 endif()
