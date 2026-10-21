@@ -2171,6 +2171,10 @@ if(WITH_MODELNET)
     swarm_kvmove_put_tests.cpp
     swarm_kvmove_quant_tests.cpp
     swarm_kvmove_remote_tests.cpp
+    swarm_settlebuild_claim_tests.cpp
+    swarm_settlebuild_preimage_tests.cpp
+    swarm_settlebuild_refund_tests.cpp
+    swarm_settlebuild_settle_tests.cpp
     swarm_minehold_request_tests.cpp
     swarm_ckptsave_request_tests.cpp
     swarm_mixedhold_request_tests.cpp

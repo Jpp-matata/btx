@@ -2103,6 +2103,12 @@ add_library(bitcoin_modelnet STATIC
   swarm_kvmove/slot.cpp
   swarm_kvmove/copy.cpp
   swarm_kvmove/swarm_kvmove.cpp
+  swarm_settlebuild/algo.cpp
+  swarm_settlebuild/flags.cpp
+  swarm_settlebuild/claim.cpp
+  swarm_settlebuild/refund.cpp
+  swarm_settlebuild/settle.cpp
+  swarm_settlebuild/swarm_settlebuild.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
