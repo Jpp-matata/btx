@@ -1820,6 +1820,17 @@ add_library(bitcoin_modelnet STATIC
   swarm_rescap/apply.cpp
   swarm_rescap/quiet.cpp
   swarm_rescap/swarm_rescap.cpp
+  swarm_holdrot/blank.cpp
+  swarm_holdrot/name.cpp
+  swarm_holdrot/record.cpp
+  swarm_holdrot/book.cpp
+  swarm_holdrot/replay.cpp
+  swarm_holdrot/gate.cpp
+  swarm_holdrot/stay.cpp
+  swarm_holdrot/request.cpp
+  swarm_holdrot/keep.cpp
+  swarm_holdrot/quiet.cpp
+  swarm_holdrot/swarm_holdrot.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp

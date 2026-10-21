@@ -2035,6 +2035,10 @@ if(WITH_MODELNET)
     swarm_rescap_raise_tests.cpp
     swarm_rescap_replay_tests.cpp
     swarm_rescap_under_tests.cpp
+    swarm_holdrot_empty_tests.cpp
+    swarm_holdrot_quiet_tests.cpp
+    swarm_holdrot_replay_tests.cpp
+    swarm_holdrot_rotate_tests.cpp
     swarm_minehold_request_tests.cpp
     swarm_ckptsave_request_tests.cpp
     swarm_mixedhold_request_tests.cpp
