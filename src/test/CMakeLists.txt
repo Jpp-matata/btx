@@ -2016,6 +2016,16 @@ if(WITH_MODELNET)
     swarm_fsdphold_empty_tests.cpp
     swarm_fsdphold_replay_tests.cpp
     swarm_fsdphold_request_tests.cpp
+    swarm_loginhold_bytes_tests.cpp
+    swarm_loginhold_empty_tests.cpp
+    swarm_loginhold_replay_tests.cpp
+    swarm_loginhold_request_tests.cpp
+    swarm_elechold_atoms_tests.cpp
+    swarm_elechold_below_tests.cpp
+    swarm_elechold_charge_tests.cpp
+    swarm_elechold_measure_tests.cpp
+    swarm_elechold_quiet_tests.cpp
+    swarm_elechold_replay_tests.cpp
     swarm_minehold_request_tests.cpp
     swarm_ckptsave_request_tests.cpp
     swarm_mixedhold_request_tests.cpp

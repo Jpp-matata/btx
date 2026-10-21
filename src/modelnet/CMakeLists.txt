@@ -1777,6 +1777,28 @@ add_library(bitcoin_modelnet STATIC
   swarm_fsdphold/keep.cpp
   swarm_fsdphold/quiet.cpp
   swarm_fsdphold/swarm_fsdphold.cpp
+  swarm_loginhold/blank.cpp
+  swarm_loginhold/name.cpp
+  swarm_loginhold/record.cpp
+  swarm_loginhold/book.cpp
+  swarm_loginhold/replay.cpp
+  swarm_loginhold/gate.cpp
+  swarm_loginhold/stay.cpp
+  swarm_loginhold/request.cpp
+  swarm_loginhold/keep.cpp
+  swarm_loginhold/quiet.cpp
+  swarm_loginhold/swarm_loginhold.cpp
+  swarm_elechold/watthour.cpp
+  swarm_elechold/under.cpp
+  swarm_elechold/record.cpp
+  swarm_elechold/book.cpp
+  swarm_elechold/replay.cpp
+  swarm_elechold/gate.cpp
+  swarm_elechold/meter.cpp
+  swarm_elechold/charge.cpp
+  swarm_elechold/atoms.cpp
+  swarm_elechold/quiet.cpp
+  swarm_elechold/swarm_elechold.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
