@@ -48,10 +48,11 @@ archive's floor instead of only the host's missing symbol.
 On top of the GLIBC ceiling and the Mach-O codesign check: an executable
 that NEEDs a library the archive ships must reach it through RUNPATH/RPATH
 or the packaged wrapper; no ELF may need a GLIBCXX, CXXABI, GCC or OPENSSL
-version above the floor from a host library; tar members must be
-root-owned and not group/world-writable, no directory may be empty, and no
-name or link may leave the archive. These checks read the files and run
-nothing, so a Mac can gate a Linux archive.
+version above the floor from a host library; a Windows .exe/.dll may import
+only system DLLs or DLLs beside it; tar members must be root-owned and not
+group/world-writable, no directory may be empty, and no name or link may
+leave the archive. These checks read the files and run nothing, so a Mac
+can gate a Linux archive.
 """
 
 from __future__ import annotations
@@ -510,6 +511,18 @@ MODEL_HELPER_BINARIES = (
     "btx-modeld", "btx-hcpd", "btx-hosted", "btx-open",
     "btx-capability", "btx-capabilityd", "btx-modelcheck", "btx-matmul-backend-info",
 )
+WINDOWS_SYSTEM_DLLS = frozenset({
+    "advapi32.dll", "authz.dll", "bcrypt.dll", "cfgmgr32.dll", "comctl32.dll",
+    "comdlg32.dll", "crypt32.dll", "d2d1.dll", "d3d11.dll", "d3d12.dll", "d3d9.dll",
+    "dbghelp.dll", "dnsapi.dll", "dwmapi.dll", "dwrite.dll", "dxgi.dll", "gdi32.dll",
+    "imm32.dll", "iphlpapi.dll", "kernel32.dll", "mpr.dll", "msvcrt.dll", "mswsock.dll",
+    "ncrypt.dll", "netapi32.dll", "normaliz.dll", "ntdll.dll", "nvcuda.dll", "ole32.dll",
+    "oleaut32.dll", "opengl32.dll", "powrprof.dll", "psapi.dll", "rpcrt4.dll",
+    "secur32.dll", "setupapi.dll", "shcore.dll", "shell32.dll", "shlwapi.dll",
+    "ucrtbase.dll", "user32.dll", "userenv.dll", "uxtheme.dll", "version.dll",
+    "winhttp.dll", "wininet.dll", "winmm.dll", "winspool.drv", "wldap32.dll",
+    "ws2_32.dll", "wtsapi32.dll",
+})
 
 
 class ElfDynamic:
@@ -675,6 +688,59 @@ def linux_elf_problems(root: Path, files: list[Path], floor: dict[str, str]) -> 
     return problems
 
 
+def pe_imports(path: Path) -> list[str]:
+    """Names in the PE import directory (what the loader must find at start)."""
+    data = path.read_bytes()
+    pe = struct.unpack_from("<I", data, 0x3C)[0]
+    if data[pe:pe + 4] != b"PE\0\0":
+        raise VerifyError(f"{path}: MZ file without a PE header")
+    sections, opt_size = struct.unpack_from("<H", data, pe + 6)[0], struct.unpack_from("<H", data, pe + 20)[0]
+    opt = pe + 24
+    wide = struct.unpack_from("<H", data, opt)[0] == 0x20B
+    if struct.unpack_from("<I", data, opt + (108 if wide else 92))[0] < 2:
+        return []
+    import_rva = struct.unpack_from("<I", data, opt + (112 if wide else 96) + 8)[0]
+    table = [struct.unpack_from("<8sIIII", data, opt + opt_size + 40 * i)[1:] for i in range(sections)]
+
+    def offset(rva: int) -> int:
+        for vsize, vaddr, rawsize, rawptr in table:
+            if vaddr <= rva < vaddr + max(vsize, rawsize):
+                return rva - vaddr + rawptr
+        raise VerifyError(f"{path}: import RVA {rva:#x} is outside every section")
+
+    names: list[str] = []
+    if not import_rva:
+        return names
+    entry = offset(import_rva)
+    while len(names) < 4096:
+        first_thunk, _, _, name_rva, thunk = struct.unpack_from("<IIIII", data, entry)
+        if not (first_thunk or name_rva or thunk):
+            break
+        start = offset(name_rva)
+        names.append(data[start:data.index(b"\0", start)].decode("ascii", "replace"))
+        entry += 20
+    return names
+
+
+def pe_problems(root: Path, files: list[Path]) -> list[str]:
+    problems = []
+    for path in files:
+        beside = {p.name.lower() for p in path.parent.iterdir() if p.is_file()}
+        try:
+            imports = pe_imports(path)
+        except (VerifyError, struct.error, ValueError) as exc:
+            problems.append(f"{path.relative_to(root)}: unreadable PE: {exc}")
+            continue
+        missing = [name for name in imports
+                   if name.lower() not in beside
+                   and name.lower() not in WINDOWS_SYSTEM_DLLS
+                   and not name.lower().startswith(("api-ms-win-", "ext-ms-"))]
+        if missing:
+            problems.append(f"{path.relative_to(root)}: imports {', '.join(missing)}, which is neither "
+                            "next to it in the archive nor a Windows system DLL; it will not start")
+    return problems
+
+
 def archive_member_problems(archive: Path) -> list[str]:
     """Owners, modes, link targets and empty directories, read from the member list.
 
@@ -776,14 +842,17 @@ def archive_member_problems(archive: Path) -> list[str]:
 
 def archive_content_problems(root: Path, *, floor: dict[str, str],
                              require_model_helpers: bool = False) -> list[str]:
-    elves, problems = [], []
+    elves, pes, problems = [], [], []
     for path in sorted(root.rglob("*")):
         if path.is_symlink() or not path.is_file():
             continue
         prefix = read_prefix(path, 8)
         if prefix[:4] == ELF_MAGIC:
             elves.append(path)
+        elif prefix[:2] == b"MZ":
+            pes.append(path)
     problems += linux_elf_problems(root, elves, floor)
+    problems += pe_problems(root, pes)
     if require_model_helpers:
         present = {p.name for p in root.rglob("*") if p.is_file()}
         missing = [name for name in MODEL_HELPER_BINARIES

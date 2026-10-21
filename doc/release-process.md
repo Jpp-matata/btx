@@ -43,8 +43,11 @@ Release Process
   `--archive` reads every file in the archive and fails it when:
   an executable NEEDs a library the archive ships but no RUNPATH (or the
   packaged wrapper) reaches it; an ELF needs a `GLIBCXX_`/`CXXABI_`/`GCC_`/`OPENSSL_`
-  version above the floor from a host library (`--floor NAME=VERSION`); a member
-  is not `root:root`, is group/world-writable, or a directory is empty.
+  version above the floor from a host library (`--floor NAME=VERSION`); a Windows
+  `.exe`/`.dll` imports a DLL that is neither a Windows system DLL nor next to
+  it (`libgomp-1.dll`, `libgcc_s_seh-1.dll`, `libwinpthread-1.dll` must ship
+  beside `btxd.exe`); a member is not `root:root`, is group/world-writable, or
+  a directory is empty.
   0.35.0rc1 was repacked outside `package_release_archive.py`; the btxd-only
   gate passed all three archives, and all three fail this one (#235, #237).
 * Complete the Profile-1 ExactReplay golden corpus and seal described below.

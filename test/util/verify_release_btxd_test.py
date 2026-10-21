@@ -88,6 +88,26 @@ def make_elf(needed=(), runpath=None, verneed=None, executable=True, extra=b""):
     return body
 
 
+def make_pe(dlls):
+    """PE32+ whose import directory names `dlls`."""
+    rva, raw_ptr = 0x1000, 0x200
+    table_size = 20 * (len(dlls) + 1)
+    names, descriptors = b"", b""
+    for dll in dlls:
+        descriptors += struct.pack("<IIIII", 0, 0, 0, rva + table_size + len(names), rva)
+        names += dll.encode() + b"\0"
+    raw = descriptors + bytes(20) + names
+    raw += bytes(-len(raw) % 0x200)
+    opt = bytearray(240)
+    struct.pack_into("<H", opt, 0, 0x20B)
+    struct.pack_into("<I", opt, 108, 16)
+    struct.pack_into("<II", opt, 120, rva, table_size)
+    head = b"MZ" + bytes(0x3A) + struct.pack("<I", 0x40) + b"PE\0\0"
+    head += struct.pack("<HHIIIHH", 0x8664, 1, 0, 0, 0, 240, 0x22) + bytes(opt)
+    head += struct.pack("<8sIIIIIIHHI", b".idata", len(raw), rva, len(raw), raw_ptr, 0, 0, 0, 0, 0xC0000040)
+    return head + bytes(raw_ptr - len(head)) + raw + ZMQ_HELP
+
+
 def write_tar(archive, files, *, uid=0, uname="root", mode=0o755, dirs=(), links=(), hardlinks=()):
     with tarfile.open(archive, "w:gz") as handle:
         for name in dirs:
@@ -624,6 +644,14 @@ class ArchiveContentGateTest(unittest.TestCase):
         spec.loader.exec_module(packager)
         self.assertEqual(tuple(packager.MODEL_HELPER_BINARIES), self.mod.MODEL_HELPER_BINARIES)
 
+    def test_pe_import_must_sit_next_to_the_exe(self) -> None:
+        exe = make_pe(["KERNEL32.dll", "api-ms-win-crt-runtime-l1-1-0.dll", "libgomp-1.dll"])
+        self.assertEqual(self.mod.pe_imports(self._write("btxd.exe", exe)),
+                         ["KERNEL32.dll", "api-ms-win-crt-runtime-l1-1-0.dll", "libgomp-1.dll"])
+        text = self._problems({"btx-0.35.0/bin/btxd.exe": exe})
+        self.assertIn("bin/btxd.exe: imports libgomp-1.dll, which is neither next to it", text)
+        self._gate({"btx-0.35.0/bin/btxd.exe": exe, "btx-0.35.0/bin/libgomp-1.dll": make_pe(["KERNEL32.dll"])})
+
     def _write(self, name, payload):
         path = self.root / name
         path.write_bytes(payload)
@@ -664,6 +692,7 @@ class ArchiveContentGateTest(unittest.TestCase):
         for text in (macos, windows):
             self.assertIn("not owned by root:root", text)
             self.assertIn("model helpers missing", text)
+        self.assertNotIn("imports", windows)  # rc1 ships the three MinGW DLLs beside btxd.exe
         if shutil.which("codesign"):  # verify_macos_signature runs only where codesign exists
             self.assertIn("bin/btxd: codesign --verify --strict failed", macos)
             self.assertEqual(macos.count("codesign --verify --strict failed"), 1)
