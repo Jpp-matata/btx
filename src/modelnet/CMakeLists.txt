@@ -1810,6 +1810,16 @@ add_library(bitcoin_modelnet STATIC
   swarm_schedwit/keep.cpp
   swarm_schedwit/quiet.cpp
   swarm_schedwit/swarm_schedwitness.cpp
+  swarm_rescap/under.cpp
+  swarm_rescap/over.cpp
+  swarm_rescap/record.cpp
+  swarm_rescap/book.cpp
+  swarm_rescap/replay.cpp
+  swarm_rescap/gate.cpp
+  swarm_rescap/stay.cpp
+  swarm_rescap/apply.cpp
+  swarm_rescap/quiet.cpp
+  swarm_rescap/swarm_rescap.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
