@@ -1864,6 +1864,16 @@ add_library(bitcoin_modelnet STATIC
   swarm_closemargin/keep.cpp
   swarm_closemargin/quiet.cpp
   swarm_closemargin/swarm_closemarginhold.cpp
+  swarm_agentrun/trace.cpp
+  swarm_agentrun/task.cpp
+  swarm_agentrun/lease.cpp
+  swarm_agentrun/result.cpp
+  swarm_agentrun/branch.cpp
+  swarm_agentrun/tool.cpp
+  swarm_agentrun/quiet.cpp
+  swarm_agentrun/leader.cpp
+  swarm_agentrun/sandbox.cpp
+  swarm_agentrun/swarm_agentrun.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp

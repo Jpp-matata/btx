@@ -2051,6 +2051,14 @@ if(WITH_MODELNET)
     swarm_closemargin_quiet_tests.cpp
     swarm_closemargin_replay_tests.cpp
     swarm_closemargin_shrink_tests.cpp
+    swarm_agentrun_branch_tests.cpp
+    swarm_agentrun_cancel_tests.cpp
+    swarm_agentrun_dag_tests.cpp
+    swarm_agentrun_leader_tests.cpp
+    swarm_agentrun_lease_tests.cpp
+    swarm_agentrun_result_tests.cpp
+    swarm_agentrun_sandbox_tests.cpp
+    swarm_agentrun_tool_tests.cpp
     swarm_minehold_request_tests.cpp
     swarm_ckptsave_request_tests.cpp
     swarm_mixedhold_request_tests.cpp
