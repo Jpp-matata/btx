@@ -1853,6 +1853,17 @@ add_library(bitcoin_modelnet STATIC
   swarm_launchprof/keep.cpp
   swarm_launchprof/quiet.cpp
   swarm_launchprof/swarm_launchprofile.cpp
+  swarm_closemargin/blank.cpp
+  swarm_closemargin/name.cpp
+  swarm_closemargin/record.cpp
+  swarm_closemargin/book.cpp
+  swarm_closemargin/replay.cpp
+  swarm_closemargin/gate.cpp
+  swarm_closemargin/stay.cpp
+  swarm_closemargin/request.cpp
+  swarm_closemargin/keep.cpp
+  swarm_closemargin/quiet.cpp
+  swarm_closemargin/swarm_closemarginhold.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
