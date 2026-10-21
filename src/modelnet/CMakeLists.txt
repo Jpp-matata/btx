@@ -2286,6 +2286,65 @@ add_library(bitcoin_modelnet STATIC
   prof02/prof02.cpp
   mod01/mod01.cpp
   swarm_bound/swarm_bound.cpp
+  liv01/liv01.cpp
+  liv02/liv02.cpp
+  liv03/liv03.cpp
+  liv04/liv04.cpp
+  liv05/liv05.cpp
+  liv06/liv06.cpp
+  liv07/liv07.cpp
+  liv08/liv08.cpp
+  liv09/liv09.cpp
+  liv10/liv10.cpp
+  liv11/liv11.cpp
+  liv12/liv12.cpp
+  liv13/liv13.cpp
+  liv14/liv14.cpp
+  liv15/liv15.cpp
+  liv16/liv16.cpp
+  liv17/liv17.cpp
+  liv18/liv18.cpp
+  liv19/liv19.cpp
+  liv20/liv20.cpp
+  liv21/liv21.cpp
+  liv22/liv22.cpp
+  liv23/liv23.cpp
+  liv24/liv24.cpp
+  liv25/liv25.cpp
+  jrn01/jrn01.cpp
+  jrn02/jrn02.cpp
+  jrn03/jrn03.cpp
+  jrn04/jrn04.cpp
+  jrn05/jrn05.cpp
+  jrn06/jrn06.cpp
+  jrn07/jrn07.cpp
+  jrn08/jrn08.cpp
+  jrn09/jrn09.cpp
+  jrn10/jrn10.cpp
+  jrn11/jrn11.cpp
+  jrn12/jrn12.cpp
+  jrn13/jrn13.cpp
+  jrn14/jrn14.cpp
+  jrn15/jrn15.cpp
+  jrn16/jrn16.cpp
+  jrn17/jrn17.cpp
+  jrn18/jrn18.cpp
+  jrn19/jrn19.cpp
+  git_origin/git_origin.cpp
+  git_attestation/git_attestation.cpp
+  agent_lineage/agent_lineage.cpp
+  agent_guard/agent_guard.cpp
+  incident/incident.cpp
+  realm_promotion/realm_promotion.cpp
+  fleet_rollout/fleet_rollout.cpp
+  git_remote/git_remote.cpp
+  slice_source/slice_source.cpp
+  slice_views/slice_views.cpp
+  slice_replay/slice_replay.cpp
+  slice_admit/slice_admit.cpp
+  slice_guard/slice_guard.cpp
+  slice_wan/slice_wan.cpp
+  slice_qualify/slice_qualify.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp

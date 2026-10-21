@@ -2351,6 +2351,65 @@ if(WITH_MODELNET)
     prof02_tests.cpp
     mod01_tests.cpp
     swarm_bound_tests.cpp
+    liv01_tests.cpp
+    liv02_tests.cpp
+    liv03_tests.cpp
+    liv04_tests.cpp
+    liv05_tests.cpp
+    liv06_tests.cpp
+    liv07_tests.cpp
+    liv08_tests.cpp
+    liv09_tests.cpp
+    liv10_tests.cpp
+    liv11_tests.cpp
+    liv12_tests.cpp
+    liv13_tests.cpp
+    liv14_tests.cpp
+    liv15_tests.cpp
+    liv16_tests.cpp
+    liv17_tests.cpp
+    liv18_tests.cpp
+    liv19_tests.cpp
+    liv20_tests.cpp
+    liv21_tests.cpp
+    liv22_tests.cpp
+    liv23_tests.cpp
+    liv24_tests.cpp
+    liv25_tests.cpp
+    jrn01_tests.cpp
+    jrn02_tests.cpp
+    jrn03_tests.cpp
+    jrn04_tests.cpp
+    jrn05_tests.cpp
+    jrn06_tests.cpp
+    jrn07_tests.cpp
+    jrn08_tests.cpp
+    jrn09_tests.cpp
+    jrn10_tests.cpp
+    jrn11_tests.cpp
+    jrn12_tests.cpp
+    jrn13_tests.cpp
+    jrn14_tests.cpp
+    jrn15_tests.cpp
+    jrn16_tests.cpp
+    jrn17_tests.cpp
+    jrn18_tests.cpp
+    jrn19_tests.cpp
+    git_origin_tests.cpp
+    git_attestation_tests.cpp
+    agent_lineage_tests.cpp
+    agent_guard_tests.cpp
+    incident_tests.cpp
+    realm_promotion_tests.cpp
+    fleet_rollout_tests.cpp
+    git_remote_tests.cpp
+    slice_source_tests.cpp
+    slice_views_tests.cpp
+    slice_replay_tests.cpp
+    slice_admit_tests.cpp
+    slice_guard_tests.cpp
+    slice_wan_tests.cpp
+    slice_qualify_tests.cpp
     swarm_minehold_request_tests.cpp
     swarm_ckptsave_request_tests.cpp
     swarm_mixedhold_request_tests.cpp
