@@ -43,6 +43,15 @@ on a version node (issue 169). Before launching a Linux daemon this gate
 reads the required GLIBC/GLIBCXX/CXXABI version nodes from `objdump -T`
 (or `readelf -V`) and prints them, so a baseline-host FAIL names the
 archive's floor instead of only the host's missing symbol.
+
+`--archive` also gates the whole archive, not only btxd (0.35.0rc1, #237).
+On top of the GLIBC ceiling and the Mach-O codesign check: an executable
+that NEEDs a library the archive ships must reach it through RUNPATH/RPATH
+or the packaged wrapper; no ELF may need a GLIBCXX, CXXABI, GCC or OPENSSL
+version above the floor from a host library; tar members must be
+root-owned and not group/world-writable, no directory may be empty, and no
+name or link may leave the archive. These checks read the files and run
+nothing, so a Mac can gate a Linux archive.
 """
 
 from __future__ import annotations
@@ -50,6 +59,7 @@ from __future__ import annotations
 import argparse
 import os
 import platform
+import posixpath
 import re
 import shutil
 import struct
@@ -123,8 +133,9 @@ def elf_needed_ldd(path: Path) -> list[str]:
             text=True,
             check=False,
         )
-    except FileNotFoundError as exc:
-        raise VerifyError("ldd is required to verify a Linux btxd") from exc
+    except FileNotFoundError:
+        # A non-Linux gate host has no ldd. DT_NEEDED is where libzmq must be.
+        return elf_dynamic_info(path).needed
     if result.returncode != 0:
         raise VerifyError(f"ldd failed on {path}: {result.stderr.strip()}")
     needed: list[str] = []
@@ -373,31 +384,36 @@ def verify_binary(path: Path) -> str:
 
 
 def packaged_openssl_libdir(path: Path) -> Path | None:
-    """OpenSSL 3.x ships in <prefix>/lib for both archive layouts.
+    """<prefix>/lib when the packaged bin/ wrapper puts it on LD_LIBRARY_PATH.
 
-    Old: libexec/<tool>.real, with the bin/ wrapper exporting LD_LIBRARY_PATH.
-    rc1: the ELF or Mach-O is directly in bin/, and libraries are in lib/.
+    Only libexec/<tool>.real is launched through that wrapper, and the
+    wrapper adds lib/ only when lib/libssl.so.3 exists. An ELF directly in
+    bin/ (the rc1 layout) gets nothing from the user's shell: it must find
+    lib/ through its own RUNPATH. Adding lib/ here hid rc1's missing RUNPATH.
     """
-    prefix: Path | None = None
-    if path.parent.name == "libexec" and path.name.endswith(".real"):
-        prefix = path.parent.parent
-    elif path.parent.name == "bin":
-        prefix = path.parent.parent
-    if prefix is None:
+    if path.parent.name != "libexec" or not path.name.endswith(".real"):
         return None
-    libdir = prefix / "lib"
+    libdir = path.parent.parent / "lib"
     if (libdir / "libssl.so.3").is_file():
         return libdir
     return None
 
 
-def verify_launch(path: Path, timeout: float = 30.0) -> None:
+LOADER_ENV_VARS = ("LD_LIBRARY_PATH", "LD_PRELOAD", "DYLD_LIBRARY_PATH",
+                   "DYLD_FALLBACK_LIBRARY_PATH", "DYLD_INSERT_LIBRARIES")
+
+
+def verify_launch(path: Path, timeout: float = 30.0, *, clean_env: bool = False) -> None:
     """Refuse a binary that cannot even print its version.
 
     The CUDA 0.34 packaging miss (`libcublasLt.so.13` missing) failed here
-    and was invisible to the ZMQ/ldd checks.
+    and was invisible to the ZMQ/ldd checks. clean_env drops the gate
+    host's loader variables, so an archive is launched as a user gets it.
     """
     env = os.environ.copy()
+    if clean_env:
+        for name in LOADER_ENV_VARS:
+            env.pop(name, None)
     libdir = packaged_openssl_libdir(path)
     if libdir is not None:
         env["LD_LIBRARY_PATH"] = str(libdir) + (
@@ -439,7 +455,7 @@ def verify_btxd(path: Path) -> str:
     return verify_binary(path)
 
 
-def verify_path_for_ship(path: Path) -> str:
+def verify_path_for_ship(path: Path, *, launch: bool = True, clean_env: bool = False) -> str:
     """Resolve wrappers, refuse untyped files, check ZMQ, and launch when native."""
     path = resolve_verify_target(path)
     kind = classify(path)
@@ -449,7 +465,9 @@ def verify_path_for_ship(path: Path) -> str:
         )
     how = verify_binary(path)
     if is_daemon(path):
-        if native_launch_possible(kind):
+        if not launch:
+            how = f"{how}+launch-not-run"
+        elif native_launch_possible(kind):
             required = required_versions_summary(path)
             if required:
                 host = host_glibc_version()
@@ -458,7 +476,7 @@ def verify_path_for_ship(path: Path) -> str:
                     f"(objdump -T; host GLIBC {host or 'unknown'})",
                     file=sys.stderr,
                 )
-            verify_launch(path)
+            verify_launch(path, clean_env=clean_env)
             how = f"{how}+launch"
         else:
             how = f"{how}+launch-skipped-cross"
@@ -468,6 +486,311 @@ def verify_path_for_ship(path: Path) -> str:
                 file=sys.stderr,
             )
     return how
+
+
+# ---------------------------------------------------------------------------
+# Whole-archive gate. 0.35.0rc1 passed the btxd-only gate above and still
+# shipped a Linux btxd that needs OPENSSL_3.2.0 with no RUNPATH to the
+# bundled lib/libssl.so.3, administrator-owned and group-writable members,
+# an empty metal/ and no model helpers (#237, #235). verify_glibc_ceiling and
+# verify_macos_signature cover the GLIBC_2.43 files and the re-signed btxd.
+
+# The host libraries other than libc. GLIBCXX/CXXABI: the floor recorded in
+# doc/release/0.35.0-rc1-checklist.md, as GLIBC_CEILING is. GCC/OPENSSL: the
+# highest version node Ubuntu 24.04's libgcc_s/libcrypto define (objdump -T).
+DEFAULT_ABI_FLOOR = {
+    "GLIBCXX": "3.4.32",
+    "CXXABI": "1.3.15",
+    "GCC": "14.0.0",
+    "OPENSSL": "3.0.9",
+}
+ABI_NODE_RE = re.compile(r"^(GLIBCXX|CXXABI|GCC|OPENSSL)_([0-9]+(?:\.[0-9]+)*)$")
+# Same names as package_release_archive.MODEL_HELPER_BINARIES (a test pins it).
+MODEL_HELPER_BINARIES = (
+    "btx-modeld", "btx-hcpd", "btx-hosted", "btx-open",
+    "btx-capability", "btx-capabilityd", "btx-modelcheck", "btx-matmul-backend-info",
+)
+
+
+class ElfDynamic:
+    # Not a dataclass: release scripts load this module by path, without
+    # sys.modules, and 3.9 dataclasses need it there to read annotations.
+    def __init__(self, executable: bool) -> None:
+        self.executable = executable
+        self.needed: list[str] = []
+        self.search: list[str] = []  # DT_RUNPATH, else DT_RPATH
+        self.search_tag = ""
+        self.verneed: dict[str, list[str]] = {}
+
+
+def elf_dynamic_info(path: Path) -> ElfDynamic:
+    """DT_NEEDED, RUNPATH/RPATH and version needs, read the way ld.so reads them."""
+    with path.open("rb") as fh:
+        file_size = os.fstat(fh.fileno()).st_size
+
+        def read_at(offset: int, size: int) -> bytes:
+            # Check against the file first: a crafted 2^62 size is otherwise a
+            # MemoryError, and a 2^64 offset an OverflowError, not a FAIL.
+            if offset + size > file_size:
+                raise VerifyError(f"{path}: truncated ELF")
+            fh.seek(offset)
+            data = fh.read(size)
+            if len(data) != size:
+                raise VerifyError(f"{path}: truncated ELF")
+            return data
+
+        head = read_at(0, 64)
+        if head[:4] != ELF_MAGIC or head[4] != 2 or head[5] != 1:
+            raise VerifyError(f"{path}: only little-endian 64-bit ELF is gated")
+        e_type = struct.unpack_from("<H", head, 16)[0]
+        phoff = struct.unpack_from("<Q", head, 32)[0]
+        phentsize, phnum = struct.unpack_from("<HH", head, 54)
+        loads: list[tuple[int, int, int]] = []
+        dynamic = None
+        interp = False
+        for i in range(phnum):
+            p_type, _, p_off, p_vaddr, _, p_filesz = struct.unpack_from(
+                "<IIQQQQ", read_at(phoff + i * phentsize, 40))
+            if p_type == 1:
+                loads.append((p_vaddr, p_off, p_filesz))
+            elif p_type == 2:
+                dynamic = (p_off, p_filesz)
+            elif p_type == 3:
+                interp = True
+        info = ElfDynamic(executable=e_type == 2 or interp)
+        if dynamic is None:
+            return info
+
+        def file_offset(vaddr: int) -> int:
+            for start, offset, size in loads:
+                if start <= vaddr < start + size:
+                    return vaddr - start + offset
+            raise VerifyError(f"{path}: dynamic address {vaddr:#x} is outside every PT_LOAD")
+
+        raw = read_at(*dynamic)
+        tags: list[tuple[int, int]] = []
+        for pos in range(0, len(raw) - 15, 16):
+            tag, value = struct.unpack_from("<qQ", raw, pos)
+            if tag == 0:
+                break
+            tags.append((tag, value))
+        first = {tag: value for tag, value in reversed(tags)}
+        if 5 not in first:
+            raise VerifyError(f"{path}: PT_DYNAMIC without DT_STRTAB")
+        strings = read_at(file_offset(first[5]), first.get(10, 0))
+
+        def string(offset: int) -> str:
+            end = strings.find(b"\0", offset)
+            if offset >= len(strings) or end < 0:
+                raise VerifyError(f"{path}: dynamic string offset {offset} out of range")
+            return strings[offset:end].decode("utf-8", "replace")
+
+        info.needed = [string(value) for tag, value in tags if tag == 1]
+        for tag, name in ((29, "RUNPATH"), (15, "RPATH")):
+            if tag in first:  # ld.so ignores DT_RPATH when DT_RUNPATH is present
+                info.search = [entry for entry in string(first[tag]).split(":") if entry]
+                info.search_tag = name
+                break
+        if 0x6FFFFFFE in first:
+            offset = file_offset(first[0x6FFFFFFE])
+            records = 0
+            for _ in range(first.get(0x6FFFFFFF, 0)):
+                _, count, file_name, aux, next_need = struct.unpack("<HHIII", read_at(offset, 16))
+                records += 1 + count
+                if records > 4096:  # real files need a few dozen; overlapping records repeat for hours
+                    raise VerifyError(f"{path}: more than 4096 version needs")
+                versions = info.verneed.setdefault(string(file_name), [])
+                aux_offset = offset + aux
+                for _ in range(count):
+                    _, _, _, name, next_aux = struct.unpack("<IHHII", read_at(aux_offset, 16))
+                    versions.append(string(name))
+                    if not next_aux:
+                        break
+                    aux_offset += next_aux
+                if not next_need:
+                    break
+                offset += next_need
+        return info
+
+
+def _search_dirs(path: Path, info: ElfDynamic) -> list[Path]:
+    dirs = []
+    for entry in info.search:
+        entry = entry.replace("${ORIGIN}", "$ORIGIN")
+        if entry.startswith("$ORIGIN"):
+            dirs.append(Path(os.path.normpath(str(path.parent) + entry[len("$ORIGIN"):])))
+    if info.executable:
+        wrapper_lib = packaged_openssl_libdir(path)
+        if wrapper_lib is not None and is_shell_wrapper(path.parent.parent / "bin" / path.name[:-5]):
+            dirs.insert(0, wrapper_lib)
+    return dirs
+
+
+def linux_elf_problems(root: Path, files: list[Path], floor: dict[str, str]) -> list[str]:
+    """Floor and reachability checks for every ELF in the unpacked archive."""
+    shipped: dict[str, list[Path]] = {}
+    for path in root.rglob("*"):
+        if path.is_file():
+            shipped.setdefault(path.name, []).append(path)
+    problems = []
+    for path in files:
+        rel = path.relative_to(root)
+        try:
+            info = elf_dynamic_info(path)
+        except (VerifyError, struct.error) as exc:
+            problems.append(f"{rel}: unreadable ELF: {str(exc).replace(f'{path}: ', '')}")
+            continue
+        dirs = [d for d in _search_dirs(path, info) if d == root or root in d.parents]
+
+        def reaches(soname: str) -> bool:
+            if not info.executable:  # libraries: optimistic, a shipped copy wins
+                return soname in shipped
+            return any((d / soname).is_file() for d in dirs)
+
+        if info.executable:
+            stranded = [name for name in info.needed if name in shipped and not reaches(name)]
+            if stranded:
+                where = sorted({str(p.parent.relative_to(root)) for n in stranded for p in shipped[n]})
+                how = (f"{info.search_tag} {':'.join(info.search)} does not reach {', '.join(where)}"
+                       if info.search else f"no RUNPATH reaches {', '.join(where)}")
+                problems.append(f"{rel}: {how}, so the host's {', '.join(stranded)} load "
+                                "instead of the copies this archive ships")
+        over: dict[str, tuple[str, str]] = {}
+        for soname, versions in info.verneed.items():
+            for version in versions:
+                match = ABI_NODE_RE.match(version)
+                if not match:
+                    continue
+                family, number = match.groups()
+                if reaches(soname):
+                    continue  # resolved to the archive's own copy, gated as its own ELF
+                limit = floor.get(family)
+                if limit and version_key(number) > version_key(limit):
+                    if family not in over or version_key(number) > version_key(over[family][0]):
+                        over[family] = (number, soname)
+        if over:
+            needs = ", ".join(f"{fam}_{num} from the host's {so} (floor {fam}_{floor[fam]})"
+                              for fam, (num, so) in sorted(over.items()))
+            problems.append(f"{rel}: needs {needs}")
+    return problems
+
+
+def archive_member_problems(archive: Path) -> list[str]:
+    """Owners, modes, link targets and empty directories, read from the member list.
+
+    Unsafe names (absolute, .., through a symlink, links leaving the archive,
+    a link target with .. after a symlink) raise before anything is
+    extracted. Python < 3.12 has no extraction filter.
+    """
+    entries: list[tuple[str, str, int, int | None, int | None, str]] = []  # name, kind, mode, uid, gid, owner
+    if archive.name.lower().endswith(".zip"):
+        try:
+            with zipfile.ZipFile(archive) as handle:
+                for info in handle.infolist():
+                    mode = (info.external_attr >> 16) if info.create_system == 3 else 0
+                    kind = "dir" if info.is_dir() else ("link" if (mode & 0o170000) == 0o120000 else "file")
+                    entries.append((info.filename, kind, mode & 0o7777, None, None, "", ))
+        except (zipfile.BadZipFile, OSError) as exc:
+            raise VerifyError(f"{archive}: not a readable shippable archive: {exc}") from exc
+    else:
+        try:
+            with tarfile.open(archive, "r:*") as handle:
+                members = handle.getmembers()
+        except (tarfile.TarError, OSError) as exc:
+            raise VerifyError(f"{archive}: not a readable shippable archive: {exc}") from exc
+        links = set()
+        regular = set()
+        seen = set()
+        link_paths = []
+        for member in members:
+            name = posixpath.normpath(member.name)
+            if name in seen:
+                raise VerifyError(f"{archive}: {member.name} appears twice; the second copy replaces the first")
+            seen.add(name)
+            if member.isfile():
+                regular.add(name)
+            if member.issym() or member.islnk():
+                # A symlink target is relative to its directory; a hard link names a member.
+                base = posixpath.dirname(name) if member.issym() else ""
+                target = posixpath.normpath(posixpath.join(base, member.linkname))
+                if member.linkname.startswith("/") or target == ".." or target.startswith("../"):
+                    raise VerifyError(f"{archive}: link {member.name} -> {member.linkname} leaves the archive")
+                if member.islnk() and target not in regular:
+                    # Python < 3.12 extracts a hard link to a symlink as that symlink,
+                    # at the link's own path, where its target can point outside.
+                    raise VerifyError(f"{archive}: hard link {member.name} -> {member.linkname} "
+                                      "does not name a regular file before it")
+                link_paths.append((member, posixpath.join(base, member.linkname)))
+                if member.issym():
+                    links.add(name)
+            elif not (member.isfile() or member.isdir()):
+                raise VerifyError(f"{archive}: {member.name} is a device, fifo or other special file")
+            kind = "dir" if member.isdir() else ("link" if member.issym() else "file")
+            entries.append((member.name, kind, member.mode, member.uid, member.gid,
+                            f"{member.uname or member.uid}:{member.gname or member.gid}"))
+        for name, *_ in entries:
+            parts = posixpath.normpath(name).split("/")
+            if any(posixpath.join(*parts[:i]) in links for i in range(1, len(parts))):
+                raise VerifyError(f"{archive}: {name} is inside a symlinked directory")
+        for member, path in link_paths:
+            # normpath reads a symlink as a directory. A .. after one climbs from
+            # where it points: d/l1 -> .. and d/l2 -> l1/../../x leave the archive.
+            walked: list[str] = []
+            through_link = False
+            for part in path.split("/"):
+                if part == ".." and through_link:
+                    raise VerifyError(f"{archive}: link {member.name} -> {member.linkname} "
+                                      "uses .. after a symlink, which can leave the archive")
+                if part == "..":
+                    walked = walked[:-1]
+                elif part not in ("", "."):
+                    walked.append(part)
+                    through_link = through_link or "/".join(walked) in links
+    for name, *_ in entries:
+        if name.startswith("/") or ".." in name.split("/"):
+            raise VerifyError(f"{archive}: unsafe member name {name}")
+
+    problems = []
+    owners = sorted({owner for _, _, _, uid, gid, owner in entries if (uid, gid) not in ((0, 0), (None, None))})
+    if owners:
+        count = sum(1 for e in entries if (e[3], e[4]) not in ((0, 0), (None, None)))
+        problems.append(f"{count} of {len(entries)} members are not owned by root:root ({', '.join(owners)}); "
+                        "tar run as root keeps that owner")
+    writable = [f"{name} {mode:04o}" for name, kind, mode, *_ in entries if kind != "link" and mode & 0o7022]
+    if writable:
+        problems.append(f"{len(writable)} members are group/world-writable or setuid/setgid "
+                        f"(e.g. {', '.join(writable[:3])})")
+    names = [posixpath.normpath(name) for name, *_ in entries]
+    holders = set()  # every directory some member sits in, at any depth
+    for name in names:
+        parent = posixpath.dirname(name)
+        while parent and parent not in holders:
+            holders.add(parent)
+            parent = posixpath.dirname(parent)
+    empty = [name for name, (_, kind, *_) in zip(names, entries)
+             if kind == "dir" and name != "." and name not in holders]
+    if empty:
+        problems.append(f"empty directories packed: {', '.join(empty)}")
+    return problems
+
+
+def archive_content_problems(root: Path, *, floor: dict[str, str],
+                             require_model_helpers: bool = False) -> list[str]:
+    elves, problems = [], []
+    for path in sorted(root.rglob("*")):
+        if path.is_symlink() or not path.is_file():
+            continue
+        prefix = read_prefix(path, 8)
+        if prefix[:4] == ELF_MAGIC:
+            elves.append(path)
+    problems += linux_elf_problems(root, elves, floor)
+    if require_model_helpers:
+        present = {p.name for p in root.rglob("*") if p.is_file()}
+        missing = [name for name in MODEL_HELPER_BINARIES
+                   if not {name, f"{name}.real", f"{name}.exe"} & present]
+        if missing:
+            problems.append(f"model helpers missing: {', '.join(missing)}")
+    return problems
 
 
 def extract_release_archive(archive: Path, dest: Path) -> None:
@@ -563,27 +886,44 @@ def verify_glibc_ceiling(root: Path, ceiling: str | None = None) -> None:
         )
 
 
-def verify_archive(archive: Path) -> str:
-    """Unpack a shippable tarball/zip and gate the real btxd (and btx-cli if present)."""
+def verify_archive(archive: Path, *, floor: dict[str, str] | None = None,
+                   require_model_helpers: bool = False, launch: bool = True) -> str:
+    """Gate a shippable tarball/zip: its members, every binary in it, then btxd.
+
+    All problems are collected and reported together. btxd is launched only
+    when nothing else failed, with the gate host's loader variables removed.
+    """
     if not archive.is_file():
         raise VerifyError(f"{archive}: missing archive")
+    problems = archive_member_problems(archive)
     with tempfile.TemporaryDirectory(prefix="btx-verify-archive-") as tmpdir:
         dest = Path(tmpdir)
         extract_release_archive(archive, dest)
-        btxd = find_packaged_btxd(dest)
-        how = verify_path_for_ship(btxd)
-        verify_glibc_ceiling(dest)
-        cli = find_packaged_cli(dest)
-        if cli is not None:
-            cli = resolve_verify_target(cli)
-            kind = classify(cli)
-            if kind == "other":
-                raise VerifyError(
-                    f"{cli}: not an ELF, Mach-O, or PE binary (refusing to ship an untyped file)"
-                )
-            verify_binary(cli)
-            how = f"{how}+cli"
-        return how
+        problems += archive_content_problems(
+            dest, floor=dict(DEFAULT_ABI_FLOOR if floor is None else floor),
+            require_model_helpers=require_model_helpers)
+        try:
+            verify_glibc_ceiling(dest)
+        except VerifyError as exc:
+            problems.append(str(exc).replace(f"{dest}{os.sep}", ""))
+        how = ""
+        try:
+            btxd = find_packaged_btxd(dest)
+            how = verify_path_for_ship(btxd, launch=launch and not problems, clean_env=True)
+            cli = find_packaged_cli(dest)
+            if cli is not None:
+                cli = resolve_verify_target(cli)
+                if classify(cli) == "other":
+                    raise VerifyError(
+                        f"{cli}: not an ELF, Mach-O, or PE binary (refusing to ship an untyped file)"
+                    )
+                verify_binary(cli)
+                how = f"{how}+cli"
+        except VerifyError as exc:
+            problems.append(str(exc).replace(f"{dest}{os.sep}", ""))
+        if problems:
+            raise VerifyError(f"{archive.name}: {len(problems)} problem(s)\n  - " + "\n  - ".join(problems))
+        return f"{how}+contents"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -606,6 +946,25 @@ def main(argv: list[str] | None = None) -> int:
         "Required on the Guix/cut/publish path that produces the user download.",
     )
     parser.add_argument(
+        "--floor",
+        action="append",
+        default=[],
+        metavar="NAME=VERSION",
+        help="Override one floor entry: " + ", ".join(f"{k}={v}" for k, v in DEFAULT_ABI_FLOOR.items())
+        + ". GLIBC is the separate ceiling (BTX_RELEASE_GLIBC_CEILING).",
+    )
+    parser.add_argument(
+        "--require-model-helpers",
+        action="store_true",
+        help="--archive: FAIL when any model helper (" + ", ".join(MODEL_HELPER_BINARIES) + ") is missing.",
+    )
+    parser.add_argument(
+        "--no-launch",
+        action="store_true",
+        help="--archive: run every static check but never execute btxd (inspecting a third-party "
+        "archive). A release cut must launch.",
+    )
+    parser.add_argument(
         "--allow-non-binary",
         action="store_true",
         help="Exit 0 on non-ELF/Mach-O/PE inputs (unit-test stubs only; never for release).",
@@ -613,11 +972,18 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if not args.binaries and not args.archives:
         parser.error("pass at least one binary or --archive")
+    floor = dict(DEFAULT_ABI_FLOOR)
+    for item in args.floor:
+        name, _, version = item.partition("=")
+        if name not in DEFAULT_ABI_FLOOR or not re.fullmatch(r"[0-9]+(\.[0-9]+)*", version):
+            parser.error(f"bad floor {item!r}; expected one of {', '.join(DEFAULT_ABI_FLOOR)}=<version>")
+        floor[name] = version
     failures = 0
     for raw in args.archives:
         path = raw.expanduser().resolve()
         try:
-            how = verify_archive(path)
+            how = verify_archive(path, floor=floor, require_model_helpers=args.require_model_helpers,
+                                 launch=not args.no_launch)
         except VerifyError as exc:
             print(f"verify_release_btxd: FAIL {exc}", file=sys.stderr)
             failures += 1

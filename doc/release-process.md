@@ -35,6 +35,18 @@ Release Process
   Do not ship a binary that contains `-zmqpubhashblock` strings without linking
   libzmq. Default ON plus this executed gate is the durable fix;
   recutting one archive was not.
+* **Cut every candidate and final archive with `package_release_archive.py`
+  and gate the exact file you upload** with
+  `python3 scripts/release/verify_release_btxd.py --archive <file> --require-model-helpers`
+  (drop `--require-model-helpers` only for a `-DWITH_MODELNET=OFF` build).
+  On top of the btxd checks, the GLIBC ceiling and `codesign --verify --strict`,
+  `--archive` reads every file in the archive and fails it when:
+  an executable NEEDs a library the archive ships but no RUNPATH (or the
+  packaged wrapper) reaches it; an ELF needs a `GLIBCXX_`/`CXXABI_`/`GCC_`/`OPENSSL_`
+  version above the floor from a host library (`--floor NAME=VERSION`); a member
+  is not `root:root`, is group/world-writable, or a directory is empty.
+  0.35.0rc1 was repacked outside `package_release_archive.py`; the btxd-only
+  gate passed all three archives, and all three fail this one (#235, #237).
 * Complete the Profile-1 ExactReplay golden corpus and seal described below.
   Any change under `CMakeLists.txt`, `cmake/`, `src/`, or `contrib/matmul-v4/`
   (except the inert manifest `.data` file) invalidates the previous seal.
