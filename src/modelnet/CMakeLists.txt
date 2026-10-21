@@ -2265,6 +2265,26 @@ add_library(bitcoin_modelnet STATIC
   grp48/grp48.cpp
   grp49/grp49.cpp
   grp50/grp50.cpp
+  acc01/acc01.cpp
+  acc02/acc02.cpp
+  acc03/acc03.cpp
+  acc04/acc04.cpp
+  acc05/acc05.cpp
+  acc06/acc06.cpp
+  acc07/acc07.cpp
+  nt01/nt01.cpp
+  nt02/nt02.cpp
+  nt03/nt03.cpp
+  nt04/nt04.cpp
+  dtat01/dtat01.cpp
+  dtat02/dtat02.cpp
+  dtat03/dtat03.cpp
+  dtat04/dtat04.cpp
+  dtat05/dtat05.cpp
+  dtat06/dtat06.cpp
+  prof01/prof01.cpp
+  prof02/prof02.cpp
+  mod01/mod01.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp

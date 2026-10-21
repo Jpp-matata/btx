@@ -2330,6 +2330,26 @@ if(WITH_MODELNET)
     grp48_tests.cpp
     grp49_tests.cpp
     grp50_tests.cpp
+    acc01_tests.cpp
+    acc02_tests.cpp
+    acc03_tests.cpp
+    acc04_tests.cpp
+    acc05_tests.cpp
+    acc06_tests.cpp
+    acc07_tests.cpp
+    nt01_tests.cpp
+    nt02_tests.cpp
+    nt03_tests.cpp
+    nt04_tests.cpp
+    dtat01_tests.cpp
+    dtat02_tests.cpp
+    dtat03_tests.cpp
+    dtat04_tests.cpp
+    dtat05_tests.cpp
+    dtat06_tests.cpp
+    prof01_tests.cpp
+    prof02_tests.cpp
+    mod01_tests.cpp
     swarm_minehold_request_tests.cpp
     swarm_ckptsave_request_tests.cpp
     swarm_mixedhold_request_tests.cpp
