@@ -186,7 +186,13 @@ def elf_required_versions(path: Path) -> dict[str, str]:
         if text.strip():
             break
     if not text.strip():
-        return {}
+        # No objdump/readelf (a slim CI image, a Mac without the command line
+        # tools): read the version needs directly, so verify_glibc_ceiling does
+        # not pass an archive only because binutils is missing.
+        try:
+            text = " ".join(v for versions in elf_dynamic_info(path).verneed.values() for v in versions)
+        except (VerifyError, struct.error):
+            return {}
     required: dict[str, str] = {}
     for prefix in ELF_VERSION_PREFIXES:
         found = re.findall(rf"\b{prefix}_([0-9]+(?:\.[0-9]+)+)", text)

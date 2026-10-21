@@ -577,6 +577,23 @@ class ArchiveContentGateTest(unittest.TestCase):
         self.assertIn("lib/libgnutls.so.30 needs GLIBC_2.43", text)
         self.assertIn("not owned by root:root", text)
 
+    def test_glibc_ceiling_without_objdump_or_readelf(self) -> None:
+        (self.root / "lib").mkdir()
+        gnutls = self._write("lib/libgnutls.so.30",
+                             make_elf(["libc.so.6"], verneed={"libc.so.6": ["GLIBC_2.43"]}, executable=False))
+        real_run = subprocess.run
+
+        def no_binutils(command, *args, **kwargs):
+            if command[0] in ("objdump", "readelf"):
+                raise FileNotFoundError(command[0])
+            return real_run(command, *args, **kwargs)
+
+        with mock.patch.object(self.mod.subprocess, "run", side_effect=no_binutils):
+            self.assertEqual(self.mod.elf_required_versions(gnutls), {"GLIBC": "2.43"})
+            with self.assertRaises(self.mod.VerifyError) as caught:
+                self.mod.verify_glibc_ceiling(self.root)
+        self.assertIn("lib/libgnutls.so.30 needs GLIBC_2.43", str(caught.exception))
+
     def test_owner_mode_and_empty_directory(self) -> None:
         text = self._problems({"./bin/btxd": self._btxd(openssl="OPENSSL_3.0.0")},
                               uid=1000, uname="administrator", mode=0o775, dirs=("./", "./bin/", "./metal/"))
@@ -684,11 +701,9 @@ class ArchiveContentGateTest(unittest.TestCase):
         linux, macos, windows = (texts[n] for n in RC1_SHA384)
         for want in ("bin/btxd: no RUNPATH reaches lib", "bin/btxd: needs OPENSSL_3.2.0 from the host's libssl.so.3",
                      "not owned by root:root (administrator:administrator)",
-                     "empty directories packed: metal", "model helpers missing"):
+                     "empty directories packed: metal", "model helpers missing",
+                     "bin/btx-qt needs GLIBC_2.43", "lib/libgnutls.so.30 needs GLIBC_2.43"):
             self.assertIn(want, linux)
-        if shutil.which("objdump") or shutil.which("readelf"):  # verify_glibc_ceiling reads through them
-            self.assertIn("bin/btx-qt needs GLIBC_2.43", linux)
-            self.assertIn("lib/libgnutls.so.30 needs GLIBC_2.43", linux)
         for text in (macos, windows):
             self.assertIn("not owned by root:root", text)
             self.assertIn("model helpers missing", text)
