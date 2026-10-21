@@ -2137,6 +2137,8 @@ add_library(bitcoin_modelnet STATIC
   swarm_defwork/swarm_defwork.cpp
   swarm_defbudget/swarm_defbudget.cpp
   swarm_trainwire/swarm_trainwire.cpp
+  swarm_kvwire/pair.cpp
+  swarm_kvwire/swarm_kvwire.cpp
   swarm_lanwire/swarm_lanwire.cpp
   free_grant.cpp
   router.cpp
