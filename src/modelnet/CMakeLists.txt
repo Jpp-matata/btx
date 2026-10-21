@@ -2345,6 +2345,20 @@ add_library(bitcoin_modelnet STATIC
   slice_guard/slice_guard.cpp
   slice_wan/slice_wan.cpp
   slice_qualify/slice_qualify.cpp
+  bnd01/bnd01.cpp
+  bnd02/bnd02.cpp
+  bnd03/bnd03.cpp
+  bnd04/bnd04.cpp
+  bnd05/bnd05.cpp
+  bnd06/bnd06.cpp
+  bnd07/bnd07.cpp
+  bnd08/bnd08.cpp
+  bnd09/bnd09.cpp
+  bnd10/bnd10.cpp
+  bnd11/bnd11.cpp
+  cyc01/cyc01.cpp
+  ext01/ext01.cpp
+  tick_bind/tick_bind.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp

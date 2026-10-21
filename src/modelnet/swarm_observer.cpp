@@ -4,6 +4,7 @@
 
 #include <modelnet/nif_observe/nif_observe.h>
 #include <modelnet/swarm_bound/swarm_bound.h>
+#include <modelnet/tick_bind/tick_bind.h>
 #include <modelnet/swarm_form/plane.h>
 #include <modelnet/swarm_lifecycle.h>
 #include <modelnet/swarm_live.h>
@@ -276,6 +277,7 @@ void StartSwarmObserver(const fs::path& modeldir)
     g_thread = std::thread([modeldir] {
         NifObserve nif_observe;
         SwarmBound swarm_bound;
+        TickBind tick_bind;
         int64_t nif_now_ms = 0;
         while (!g_stop.load()) {
             std::string err;
@@ -308,6 +310,10 @@ void StartSwarmObserver(const fs::path& modeldir)
                 std::string bound_err;
                 if (!swarm_bound.Pass(nif_now_ms, bound_err)) {
                     LogPrintf("swarm bound: %s (monetary node continues)\n", bound_err);
+                }
+                std::string tick_err;
+                if (!tick_bind.Pass(tick_err)) {
+                    LogPrintf("swarm tick bind: %s (monetary node continues)\n", tick_err);
                 }
                 if (nif_now_ms < INT64_MAX) ++nif_now_ms;
             } catch (const std::exception& e) {

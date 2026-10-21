@@ -2410,6 +2410,20 @@ if(WITH_MODELNET)
     slice_guard_tests.cpp
     slice_wan_tests.cpp
     slice_qualify_tests.cpp
+    bnd01_tests.cpp
+    bnd02_tests.cpp
+    bnd03_tests.cpp
+    bnd04_tests.cpp
+    bnd05_tests.cpp
+    bnd06_tests.cpp
+    bnd07_tests.cpp
+    bnd08_tests.cpp
+    bnd09_tests.cpp
+    bnd10_tests.cpp
+    bnd11_tests.cpp
+    cyc01_tests.cpp
+    ext01_tests.cpp
+    tick_bind_tests.cpp
     swarm_minehold_request_tests.cpp
     swarm_ckptsave_request_tests.cpp
     swarm_mixedhold_request_tests.cpp
