@@ -2123,6 +2123,7 @@ add_library(bitcoin_modelnet STATIC
   swarm_kvremote/dstbody.cpp
   swarm_kvremote/swarm_kvremote.cpp
   swarm_disttrain/swarm_disttrain.cpp
+  swarm_measure/swarm_measure.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
