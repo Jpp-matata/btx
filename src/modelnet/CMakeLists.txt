@@ -1974,6 +1974,33 @@ add_library(bitcoin_modelnet STATIC
   swarm_execnbhd/fallback.cpp
   swarm_execnbhd/quiet.cpp
   swarm_execnbhd/swarm_execnbhd.cpp
+  swarm_routebook/slack.cpp
+  swarm_routebook/hops.cpp
+  swarm_routebook/ledger.cpp
+  swarm_routebook/bind.cpp
+  swarm_routebook/hashlock.cpp
+  swarm_routebook/sighash.cpp
+  swarm_routebook/claim.cpp
+  swarm_routebook/flags.cpp
+  swarm_routebook/swarm_routebook.cpp
+  swarm_sandboxgate/blank.cpp
+  swarm_sandboxgate/clock.cpp
+  swarm_sandboxgate/prefix.cpp
+  swarm_sandboxgate/capability.cpp
+  swarm_sandboxgate/record.cpp
+  swarm_sandboxgate/book.cpp
+  swarm_sandboxgate/journal.cpp
+  swarm_sandboxgate/replay.cpp
+  swarm_sandboxgate/grant_kind.cpp
+  swarm_sandboxgate/grant.cpp
+  swarm_sandboxgate/act_kind.cpp
+  swarm_sandboxgate/act.cpp
+  swarm_sandboxgate/net_kind.cpp
+  swarm_sandboxgate/net.cpp
+  swarm_sandboxgate/run.cpp
+  swarm_sandboxgate/quiet.cpp
+  swarm_sandboxgate/inspect.cpp
+  swarm_sandboxgate/swarm_sandboxgate.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp

@@ -2110,6 +2110,17 @@ if(WITH_MODELNET)
     swarm_execnbhd_remote_tests.cpp
     swarm_execnbhd_seat_tests.cpp
     swarm_execnbhd_share_tests.cpp
+    swarm_routebook_claim_tests.cpp
+    swarm_routebook_hashlock_tests.cpp
+    swarm_routebook_hop_tests.cpp
+    swarm_routebook_sighash_tests.cpp
+    swarm_routebook_slack_tests.cpp
+    swarm_sandboxgate_act_tests.cpp
+    swarm_sandboxgate_expire_tests.cpp
+    swarm_sandboxgate_grant_tests.cpp
+    swarm_sandboxgate_net_tests.cpp
+    swarm_sandboxgate_private_tests.cpp
+    swarm_sandboxgate_run_tests.cpp
     swarm_minehold_request_tests.cpp
     swarm_ckptsave_request_tests.cpp
     swarm_mixedhold_request_tests.cpp
