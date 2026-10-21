@@ -2265,6 +2265,14 @@ if(WITH_MODELNET)
     grp08_tests.cpp
     grp09_tests.cpp
     grp10_tests.cpp
+    nif_journal_tests.cpp
+    nif_egress_tests.cpp
+    nif_reqbind_tests.cpp
+    dt_moments_tests.cpp
+    dt_sockagree_tests.cpp
+    dt_pieceout_tests.cpp
+    nif_gate_tests.cpp
+    dt_schedlive_tests.cpp
     swarm_minehold_request_tests.cpp
     swarm_ckptsave_request_tests.cpp
     swarm_mixedhold_request_tests.cpp

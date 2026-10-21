@@ -2200,6 +2200,14 @@ add_library(bitcoin_modelnet STATIC
   grp08/grp08.cpp
   grp09/grp09.cpp
   grp10/grp10.cpp
+  nif_journal/nif_journal.cpp
+  nif_egress/nif_egress.cpp
+  nif_reqbind/nif_reqbind.cpp
+  dt_moments/dt_moments.cpp
+  dt_sockagree/dt_sockagree.cpp
+  dt_pieceout/dt_pieceout.cpp
+  nif_gate/nif_gate.cpp
+  dt_schedlive/dt_schedlive.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
