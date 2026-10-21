@@ -2189,6 +2189,7 @@ if(WITH_MODELNET)
     swarm_agentclass_work_tests.cpp
     swarm_runtimeclass_tests.cpp
     swarm_kvremote_tests.cpp
+    swarm_disttrain_tests.cpp
     swarm_minehold_request_tests.cpp
     swarm_ckptsave_request_tests.cpp
     swarm_mixedhold_request_tests.cpp
