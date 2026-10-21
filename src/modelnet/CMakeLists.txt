@@ -2109,6 +2109,7 @@ add_library(bitcoin_modelnet STATIC
   swarm_settlebuild/refund.cpp
   swarm_settlebuild/settle.cpp
   swarm_settlebuild/swarm_settlebuild.cpp
+  swarm_runtick/swarm_runtick.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
