@@ -179,6 +179,7 @@ endif()
 if(WITH_MODELNET)
   target_sources(fuzz
     PRIVATE
+      modelnet_canonical_codec.cpp
       modelnet_lab_peer.cpp
   )
   target_link_libraries(fuzz bitcoin_modelnet)
