@@ -2110,6 +2110,16 @@ add_library(bitcoin_modelnet STATIC
   swarm_settlebuild/settle.cpp
   swarm_settlebuild/swarm_settlebuild.cpp
   swarm_runtick/swarm_runtick.cpp
+  swarm_stepwork/kind.cpp
+  swarm_stepwork/outcome.cpp
+  swarm_stepwork/admit.cpp
+  swarm_stepwork/offer.cpp
+  swarm_stepwork/gpu.cpp
+  swarm_stepwork/record.cpp
+  swarm_stepwork/swarm_stepwork.cpp
+  swarm_economyclass/swarm_economyclass.cpp
+  swarm_agentclass/swarm_agentclass.cpp
+  swarm_runtimeclass/swarm_runtimeclass.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp

@@ -2178,6 +2178,16 @@ if(WITH_MODELNET)
     swarm_runtick_gpu_tests.cpp
     swarm_runtick_steps_tests.cpp
     swarm_runtick_tick_tests.cpp
+    swarm_stepwork_gpu_tests.cpp
+    swarm_stepwork_offer_tests.cpp
+    swarm_stepwork_private_tests.cpp
+    swarm_stepwork_record_tests.cpp
+    swarm_economyclass_open_tests.cpp
+    swarm_economyclass_pay_tests.cpp
+    swarm_agentclass_spawn_tests.cpp
+    swarm_agentclass_tests.cpp
+    swarm_agentclass_work_tests.cpp
+    swarm_runtimeclass_tests.cpp
     swarm_minehold_request_tests.cpp
     swarm_ckptsave_request_tests.cpp
     swarm_mixedhold_request_tests.cpp
