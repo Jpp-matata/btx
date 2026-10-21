@@ -2,6 +2,7 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or https://opensource.org/license/mit/.
 
+#include <modelnet/nif_observe/nif_observe.h>
 #include <modelnet/swarm_form/plane.h>
 #include <modelnet/swarm_lifecycle.h>
 #include <modelnet/swarm_live.h>
@@ -16,6 +17,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <exception>
 #include <fstream>
 #include <map>
@@ -271,6 +273,8 @@ void StartSwarmObserver(const fs::path& modeldir)
     if (modeldir.empty()) return;
     g_stop.store(false);
     g_thread = std::thread([modeldir] {
+        NifObserve nif_observe;
+        int64_t nif_now_ms = 0;
         while (!g_stop.load()) {
             std::string err;
             bool ok = false;
@@ -295,6 +299,11 @@ void StartSwarmObserver(const fs::path& modeldir)
                         LogPrintf("swarm live: %s (monetary node continues)\n", live_err);
                     }
                 }
+                std::string nif_err;
+                if (!nif_observe.Tick(nif_now_ms, nif_err)) {
+                    LogPrintf("swarm nif observe: %s (monetary node continues)\n", nif_err);
+                }
+                if (nif_now_ms < INT64_MAX) ++nif_now_ms;
             } catch (const std::exception& e) {
                 ok = false;
                 err = e.what();
