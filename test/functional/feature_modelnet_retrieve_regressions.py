@@ -16,7 +16,8 @@ Loopback helpers and one regtest btxd only. CPU only. Nothing spends.
 - #230: a host with -modeluploadlimit serves a whole fetch, paced at its cap.
   0.34.15 refused with 429 and the fetch failed ("missing FreeGrant").
 - #232: removemodel through btxd deletes the pieces and the checkout, and
-  `btx-model rm` does the same through the helper socket.
+  `btx-model rm` does the same through the helper socket. `btx-model rm`
+  refuses a name that two local models share.
 
 --cases picks a subset (default: all). Run with the configfile of an older
 build to see what each case locks in.
@@ -334,18 +335,35 @@ class ModelNetRetrieveRegressionsTest(BitcoinTestFramework):
         assert model_id not in [m.get("model_id") for m in node.listmodels().get("models", [])]
 
         cli = Path(self.config["environment"]["SRCDIR"]) / "contrib" / "modelnet" / "btx-model"
+        env = {k: v for k, v in os.environ.items() if k not in ("MODELD_SOCK", "BTX_MODELD_SOCKET")}
+
+        def btx_model_rm(ref):
+            run = subprocess.run([sys.executable, str(cli), "--socket", str(self.helpers["rm"]["sock"]), "--json",
+                                  "rm", ref], capture_output=True, text=True, env=env,
+                                 timeout=60 * self.options.timeout_factor)
+            return run.returncode, json.loads(run.stdout)
+
         second = self._import("rm", self._write_model("remove-b", REMOVE_BYTES))
+        third = self._import("rm", self._write_model("remove-c", REMOVE_BYTES))
+        # Both files are model.safetensors, so both models have that name: rm
+        # refuses to pick one and deletes nothing.
+        rc, out = btx_model_rm("model.safetensors")
+        assert_equal(rc, 1)
+        assert "2 local models match" in out.get("error", ""), out
+        assert_equal(len(self._rpc("rm", "listmodels").get("models") or []), 2)
+
         checkout_b = Path(self._rpc("rm", "exportmodelpath", [second["uri"]])["path"])
         assert checkout_b.is_dir(), checkout_b
-        env = {k: v for k, v in os.environ.items() if k not in ("MODELD_SOCK", "BTX_MODELD_SOCKET")}
-        run = subprocess.run([sys.executable, str(cli), "--socket", str(self.helpers["rm"]["sock"]), "--json",
-                              "rm", second["model_id"]], capture_output=True, text=True, env=env,
-                             timeout=60 * self.options.timeout_factor)
-        assert_equal(run.returncode, 0)
-        out = json.loads(run.stdout)
+        rc, out = btx_model_rm(second["model_id"])
+        assert_equal(rc, 0)
         assert_equal(out.get("removed"), True)
         assert_equal(out.get("checkout_removed"), True)
         assert not checkout_b.exists(), checkout_b
+
+        # One model has the name now, so rm by name deletes that one.
+        rc, out = btx_model_rm("model.safetensors")
+        assert_equal(rc, 0)
+        assert_equal(out.get("model_id"), third["model_id"])
         assert_equal(list((modeldir / "store").rglob("*.piece")), [])
         assert_equal(self._rpc("rm", "listmodels").get("models") or [], [])
         self.stop_node(0)
