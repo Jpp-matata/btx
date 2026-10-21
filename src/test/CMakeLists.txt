@@ -2141,6 +2141,11 @@ if(WITH_MODELNET)
     swarm_parentage_hub_tests.cpp
     swarm_parentage_promote_tests.cpp
     swarm_parentage_trust_tests.cpp
+    swarm_sigcover_claim_tests.cpp
+    swarm_sigcover_cover_tests.cpp
+    swarm_sigcover_key_tests.cpp
+    swarm_sigcover_preimage_tests.cpp
+    swarm_sigcover_skip_tests.cpp
     swarm_minehold_request_tests.cpp
     swarm_ckptsave_request_tests.cpp
     swarm_mixedhold_request_tests.cpp

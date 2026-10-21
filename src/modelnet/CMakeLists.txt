@@ -2050,6 +2050,16 @@ add_library(bitcoin_modelnet STATIC
   swarm_parentage/promote.cpp
   swarm_parentage/flags.cpp
   swarm_parentage/swarm_parentage.cpp
+  swarm_sigcover/names.cpp
+  swarm_sigcover/record.cpp
+  swarm_sigcover/cover.cpp
+  swarm_sigcover/preimage.cpp
+  swarm_sigcover/bind.cpp
+  swarm_sigcover/claim.cpp
+  swarm_sigcover/penalty.cpp
+  swarm_sigcover/ledger.cpp
+  swarm_sigcover/flags.cpp
+  swarm_sigcover/swarm_sigcover.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
