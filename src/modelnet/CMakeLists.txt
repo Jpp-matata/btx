@@ -2285,6 +2285,7 @@ add_library(bitcoin_modelnet STATIC
   prof01/prof01.cpp
   prof02/prof02.cpp
   mod01/mod01.cpp
+  swarm_bound/swarm_bound.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp

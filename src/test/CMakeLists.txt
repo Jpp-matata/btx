@@ -2350,6 +2350,7 @@ if(WITH_MODELNET)
     prof01_tests.cpp
     prof02_tests.cpp
     mod01_tests.cpp
+    swarm_bound_tests.cpp
     swarm_minehold_request_tests.cpp
     swarm_ckptsave_request_tests.cpp
     swarm_mixedhold_request_tests.cpp
