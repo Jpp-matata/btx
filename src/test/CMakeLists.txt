@@ -2239,6 +2239,14 @@ if(WITH_MODELNET)
     nif_fork_tests.cpp
     dt_kernel_tests.cpp
     nif_guard_tests.cpp
+    nif_manifest_tests.cpp
+    nif_discover_tests.cpp
+    nif_cost_tests.cpp
+    dt_share_tests.cpp
+    dt_rollout_tests.cpp
+    dt_delay_tests.cpp
+    dt_reshard_tests.cpp
+    nif_status_tests.cpp
     swarm_minehold_request_tests.cpp
     swarm_ckptsave_request_tests.cpp
     swarm_mixedhold_request_tests.cpp

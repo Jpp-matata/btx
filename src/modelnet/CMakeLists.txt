@@ -2174,6 +2174,14 @@ add_library(bitcoin_modelnet STATIC
   nif_fork/nif_fork.cpp
   dt_kernel/dt_kernel.cpp
   nif_guard/nif_guard.cpp
+  nif_manifest/nif_manifest.cpp
+  nif_discover/nif_discover.cpp
+  nif_cost/nif_cost.cpp
+  dt_share/dt_share.cpp
+  dt_rollout/dt_rollout.cpp
+  dt_delay/dt_delay.cpp
+  dt_reshard/dt_reshard.cpp
+  nif_status/nif_status.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
