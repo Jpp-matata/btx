@@ -996,42 +996,52 @@ if(APPLE AND CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
   # libomp.dylib is an /opt/homebrew load command; a downloadable tarball
   # will not launch on a Mac without that keg. AppleClang does not ship a
   # runtime, so detect the keg's static archive explicitly.
+  option(BTX_ALLOW_SERIAL_PROVER
+    "Allow an Apple build with no static libomp.a; the prover then runs its guarded serial loops (slower, same results). Off for release builds." OFF)
+  set(_omp_prefixes ${CMAKE_PREFIX_PATH} ${CMAKE_FIND_ROOT_PATH}
+    /opt/homebrew/opt/libomp /usr/local/opt/libomp)
   find_path(BTX_APPLE_LIBOMP_INCLUDE_DIR omp.h
-    HINTS
-      /opt/homebrew/opt/libomp
-      /usr/local/opt/libomp
+    HINTS ${_omp_prefixes}
     PATH_SUFFIXES include
   )
   set(BTX_APPLE_LIBOMP_LIBRARY "")
-  foreach(_omp_a IN ITEMS
-      /opt/homebrew/opt/libomp/lib/libomp.a
-      /usr/local/opt/libomp/lib/libomp.a)
-    if(EXISTS "${_omp_a}")
-      set(BTX_APPLE_LIBOMP_LIBRARY "${_omp_a}")
+  foreach(_omp_prefix IN LISTS _omp_prefixes)
+    if(EXISTS "${_omp_prefix}/lib/libomp.a")
+      set(BTX_APPLE_LIBOMP_LIBRARY "${_omp_prefix}/lib/libomp.a")
       break()
     endif()
   endforeach()
   if(NOT BTX_APPLE_LIBOMP_INCLUDE_DIR OR NOT BTX_APPLE_LIBOMP_LIBRARY)
-    message(FATAL_ERROR
-      "macOS release builds require static libomp.a plus omp.h "
-      "(Homebrew: brew install libomp). Linking libomp.dylib puts an "
-      "/opt/homebrew load command in btxd and the tarball will not launch "
-      "on a clean Mac.")
+    if(BTX_ALLOW_SERIAL_PROVER)
+      message(WARNING
+        "BTX_ALLOW_SERIAL_PROVER=ON: no static libomp.a found; building the "
+        "shielded prover with serial loops. Do not ship this build.")
+    else()
+      message(FATAL_ERROR
+        "macOS release builds require static libomp.a plus omp.h "
+        "(Homebrew: brew install libomp, or a libomp prefix on "
+        "CMAKE_PREFIX_PATH). Linking libomp.dylib puts an "
+        "/opt/homebrew load command in btxd and the tarball will not launch "
+        "on a clean Mac. For a local lab build only, configure with "
+        "-DBTX_ALLOW_SERIAL_PROVER=ON.")
+    endif()
   endif()
-  add_library(btx_apple_openmp INTERFACE)
-  target_compile_options(btx_apple_openmp INTERFACE
-    $<$<COMPILE_LANGUAGE:CXX>:-Xpreprocessor>
-    $<$<COMPILE_LANGUAGE:CXX>:-fopenmp>
-  )
-  target_include_directories(btx_apple_openmp SYSTEM INTERFACE
-    ${BTX_APPLE_LIBOMP_INCLUDE_DIR}
-  )
-  target_link_libraries(btx_apple_openmp INTERFACE
-    ${BTX_APPLE_LIBOMP_LIBRARY}
-  )
-  target_link_libraries(bitcoin_common PUBLIC btx_apple_openmp)
-  message(STATUS
-    "Using AppleClang OpenMP runtime (static): ${BTX_APPLE_LIBOMP_LIBRARY}")
+  if(BTX_APPLE_LIBOMP_INCLUDE_DIR AND BTX_APPLE_LIBOMP_LIBRARY)
+    add_library(btx_apple_openmp INTERFACE)
+    target_compile_options(btx_apple_openmp INTERFACE
+      $<$<COMPILE_LANGUAGE:CXX>:-Xpreprocessor>
+      $<$<COMPILE_LANGUAGE:CXX>:-fopenmp>
+    )
+    target_include_directories(btx_apple_openmp SYSTEM INTERFACE
+      ${BTX_APPLE_LIBOMP_INCLUDE_DIR}
+    )
+    target_link_libraries(btx_apple_openmp INTERFACE
+      ${BTX_APPLE_LIBOMP_LIBRARY}
+    )
+    target_link_libraries(bitcoin_common PUBLIC btx_apple_openmp)
+    message(STATUS
+      "Using AppleClang OpenMP runtime (static): ${BTX_APPLE_LIBOMP_LIBRARY}")
+  endif()
 elseif(OpenMP_CXX_FOUND)
   target_link_libraries(bitcoin_common PUBLIC OpenMP::OpenMP_CXX)
 endif()

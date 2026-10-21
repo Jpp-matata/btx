@@ -1548,6 +1548,18 @@ std::vector<matmul::trusted::ExactReplayAttestation> HeardAttestations()
     return store->ExportHeard();
 }
 
+std::vector<matmul::trusted::ExactReplayAttestation> HeardForServe(
+    const uint256& block_hash,
+    int32_t block_height,
+    size_t max_items,
+    uint32_t rotate)
+{
+    auto store{Store()};
+    if (!store) return {};
+    return store->GetHeardForServe(block_hash, block_height, max_items,
+                                   rotate);
+}
+
 matmul::trusted::AttestationLogHead LogHead()
 {
     auto store{Store()};

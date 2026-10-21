@@ -2,6 +2,7 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or https://opensource.org/license/mit/.
 
+#include <exception>
 #include <modelnet/lab_wire.h>
 
 #include <bech32.h>
@@ -165,7 +166,15 @@ bool LoadRegistry(const std::string& spec_path, Registry& out, std::string& err)
             err = "BTX035_SCHEMA";
             return false;
         }
-        const int wire = row["wire_kind"].getInt<int>();
+        int wire{-1};
+        try {
+            wire = row["wire_kind"].getInt<int>();
+        } catch (const std::exception&) {
+            // Out of int range, fractional, or exponent form: untrusted input
+            // must not throw out of the parser.
+            err = "BTX035_SCHEMA";
+            return false;
+        }
         const std::string kind = row["kind"].get_str();
         if (wire < 0 || wire > 15 || seen[wire] || kind.empty() || out.kind_set.count(kind)) {
             err = "BTX035_SCHEMA";

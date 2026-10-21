@@ -51,6 +51,7 @@ import argparse
 import os
 import platform
 import re
+import shutil
 import struct
 import subprocess
 import sys
@@ -211,6 +212,7 @@ def verify_windows(path: Path) -> None:
 
 
 def verify_macos_portable(path: Path, dylibs: list[str] | None = None) -> None:
+    verify_macos_signature(path)
     if dylibs is None:
         dylibs = macho_dylibs(path)
     forbidden = homebrew_loads(dylibs)
@@ -218,6 +220,33 @@ def verify_macos_portable(path: Path, dylibs: list[str] | None = None) -> None:
         raise VerifyError(
             f"{path}: macOS release binary must not load Homebrew dylibs "
             f"(clean Mac without brew will not launch). Found: {forbidden}"
+        )
+
+
+def verify_macos_signature(path: Path) -> None:
+    """Fail a Mach-O whose code signature no longer matches its bytes.
+
+    rc1's bin/btxd had compiled-in Metal kernel paths rewritten after linking
+    and was not re-signed, so Apple Silicon killed it at launch (SIGKILL, exit
+    137) while the dylib checks passed. Only a host with `codesign` can check;
+    elsewhere this is a no-op and the release checklist must record a native run.
+    """
+    codesign = shutil.which("codesign")
+    if codesign is None:
+        return
+    result = subprocess.run(
+        [codesign, "--verify", "--strict", str(path)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        if "not signed at all" in detail:
+            return  # never signed is a distribution choice; a broken seal is the bug
+        raise VerifyError(
+            f"{path}: codesign --verify --strict failed (the binary was modified "
+            f"after signing; re-sign it or set the paths at configure time): {detail}"
         )
 
 
@@ -501,6 +530,39 @@ def find_packaged_cli(root: Path) -> Path | None:
     return _prefer_bin_then_any(found)
 
 
+GLIBC_CEILING = "2.38"
+
+
+def verify_glibc_ceiling(root: Path, ceiling: str | None = None) -> None:
+    """Fail when any packaged ELF needs a newer GLIBC than the documented floor.
+
+    verify_launch only runs btxd. rc1 shipped btx-qt and a bundled libgnutls
+    that needed GLIBC_2.43 against a documented 2.38 (issue 237), so the GUI
+    could not start on Ubuntu 24.04 and the bundled lib/ broke host tools
+    when put on LD_LIBRARY_PATH. Read every ELF under bin/, libexec/ and lib/.
+    """
+    ceiling = ceiling or os.environ.get("BTX_RELEASE_GLIBC_CEILING", GLIBC_CEILING)
+    limit = version_key(ceiling)
+    offenders: list[str] = []
+    for sub in ("bin", "libexec", "lib"):
+        for directory in sorted(root.rglob(sub)):
+            if not directory.is_dir():
+                continue
+            for path in sorted(directory.rglob("*")):
+                if path.is_symlink() or not path.is_file():
+                    continue
+                glibc = elf_required_versions(path).get("GLIBC")
+                if glibc and version_key(glibc) > limit:
+                    offenders.append(f"{path.relative_to(root)} needs GLIBC_{glibc}")
+    if offenders:
+        raise VerifyError(
+            f"packaged files need a GLIBC newer than the documented {ceiling}: "
+            + "; ".join(offenders[:8])
+            + (f" (+{len(offenders) - 8} more)" if len(offenders) > 8 else "")
+            + ". Build on the baseline image, or drop or re-bundle those files."
+        )
+
+
 def verify_archive(archive: Path) -> str:
     """Unpack a shippable tarball/zip and gate the real btxd (and btx-cli if present)."""
     if not archive.is_file():
@@ -510,6 +572,7 @@ def verify_archive(archive: Path) -> str:
         extract_release_archive(archive, dest)
         btxd = find_packaged_btxd(dest)
         how = verify_path_for_ship(btxd)
+        verify_glibc_ceiling(dest)
         cli = find_packaged_cli(dest)
         if cli is not None:
             cli = resolve_verify_target(cli)

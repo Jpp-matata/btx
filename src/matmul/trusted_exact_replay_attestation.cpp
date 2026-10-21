@@ -14,6 +14,7 @@ extern "C" {
 }
 
 #include <algorithm>
+#include <array>
 #include <limits>
 #include <optional>
 #include <set>
@@ -1962,6 +1963,52 @@ std::vector<ExactReplayAttestation> AttestationStore::GetHeard(
         if (key.height == block_height && key.hash == block_hash) {
             out.push_back(attestation);
         }
+    }
+    return out;
+}
+
+std::vector<ExactReplayAttestation> AttestationStore::GetHeardForServe(
+    const uint256& block_hash,
+    int32_t block_height,
+    size_t max_items,
+    uint32_t rotate) const
+{
+    std::vector<ExactReplayAttestation> out;
+    if (max_items == 0) return out;
+    // With open attestors and a full pin our own votes are heard here too.
+    // They leave through the signer push / regeneration paths, which keep
+    // the withdrawn-vote rule; never re-serve them from the directory.
+    const std::optional<CPubKey> local{LocalSignerPubKey()};
+    const auto now{Clock::now()};
+    // HeardKey sorts by (height, hash, signer), and CPubKey by its prefix
+    // byte first: every stored signer sorts at or after the lowest
+    // compressed key. Visit only this block's entries, so a hash with
+    // nothing heard costs one map lookup, not a pass over the directory.
+    static constexpr std::array<unsigned char, CPubKey::COMPRESSED_SIZE>
+        LOWEST_SIGNER{0x02};
+    const HeardKey first{block_height, block_hash, CPubKey{LOWEST_SIGNER}};
+    std::lock_guard lock{m_mutex};
+    std::vector<const ExactReplayAttestation*> matches;
+    for (auto it{m_heard.lower_bound(first)};
+         it != m_heard.end() && it->first.height == block_height &&
+         it->first.hash == block_hash;
+         ++it) {
+        const auto& [key, attestation] = *it;
+        if (IsBlockedLocked(key.signer)) continue;
+        if (local.has_value() && key.signer == *local) continue;
+        const auto updated{m_heard_updated.find(key)};
+        if (updated == m_heard_updated.end() ||
+            now - updated->second >= m_config.ttl) {
+            continue;
+        }
+        matches.push_back(&attestation);
+    }
+    if (matches.empty()) return out;
+    const size_t count{std::min(max_items, matches.size())};
+    const size_t start{rotate % matches.size()};
+    out.reserve(count);
+    for (size_t i = 0; i < count; ++i) {
+        out.push_back(*matches[(start + i) % matches.size()]);
     }
     return out;
 }

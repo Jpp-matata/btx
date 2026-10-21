@@ -689,6 +689,15 @@ static RPCHelpMan unhostmodel()
                         {{"id", RPCArg::Type::STR, RPCArg::Optional::NO, "btx:// URI, hex, or alias"}});
 }
 
+static RPCHelpMan removemodel()
+{
+    return ProxyOrLocal("removemodel",
+                        "Delete a downloaded model: unpin, unseed, drop its pieces and its exportmodelpath checkout. "
+                        "Refuses with IN_USE while a retrieve for it is queued or running. Local storage only; never spends, "
+                        "never deletes a remote copy or another host's replica.\n",
+                        {{"id", RPCArg::Type::STR, RPCArg::Optional::NO, "btx:// URI, hex, or alias"}});
+}
+
 static RPCHelpMan removemodelalias()
 {
     return ProxyOrLocal("removemodelalias", "Remove an Ollama-style alias and re-sign the search card.\n",
@@ -2238,6 +2247,7 @@ void RegisterModelNetRPCCommands(CRPCTable& t)
         {"modelnet", &showmodel},
         {"modelnet", &exportmodellink},
         {"modelnet", &unhostmodel},
+        {"modelnet", &removemodel},
         {"modelnet", &removemodelalias},
         {"modelnet", &openmodelshare},
         {"modelnet", &getsetupstatus},

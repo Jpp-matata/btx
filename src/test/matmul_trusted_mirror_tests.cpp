@@ -2820,6 +2820,216 @@ BOOST_AUTO_TEST_CASE(signer_getmmattest_historical_and_hammer_ban)
     BOOST_CHECK(AggressiveGetMmAttestShouldBan(GETMMATTEST_HAMMER_BAN_AFTER + 8));
 }
 
+BOOST_AUTO_TEST_CASE(getmmattest_heard_bucket)
+{
+    using node::matmul_trusted::GetMmAttestHeardAffordable;
+    using node::matmul_trusted::GetMmAttestHeardRefill;
+    using node::matmul_trusted::GETMMATTEST_HEARD_BURST;
+    using node::matmul_trusted::GETMMATTEST_HEARD_PER_ANSWER;
+    using node::matmul_trusted::GETMMATTEST_HEARD_TOKEN_REFILL;
+
+    BOOST_CHECK_EQUAL(GETMMATTEST_HEARD_PER_ANSWER, 4U);
+    BOOST_CHECK_EQUAL(GETMMATTEST_HEARD_BURST, 4.0);
+    BOOST_CHECK(GETMMATTEST_HEARD_TOKEN_REFILL == std::chrono::seconds{4});
+
+    double tokens{GETMMATTEST_HEARD_BURST};
+    BOOST_CHECK_EQUAL(GetMmAttestHeardAffordable(tokens, 0), 4U);
+    tokens -= 4.0;
+    BOOST_CHECK_EQUAL(GetMmAttestHeardAffordable(tokens, 0), 0U);
+    tokens = GetMmAttestHeardRefill(tokens, std::chrono::seconds{3});
+    BOOST_CHECK_EQUAL(tokens, 0.75);
+    BOOST_CHECK_EQUAL(GetMmAttestHeardAffordable(tokens, 0), 0U);
+    tokens = GetMmAttestHeardRefill(tokens, std::chrono::seconds{1});
+    BOOST_CHECK_EQUAL(tokens, 1.0);
+    BOOST_CHECK_EQUAL(GetMmAttestHeardAffordable(tokens, 0), 1U);
+    tokens = GetMmAttestHeardRefill(tokens, std::chrono::hours{1});
+    BOOST_CHECK_EQUAL(tokens, GETMMATTEST_HEARD_BURST);
+    // A clock step back never refills.
+    BOOST_CHECK_EQUAL(
+        GetMmAttestHeardRefill(1.0, std::chrono::microseconds{-5}), 1.0);
+    BOOST_CHECK_EQUAL(GetMmAttestHeardAffordable(2.9, 0), 2U);
+    BOOST_CHECK_EQUAL(GetMmAttestHeardAffordable(100.0, 0), 4U);
+    BOOST_CHECK_EQUAL(GetMmAttestHeardAffordable(-1.0, 0), 0U);
+    // Heard items only fill the answer up to 4 items in all (pinned + PQ +
+    // heard).
+    BOOST_CHECK_EQUAL(GetMmAttestHeardAffordable(4.0, 1), 3U);
+    BOOST_CHECK_EQUAL(GetMmAttestHeardAffordable(4.0, 3), 1U);
+    BOOST_CHECK_EQUAL(GetMmAttestHeardAffordable(1.5, 2), 1U);
+    BOOST_CHECK_EQUAL(GetMmAttestHeardAffordable(0.5, 3), 0U);
+    BOOST_CHECK_EQUAL(GetMmAttestHeardAffordable(4.0, 4), 0U);
+    BOOST_CHECK_EQUAL(GetMmAttestHeardAffordable(4.0, 16), 0U);
+}
+
+// Model of a stock receiver (NP MMATTEST and MMATTESTPQ handlers: one
+// per-peer bucket of 64 items, refill 1/s, a whole message is ignored when
+// its count is not affordable, GETMMATTEST_HAMMER_BAN_AFTER consecutive
+// ignores ban) against one serving peer that answers every GETMMATTEST with
+// `pinned` votes (pinned + PQ) and then, in their own message, the heard
+// items its per-requester allowance pays for, filling the answer up to
+// GETMMATTEST_HEARD_PER_ANSWER items. A catch-up burst of 16 live asks, or
+// of 16 live asks and then the 4 historical asks the server also allows
+// (pinned only), then one live ask every 10s for an hour.
+BOOST_AUTO_TEST_CASE(getmmattest_heard_fits_stock_receiver)
+{
+    using namespace std::chrono_literals;
+    using node::matmul_trusted::GetMmAttestConsumeRequestToken;
+    using node::matmul_trusted::GetMmAttestHeardAffordable;
+    using node::matmul_trusted::GetMmAttestHeardRefill;
+    using node::matmul_trusted::GETMMATTEST_HAMMER_BAN_AFTER;
+    using node::matmul_trusted::GETMMATTEST_HEARD_BURST;
+    using node::matmul_trusted::GETMMATTEST_HEARD_PER_ANSWER;
+    using node::matmul_trusted::GETMMATTEST_HISTORICAL_REQUEST_BURST;
+    using node::matmul_trusted::GETMMATTEST_HISTORICAL_TOKEN_REFILL;
+    using node::matmul_trusted::GETMMATTEST_LIVE_REQUEST_BURST;
+    using node::matmul_trusted::GETMMATTEST_LIVE_TOKEN_REFILL;
+
+    // net_processing.cpp MATMUL_ATTESTATION_INBOUND_BURST and
+    // MATMUL_ATTESTATIONS_PER_MESSAGE.
+    constexpr double RECEIVER_BURST{64.0};
+    constexpr size_t MAX_PINNED_PER_MESSAGE{16};
+
+    struct Outcome {
+        std::vector<bool> pinned_accepted;
+        int pinned_ignored{0};
+        int heard_ignored{0};
+        int max_strikes{0};
+        size_t burst_heard_items{0};
+        size_t heard_items{0};
+    };
+    auto per_second = [](std::chrono::microseconds elapsed, auto refill) {
+        return static_cast<double>(elapsed.count()) /
+               static_cast<double>(
+                   std::chrono::microseconds{refill}.count());
+    };
+    auto run = [&](size_t pinned, bool historical, bool serve_heard) {
+        Outcome out;
+        double receiver_tokens{RECEIVER_BURST};
+        std::chrono::microseconds receiver_last{0us};
+        int strikes{0};
+        double live_tokens{GETMMATTEST_LIVE_REQUEST_BURST};
+        double historical_tokens{GETMMATTEST_HISTORICAL_REQUEST_BURST};
+        std::chrono::microseconds serve_last{0us};
+        double heard_tokens{GETMMATTEST_HEARD_BURST};
+        std::chrono::microseconds heard_last{0us};
+        auto receive = [&](std::chrono::microseconds now, size_t count) {
+            if (receiver_last != 0us) {
+                receiver_tokens = std::min(
+                    RECEIVER_BURST,
+                    receiver_tokens +
+                        per_second(now - receiver_last,
+                                   GETMMATTEST_LIVE_TOKEN_REFILL));
+            }
+            receiver_last = now;
+            if (receiver_tokens < static_cast<double>(count)) {
+                ++strikes;
+                out.max_strikes = std::max(out.max_strikes, strikes);
+                return false;
+            }
+            receiver_tokens -= static_cast<double>(count);
+            strikes = 0;
+            return true;
+        };
+        auto ask = [&](std::chrono::microseconds now, bool live,
+                       bool in_burst) {
+            if (serve_last != 0us) {
+                live_tokens = std::min(
+                    GETMMATTEST_LIVE_REQUEST_BURST,
+                    live_tokens + per_second(now - serve_last,
+                                             GETMMATTEST_LIVE_TOKEN_REFILL));
+                historical_tokens = std::min(
+                    GETMMATTEST_HISTORICAL_REQUEST_BURST,
+                    historical_tokens +
+                        per_second(now - serve_last,
+                                   GETMMATTEST_HISTORICAL_TOKEN_REFILL));
+            }
+            serve_last = now;
+            if (!GetMmAttestConsumeRequestToken(live, live_tokens,
+                                                historical_tokens)) {
+                return;
+            }
+            if (pinned > 0) {
+                const bool accepted{receive(now, pinned)};
+                out.pinned_accepted.push_back(accepted);
+                if (!accepted) ++out.pinned_ignored;
+            }
+            if (!serve_heard || !live) return;
+            if (heard_last != 0us) {
+                heard_tokens =
+                    GetMmAttestHeardRefill(heard_tokens, now - heard_last);
+            }
+            heard_last = now;
+            // A flooded directory always has more heard keys than the cap.
+            const size_t heard{GetMmAttestHeardAffordable(heard_tokens, pinned)};
+            if (heard == 0) return;
+            BOOST_CHECK_LE(pinned + heard, GETMMATTEST_HEARD_PER_ANSWER);
+            heard_tokens -= static_cast<double>(heard);
+            out.heard_items += heard;
+            if (in_burst) out.burst_heard_items += heard;
+            if (!receive(now, heard)) ++out.heard_ignored;
+        };
+        std::chrono::microseconds now{1s};
+        for (int i = 0; i < static_cast<int>(GETMMATTEST_LIVE_REQUEST_BURST);
+             ++i) {
+            ask(now, /*live=*/true, /*in_burst=*/true);
+            now += 1ms;
+        }
+        // Historical answers last: the heard items of the burst are already
+        // spent when their pinned votes arrive.
+        for (int i = 0;
+             historical &&
+             i < static_cast<int>(GETMMATTEST_HISTORICAL_REQUEST_BURST);
+             ++i) {
+            ask(now, /*live=*/false, /*in_burst=*/true);
+            now += 1ms;
+        }
+        for (int i = 0; i < 360; ++i) {
+            now += 10s;
+            ask(now, /*live=*/true, /*in_burst=*/false);
+        }
+        return out;
+    };
+
+    for (const bool historical : {false, true}) {
+        // Votes per answer a stock receiver takes on its own in the burst:
+        // 64 / 16 = 4 live, 64 / 20 -> 3 with the historical answers.
+        const size_t answers{static_cast<size_t>(
+            GETMMATTEST_LIVE_REQUEST_BURST +
+            (historical ? GETMMATTEST_HISTORICAL_REQUEST_BURST : 0.0))};
+        const size_t carry{static_cast<size_t>(RECEIVER_BURST) / answers};
+        for (size_t pinned{0}; pinned <= MAX_PINNED_PER_MESSAGE; ++pinned) {
+            BOOST_TEST_CONTEXT("pinned " << pinned << " historical "
+                                         << historical)
+            {
+                const Outcome off{run(pinned, historical, /*serve_heard=*/false)};
+                const Outcome on{run(pinned, historical, /*serve_heard=*/true)};
+                if (pinned <= carry) {
+                    // The pinned burst fits on its own: heard items take
+                    // none of it.
+                    BOOST_CHECK_EQUAL(off.pinned_ignored, 0);
+                    BOOST_CHECK_EQUAL(on.pinned_ignored, 0);
+                    BOOST_CHECK_EQUAL(on.heard_ignored, 0);
+                    BOOST_CHECK_LT(on.max_strikes, GETMMATTEST_HAMMER_BAN_AFTER);
+                } else {
+                    // Overflows a stock receiver without any heard item.
+                    BOOST_CHECK_GT(off.pinned_ignored, 0);
+                }
+                if (pinned >= GETMMATTEST_HEARD_PER_ANSWER) {
+                    // Nothing heard: the receiver sees exactly what it sees
+                    // with the directory off.
+                    BOOST_CHECK_EQUAL(on.heard_items, 0U);
+                    BOOST_CHECK(on.pinned_accepted == off.pinned_accepted);
+                    BOOST_CHECK_EQUAL(on.max_strikes, off.max_strikes);
+                } else {
+                    BOOST_CHECK_EQUAL(on.burst_heard_items,
+                                      static_cast<size_t>(GETMMATTEST_HEARD_BURST));
+                    // 0.25 items/s after the burst: 4 + 3600s / 4s at most.
+                    BOOST_CHECK_LE(on.heard_items, 4U + 900U);
+                }
+            }
+        }
+    }
+}
+
 BOOST_AUTO_TEST_CASE(competing_attested_index_rejects_fossil_depth)
 {
     using node::matmul_trusted::TrustedMirrorMayAdoptCompetingAttestedIndex;

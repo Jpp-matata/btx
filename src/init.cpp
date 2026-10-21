@@ -63,6 +63,8 @@
 #include <node/blockstorage.h>
 #include <node/caches.h>
 #include <node/autoupdate.h>
+#include <node/attested_utxo_snapshot.h>
+#include <node/attested_utxo_snapshot_p2p.h>
 #include <node/chainstate.h>
 #include <node/chainstatemanager_args.h>
 #include <node/context.h>
@@ -120,6 +122,7 @@
 #include <uint256.h>
 
 #ifdef ENABLE_MODELNET
+#include <modelnet/firstrun.h>
 #include <modelnet/model_nat.h>
 #include <modelnet/policy.h>
 #include <modelnet/profile.h>
@@ -673,7 +676,7 @@ void SetupServerArgs(ArgsManager& argsman, bool can_listen_ipc)
     argsman.AddArg("-matmultrustedthreshold=<n>", "Required distinct trusted signatures (M) for one block, 1..N (default: 1). On mainnet with -matmulvalidation=trusted, M<2 or N<2 is refused: above the Profile-1 activation height the quorum replaces the MatMul proof-of-work check, so a 1-of-1 quorum makes one key the node's sole proof-of-work authority. Override with -allowsinglekeytrustedmirror=1. On -matmulvalidation=consensus the pin is telemetry and never skips ExactReplay. Configure 2 independent signers with M=2.", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-allowsinglekeytrustedmirror", "Allow a mainnet trusted mirror to start with N<2 or M<2 (default: 0). That topology is a single stolen WIF hijacking ExactReplay skip. Transition override only; logged and alarming. Consensus+pin is never refused for 1-of-1 (the pin is telemetry).", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-matmulattestationblocklist=<hex>", "Compressed secp256k1 public key whose ExactReplay attestations are never counted, even if the key is also in -matmultrustedpubkey. Repeat for multiple keys. Manual emergency hijack control only; never auto-populated from peer counts or open-attestor majority. Starting or adding a block that leaves fewer than -matmultrustedthreshold unblocked pin members is refused (fail-closed). Runtime adds persist; unblocking a persisted key requires editing the durable record. Restart without this flag unblocks config-only keys.", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
-    argsman.AddArg("-matmulopenattestors", "Hear cryptographically valid ExactReplay attestations from keys outside -matmultrustedpubkey (default: 0). Off until the open-speak directory is rate-limited. A new key is listed as admitted after it co-signs a hash that already has pin quorum; that directory is not MatMul authority. Only trusted mirrors skip ExactReplay on pin M-of-N; consensus miners never skip because a pin signed, and the pin is not FindMostWorkChain or getblocktemplate fork choice on consensus. Set to 1 to enable the directory.", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
+    argsman.AddArg("-matmulopenattestors", "Hear cryptographically valid ExactReplay attestations from keys outside -matmultrustedpubkey (default: 0). Off until the open-speak directory is rate-limited. A new key is listed as admitted after it co-signs a hash that already has pin quorum; that directory is not MatMul authority. A serving node also answers GETMMATTEST with up to 4 heard statements, after its pinned ones. Only trusted mirrors skip ExactReplay on pin M-of-N; consensus miners never skip because a pin signed, and the pin is not FindMostWorkChain or getblocktemplate fork choice on consensus. Set to 1 to enable the directory.", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-matmulopenthreshold=<n>", "Directory open-quorum signal: distinct pinned-or-admitted unfrozen keys (default: max(M, 2)). Reported by getmatmulattestors; never replaces -matmultrustedthreshold and never skips ExactReplay.", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-matmultrustedwaitms=<n>", "Maximum time a trusted-mirror block may remain parked awaiting an M-of-N attestation quorum before the attempt is left retryable (non-punitive), in milliseconds (default: 60000, maximum: 600000). Does not block the verify worker: many blocks may await quorum concurrently.", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-matmulattestationsignerkeyfile=<file>", "Archive-validator file containing exactly one WIF signing key. Relative paths resolve under the network datadir. The corresponding public key is added to the configured signer set. Protect this file as an online validation key.", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
@@ -747,6 +750,8 @@ void SetupServerArgs(ArgsManager& argsman, bool can_listen_ipc)
     argsman.AddArg("-includeconf=<file>", "Specify additional configuration file, relative to the -datadir path (only useable from configuration file, not command line)", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-allowignoredconf", strprintf("For backwards compatibility, treat an unused %s file in the datadir as a warning, not an error.", BITCOIN_CONF_FILENAME), ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-loadblock=<file>", "Imports blocks from external file on startup", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
+    argsman.AddArg("-offerattestedutxosnapshot=<file>", "Offer this attested UTXO snapshot over P2P from startup, as the offerattestedutxosnapshot RPC does at runtime (an RPC offer is held in memory and is gone after a restart). Use with -offerattestedutxosnapshotmanifest. Relative paths resolve under the network datadir. The files get the same checks as the RPC; if a check fails the node starts without an offer and logs the reason.", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
+    argsman.AddArg("-offerattestedutxosnapshotmanifest=<file>", "Signed manifest for -offerattestedutxosnapshot. Relative paths resolve under the network datadir.", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-lowmem=<n>", strprintf("If system available memory falls below <n> MiB, flush caches (0 to disable, default: %s)", g_low_memory_threshold / 1024 / 1024), ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-maxmempool=<n>", strprintf("Keep the transaction memory pool below <n> megabytes (default: %u)", DEFAULT_MAX_MEMPOOL_SIZE_MB), ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-maxorphantx=<n>", strprintf("Keep at most <n> unconnectable transactions in memory (default: %u)", DEFAULT_MAX_ORPHAN_TRANSACTIONS), ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
@@ -2878,6 +2883,61 @@ static bool InitializeMatMulRCReadinessPostDaemon(
     return true;
 }
 
+/**
+ * Offer the attested UTXO snapshot named by -offerattestedutxosnapshot and
+ * -offerattestedutxosnapshotmanifest, with the same checks as the
+ * offerattestedutxosnapshot RPC. The offer itself is process-local, so this is
+ * how an offering host keeps serving across restarts.
+ */
+static bool OfferAttestedUTXOSnapshotAtStartup(NodeContext& node,
+                                               const ArgsManager& args,
+                                               std::string& error)
+{
+    const fs::path snapshot_arg{args.GetPathArg("-offerattestedutxosnapshot")};
+    const fs::path manifest_arg{args.GetPathArg("-offerattestedutxosnapshotmanifest")};
+    if (snapshot_arg.empty() || manifest_arg.empty()) {
+        error = "set both -offerattestedutxosnapshot and -offerattestedutxosnapshotmanifest";
+        return false;
+    }
+    if (!node.chainman || !node.peerman || !node.connman) {
+        error = "node is not fully initialized";
+        return false;
+    }
+    if (node.chainman->IsDiscoveryRelay()) {
+        error = "a discovery relay (-matmulvalidation=relay) does not serve snapshots";
+        return false;
+    }
+    const fs::path snapshot_path{AbsPathForConfigVal(args, snapshot_arg)};
+    const fs::path manifest_path{AbsPathForConfigVal(args, manifest_arg)};
+    node::AttestedUTXOSnapshotOffer offer;
+    if (!node::BuildAttestedUTXOSnapshotOfferFromFiles(
+            snapshot_path, manifest_path, node::ATTESTED_UTXO_SNAPSHOT_CHUNK_SIZE,
+            offer, error)) {
+        return false;
+    }
+    if (node::matmul_trusted::IsConfigured()) {
+        const auto verified{
+            node::matmul_trusted::VerifyUtxoSnapshotManifest(offer.manifest)};
+        if (verified != matmul::trusted::UtxoSnapshotVerifyResult::Valid) {
+            error = strprintf("manifest failed local quorum check: %s",
+                              matmul::trusted::UtxoSnapshotVerifyResultName(verified));
+            return false;
+        }
+    }
+    const int32_t height{offer.height};
+    const uint256 block_hash{offer.block_hash};
+    const uint32_t chunk_count{offer.chunk_count};
+    const size_t signatures{offer.manifest.signatures.size()};
+    if (!node.peerman->AttestedUTXOSnapshotCoordinator().OfferSnapshot(
+            std::move(offer), error)) {
+        return false;
+    }
+    LogInfo("Offering attested UTXO snapshot from -offerattestedutxosnapshot: "
+            "height=%d block=%s chunks=%u signatures=%u\n",
+            height, block_hash.ToString(), chunk_count, signatures);
+    return true;
+}
+
 bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
 {
     const ArgsManager& args = *Assert(node.args);
@@ -3683,6 +3743,18 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
         return true;
     }
 
+    // Re-offer a configured attested UTXO snapshot before the network starts,
+    // so the service bit is in our VERSION from the first connection.
+    if (args.IsArgSet("-offerattestedutxosnapshot") ||
+        args.IsArgSet("-offerattestedutxosnapshotmanifest")) {
+        std::string offer_error;
+        if (OfferAttestedUTXOSnapshotAtStartup(node, args, offer_error)) {
+            g_local_services = ServiceFlags(g_local_services | NODE_ATTESTED_UTXO_SNAPSHOT);
+        } else {
+            InitWarning(strprintf(_("Not offering the attested UTXO snapshot from -offerattestedutxosnapshot: %s"), offer_error));
+        }
+    }
+
     // ********************************************************* Step 12: start node
 
     int64_t best_block_time{};
@@ -4334,6 +4406,19 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
             }
             if (apply_profile) {
                 modelnet::ApplyProfileToLaunchConfig(policy, hcfg);
+            }
+            // The default budget is "auto" (up to 512 GiB). Hold it at 0 until
+            // the operator has consented the way the GUI and btx-open ask:
+            // an explicit -modelstorage/-modelprofile, a saved profile, the
+            // first-run consent file, or BTX_MODEL_STORAGE.
+            const std::string requested_storage = hcfg.storage_arg;
+            hcfg.storage_arg = modelnet::ResolveHeadlessStorageArg(
+                requested_storage,
+                args.IsArgSet("-modelstorage") || args.IsArgSet("-modelprofile") || apply_profile,
+                modelnet::FirstRunConsentPath(args.GetDataDirNet()));
+            if (hcfg.storage_arg != requested_storage) {
+                LogPrintf("model storage: no first-run consent for a payload budget (%s); keeping 0. "
+                          "Set -modelstorage=<size|auto> or record consent to enable it.\n", requested_storage);
             }
         }
         const std::string modeld_arg = args.IsArgSet("-modelhelper") ? args.GetArg("-modelhelper", "") :

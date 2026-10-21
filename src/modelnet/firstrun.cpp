@@ -37,6 +37,17 @@ bool AllowPayloadStorageFile(const fs::path& path)
     return AllowPayloadStorage(c);
 }
 
+std::string ResolveHeadlessStorageArg(const std::string& requested, bool explicit_operator_choice, const fs::path& consent_path)
+{
+    if (requested == "0") return requested;
+    if (explicit_operator_choice) return requested;
+    if (AllowPayloadStorageFile(consent_path)) return requested;
+    uint64_t env_bytes{0};
+    std::string env_err;
+    if (EnvHasPositiveStorageBudget(env_bytes, env_err)) return requested;
+    return "0";
+}
+
 bool LoadFirstRunConsent(const fs::path& path, FirstRunConsent& out, std::string& err)
 {
     out = FirstRunConsent{};

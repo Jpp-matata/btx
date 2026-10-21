@@ -49,6 +49,7 @@ Conceptual background: [search.md](search.md), [directory.md](directory.md),
 | `exportmodellink` | Write/return a `.btx` JSON magnet analog (canonical `uri` + `copy_text`) |
 | `openmodelshare` | Preview-only parse of copy_text / `.btx` file / `btx://` (same contract as `openbtxuri`) |
 | `unhostmodel` | Unpin + unseed in one call (does not delete catalog bytes) |
+| `removemodel` | Delete a downloaded model's pieces and `exportmodelpath` checkout, unpin and unseed. `IN_USE` while a retrieve runs. Local only; never spends |
 | `getmodeltransfers` | Torrent-style list: `state`, ratio, served/received, `share`; live job `percent`, `bytes_per_sec`, `eta_s`, `job_id` |
 | `setmodelalias` / `getmodelaliases` / `removemodelalias` | Ollama-style alias; omit id on get to list all |
 | `scanmodelwatch` | Host new GGUF/SafeTensors from `-modelwatch=` or an explicit path; skip when `would_fit` is false; `.btx` cards are **opened**, not imported as weights |

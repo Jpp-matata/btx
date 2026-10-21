@@ -85,6 +85,22 @@ retains and re-advertises that qualified public model inside the budget.
 Preserve-rare (fetch under-replicated models into spare space) is explicit.
 See [propagation.md](propagation.md).
 
+Headless `btxd` honours the same first-run gate as `btx-qt` and `btx-open`:
+the payload budget stays **0** until the operator consents, either with an
+explicit `-modelstorage=<size|auto>` (or `-modelprofile`), a saved profile, the
+first-run consent file (`<datadir>/modelnet/firstrun.json`), or a positive
+`BTX_MODEL_STORAGE`. Without one of those the log says so and the budget is 0.
+
+## Finding a first peer
+
+There is no compiled-in model contact: `ModelDNSSeeds()` is empty until a
+crawl publishes DNS names, and MDPEERS hints from monetary peers are consumed
+as hints and never dialed. A new node therefore needs one `-modelpeer=<host:port>`
+(alias `-modelseednode`) from an operator it chooses; nothing in the protocol
+treats any contact as canonical, and a peer count is only this node's
+observation. Which contacts, if any, ship as defaults is a community decision,
+not something this tree hard-codes.
+
 ## Architecture (two processes)
 
 ```

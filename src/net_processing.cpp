@@ -191,6 +191,13 @@ static constexpr double MATMUL_ATTESTATION_HISTORICAL_REQUEST_BURST{
 static constexpr double MATMUL_ATTESTATION_INBOUND_BURST{64.0};
 static constexpr double MATMUL_ATTESTATION_GLOBAL_INBOUND_BURST{256.0};
 static constexpr double MATMUL_ATTESTATION_NETGROUP_INBOUND_BURST{64.0};
+// A live GETMMATTEST answer that carries heard statements holds at most
+// GETMMATTEST_HEARD_PER_ANSWER items in all, so a full live request burst of
+// such answers fits the receiver's per-peer bucket above.
+static_assert(static_cast<double>(
+                  node::matmul_trusted::GETMMATTEST_HEARD_PER_ANSWER) *
+                  node::matmul_trusted::GETMMATTEST_LIVE_REQUEST_BURST <=
+              MATMUL_ATTESTATION_INBOUND_BURST);
 /** Per-source ceiling on attestation signature-verification work accepted
  *  before validity is known. Bounds aggregate CPU without a global choke point
  *  that one flooding netgroup could exhaust for everybody. */
@@ -219,6 +226,13 @@ static constexpr int MATMUL_ATTESTATION_MISS_BACKOFF_MAX_EXP{6};
 /** Rate-limit authority getmmattest outcome logs (still LogDebug every time). */
 static constexpr auto MATMUL_ATTESTATION_SERVE_LOG_INTERVAL{2s};
 static constexpr auto MATMUL_TRUSTED_MIRROR_STALL_LOG_INTERVAL{30s};
+//! A trusted mirror whose tip has not moved while headers are ahead, and that
+//! has no peer advertising NODE_MATMUL_ATTESTATION_ARCHIVE (the bit for
+//! "answers GETMMATTEST"), warns after this long, then at most once per
+//! interval. Typical case: right after loadtxoutsetattested with only
+//! -matmulattestationserve=0 peers.
+static constexpr auto MATMUL_TRUSTED_NO_ATTESTATION_PEER_GRACE{60s};
+static constexpr auto MATMUL_TRUSTED_NO_ATTESTATION_PEER_LOG_INTERVAL{10min};
 //! Unconnecting header batches before we drop the peer. Bitcoin Core's
 //! nUnconnectingHeaders; restored after a header-flood / body-withhold
 //! orphan storm (operator ~48%).
@@ -708,11 +722,19 @@ static std::chrono::steady_clock::duration MatMulRCSourceBudgetRetryDelay(
     const MatMulPeerVerificationBudget& keyed_netgroup_budget,
     std::chrono::steady_clock::time_point now)
 {
-    return ClampMatMulBudgetDeferredDelay(std::max({
+    const auto remaining{std::max({
         MatMulBudgetWindowRetryDelay(address_budget.rc_window_start, now),
         MatMulBudgetWindowRetryDelay(keyed_netgroup_budget.rc_window_start, now),
         MatMulBudgetWindowRetryDelay(address_budget.rc_progress_window_start, now),
-        MatMulBudgetWindowRetryDelay(keyed_netgroup_budget.rc_progress_window_start, now)}));
+        MatMulBudgetWindowRetryDelay(keyed_netgroup_budget.rc_progress_window_start, now)})};
+    // No open window: the miss is not a rate-window wait (for example an
+    // effective budget below the job's work units), so no refill will admit
+    // it. Use the cooldown, as MatMulBudgetRefillRetryDelay does, not the 1s
+    // floor, or a retry that honours this delay would spin at 1Hz.
+    if (remaining <= std::chrono::steady_clock::duration::zero()) {
+        return MATMUL_BUDGET_DEFER_COOLDOWN;
+    }
+    return ClampMatMulBudgetDeferredDelay(remaining);
 }
 
 static uint32_t LimitMatMulRCCatchupScaleToScheduler(uint32_t requested_scale)
@@ -1235,6 +1257,13 @@ struct Peer {
     double m_matmul_attestation_inbound_tokens GUARDED_BY(NetEventsInterface::g_msgproc_mutex){
         MATMUL_ATTESTATION_INBOUND_BURST};
     std::chrono::microseconds m_matmul_attestation_last_refill GUARDED_BY(NetEventsInterface::g_msgproc_mutex){0us};
+    /** Heard statements served to this peer after a pinned GETMMATTEST
+     *  answer (-matmulopenattestors=1 only). Own bucket and clock; the
+     *  cursor rotates through the heard keys of a hash across answers. */
+    double m_matmul_heard_serve_tokens GUARDED_BY(NetEventsInterface::g_msgproc_mutex){
+        node::matmul_trusted::GETMMATTEST_HEARD_BURST};
+    std::chrono::microseconds m_matmul_heard_serve_last_refill GUARDED_BY(NetEventsInterface::g_msgproc_mutex){0us};
+    uint32_t m_matmul_heard_serve_cursor GUARDED_BY(NetEventsInterface::g_msgproc_mutex){0};
     /** Consecutive ignored GETMMATTEST / over-budget MMATTEST. Reset on
      *  a successful serve or accepted mmattest. Aggressive P2P is
      *  penalized once this hits GETMMATTEST_HAMMER_BAN_AFTER. */
@@ -2440,6 +2469,12 @@ private:
     //! Rate-limited stall diagnostics for trusted mirrors.
     std::chrono::steady_clock::time_point m_matmul_trusted_last_stall_log
         GUARDED_BY(cs_main){};
+    //! "No attestation-serving peer" diagnostics (mockable time, seconds).
+    std::chrono::seconds m_matmul_no_attestation_peer_since
+        GUARDED_BY(cs_main){0s};
+    int m_matmul_no_attestation_peer_tip_height GUARDED_BY(cs_main){-1};
+    std::chrono::seconds m_matmul_no_attestation_peer_last_log
+        GUARDED_BY(cs_main){0s};
     //! Count of distinct unattestable hashes observed (not repeat evaluations).
     uint64_t m_matmul_trusted_reject_unattestable
         GUARDED_BY(cs_main){0};
@@ -2909,6 +2944,8 @@ private:
                                           const CBlockIndex* index,
                                           const CBlockIndex* tip,
                                           bool tip_extending) const
+        EXCLUSIVE_LOCKS_REQUIRED(cs_main);
+    void MaybeLogNoAttestationServingPeer(std::chrono::seconds now)
         EXCLUSIVE_LOCKS_REQUIRED(cs_main);
     void MaybeLogTrustedMirrorStall(int32_t tip_height)
         EXCLUSIVE_LOCKS_REQUIRED(cs_main);
@@ -4035,8 +4072,20 @@ void PeerManagerImpl::DispatchDisconnectedRetainedMatMulBody(
         RefreshMatMulDeferredBodyRetry(hash, "disconnected source missing body");
         return;
     }
+    // With no bounded recompute to schedule, nothing processes this body
+    // while its source is gone, and download skips a retained hash.
+    // Refreshing it would hold the only copy until
+    // MATMUL_DEFERRED_BODY_MAX_AGE. Release it, so a connected peer can
+    // serve the block under that peer's own admission.
+    const auto release_for_refetch = [&](const char* reason) {
+        LogDebug(BCLog::NET,
+                 "Releasing retained body %s for re-fetch; source peer=%d is gone and %s\n",
+                 hash.ToString(), candidate.source_peer, reason);
+        EraseMatMulDeferredBody(hash);
+        ClearMatMulRCBodyDeferred(hash);
+    };
     if (!m_matmul_verify_worker) {
-        RefreshMatMulDeferredBodyRetry(hash, "disconnected source has no bounded worker");
+        release_for_refetch("there is no bounded worker");
         return;
     }
     std::optional<ChainstateManager::MatMulEncDrClassifyResult> encdr;
@@ -4049,7 +4098,9 @@ void PeerManagerImpl::DispatchDisconnectedRetainedMatMulBody(
                         candidate.block->hashPrevBlock == tip->GetBlockHash();
     }
     if (!encdr) {
-        RefreshMatMulDeferredBodyRetry(hash, "disconnected source has no bounded recompute");
+        // For example the ExactReplay verdict is already known (a header-first
+        // replay of this hash finished), or the height is below v4.
+        release_for_refetch("it needs no bounded recompute");
         return;
     }
     const Consensus::Params& params{m_chainparams.GetConsensus()};
@@ -12084,6 +12135,67 @@ void PeerManagerImpl::MaybeLogTrustedMirrorStall(int32_t tip_height)
     MaybeKickAbcForAttestedCatchUp();
 }
 
+void PeerManagerImpl::MaybeLogNoAttestationServingPeer(std::chrono::seconds now)
+{
+    AssertLockHeld(cs_main);
+    const CBlockIndex* tip{m_chainman.ActiveChain().Tip()};
+    const CBlockIndex* best_header{m_chainman.m_best_header};
+    bool stuck{node::matmul_trusted::IsTrustedMirror() && tip != nullptr &&
+               best_header != nullptr && best_header->nHeight > tip->nHeight &&
+               m_chainparams.GetConsensus().IsMatMulTrustedReplayAttestationActive(
+                   tip->nHeight + 1)};
+    size_t peers{0};
+    if (stuck) {
+        const auto now_us{
+            std::chrono::duration_cast<std::chrono::microseconds>(now)};
+        for (const auto& [id, state] : m_node_states) {
+            ++peers;
+            // A peer that recently delivered a valid MMATTEST is serving us
+            // even if it does not advertise the archive bit.
+            const auto success{m_matmul_attestation_peer_success.find(id)};
+            const bool recent_success{
+                success != m_matmul_attestation_peer_success.end() &&
+                now_us >= success->second.seen_at &&
+                now_us - success->second.seen_at <=
+                    MATMUL_ATTESTATION_REQUEST_TTL};
+            if (state.m_matmul_attestation_archive || recent_success) {
+                stuck = false;
+                break;
+            }
+        }
+    }
+    if (!stuck) {
+        m_matmul_no_attestation_peer_since = 0s;
+        return;
+    }
+    if (m_matmul_no_attestation_peer_since == 0s ||
+        m_matmul_no_attestation_peer_tip_height != tip->nHeight) {
+        // Start the grace period, or restart it because the tip moved.
+        m_matmul_no_attestation_peer_since = now;
+        m_matmul_no_attestation_peer_tip_height = tip->nHeight;
+        return;
+    }
+    if (now - m_matmul_no_attestation_peer_since <
+        MATMUL_TRUSTED_NO_ATTESTATION_PEER_GRACE) {
+        return;
+    }
+    if (m_matmul_no_attestation_peer_last_log != 0s &&
+        now - m_matmul_no_attestation_peer_last_log <
+            MATMUL_TRUSTED_NO_ATTESTATION_PEER_LOG_INTERVAL) {
+        return;
+    }
+    m_matmul_no_attestation_peer_last_log = now;
+    LogWarning(
+        "matmul trusted mirror: no attestation-serving peer connected "
+        "(none of %u peer(s) advertises NODE_MATMUL_ATTESTATION_ARCHIVE or "
+        "delivered a valid attestation in the last minute); "
+        "tip_height=%d header_height=%d. Blocks above the tip need a signer "
+        "quorum, which this node can only fetch from a consensus signer or a "
+        "trusted mirror running with -matmulattestationserve=1. Connect one "
+        "(for example with -addnode).\n",
+        static_cast<unsigned>(peers), tip->nHeight, best_header->nHeight);
+}
+
 void PeerManagerImpl::MaybeEvictAttestationBackoff()
 {
     AssertLockHeld(cs_main);
@@ -15176,6 +15288,18 @@ void PeerManagerImpl::ProcessBlock(CNode& node, const std::shared_ptr<const CBlo
                 body_charged_netgroup = node.nKeyedNetGroup;
             }
             return true;
+        }
+        if (progress_lane) {
+            // End the lifecycle attempt before the body is retained below, as
+            // the pending-cap path in AdmitMatMulBlockVerification does.
+            // Ending it (MatMulBlockLifecycle::Retry with
+            // MATMUL_BUDGET_DEFER_COOLDOWN) sets the retry deadline to now +
+            // 60s; done after StoreMatMulDeferredBody, it replaced the refill
+            // delay computed here, so a followed-chain body whose window
+            // refilled in seconds still waited a full minute. The caller's
+            // later release_admission_marker() is then a no-op. Competing-lane
+            // bodies keep the 60s retry.
+            release_admission_marker();
         }
         if (global_exhausted) {
             // Hold this block off the download scheduler until the per-minute
@@ -21123,6 +21247,8 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
                 peer->m_matmul_protocol_ignored = 0;
             }
         };
+        // Pinned and PQ items already sent in this answer (push_heard).
+        size_t answer_items{0};
         auto push_mmattest =
             [&](std::vector<matmul::trusted::ExactReplayAttestation> attestations,
                 const char* reason) {
@@ -21135,6 +21261,7 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
                     return;
                 }
                 if (!ensure_logical_token()) return;
+                answer_items += attestations.size();
                 MakeAndPushMessage(
                     pfrom, NetMsgType::MMATTEST, attestations);
                 MaybeLogAttestationServe(
@@ -21150,11 +21277,66 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
                 }
                 if (attestations.empty()) return;
                 if (!ensure_logical_token()) return;
+                answer_items += attestations.size();
                 MakeAndPushMessage(
                     pfrom, NetMsgType::MMATTESTPQ, attestations);
                 MaybeLogAttestationServe(reason, block_hash, height,
                                          pfrom.GetId());
             };
+
+        // Open-attestor directory (-matmulopenattestors=1): after the pinned
+        // and PQ answers, fill the answer up to GETMMATTEST_HEARD_PER_ANSWER
+        // items with valid statements from keys this node does not pin. A
+        // requester that pins one of those keys counts it through its own
+        // Add(); nobody's trust changes here. Own MMATTEST, so a receiver
+        // short of tokens drops only this message, and an answer that
+        // already carries GETMMATTEST_HEARD_PER_ANSWER items gets none. Live
+        // active-chain hashes only (not recovery forks or followed
+        // suffixes), paced per requester, never GETMMATPQ.
+        auto push_heard = [&]() {
+            if (msg_type != NetMsgType::GETMMATTEST) return;
+            if (!on_active_chain || !live_window) return;
+            if (!node::matmul_trusted::OpenAttestorsEnabled()) return;
+            if (logical_rate_limited) return;
+            if (answer_items >=
+                node::matmul_trusted::GETMMATTEST_HEARD_PER_ANSWER) {
+                return;
+            }
+            if (peer->m_matmul_heard_serve_last_refill != 0us) {
+                peer->m_matmul_heard_serve_tokens =
+                    node::matmul_trusted::GetMmAttestHeardRefill(
+                        peer->m_matmul_heard_serve_tokens,
+                        now - peer->m_matmul_heard_serve_last_refill);
+            }
+            peer->m_matmul_heard_serve_last_refill = now;
+            const size_t affordable{
+                node::matmul_trusted::GetMmAttestHeardAffordable(
+                    peer->m_matmul_heard_serve_tokens, answer_items)};
+            if (affordable == 0) {
+                LogDebug(BCLog::NET,
+                         "Pacing heard getmmattest answer peer=%d block=%s\n",
+                         pfrom.GetId(), block_hash.ToString());
+                return;
+            }
+            auto heard{node::matmul_trusted::HeardForServe(
+                block_hash, height, affordable,
+                peer->m_matmul_heard_serve_cursor)};
+            if (heard.empty()) return;
+            if (!ensure_logical_token()) {
+                // A refused heard-only ask still pays one heard item for the
+                // walk, so a requester out of serve tokens cannot repeat it
+                // once per message (affordable >= 1, so never negative).
+                peer->m_matmul_heard_serve_tokens -= 1.0;
+                return;
+            }
+            peer->m_matmul_heard_serve_tokens -=
+                static_cast<double>(heard.size());
+            peer->m_matmul_heard_serve_cursor +=
+                static_cast<uint32_t>(heard.size());
+            MakeAndPushMessage(pfrom, NetMsgType::MMATTEST, heard);
+            MaybeLogAttestationServe(
+                "heard", block_hash, height, pfrom.GetId());
+        };
 
         const char* serve_reason{"cached"};
         auto existing{node::matmul_trusted::Get(block_hash, height)};
@@ -21164,6 +21346,7 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
                 push_mmattest(std::move(existing), serve_reason);
             }
             push_mmattestpq(std::move(existing_pq), serve_reason);
+            push_heard();
             finish_logical();
             return;
         }
@@ -21253,6 +21436,7 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
             node::matmul_trusted::Get(block_hash, height), serve_reason);
         push_mmattestpq(
             node::matmul_trusted::GetPq(block_hash, height), serve_reason);
+        push_heard();
         finish_logical();
         return;
     }
@@ -23049,6 +23233,7 @@ void PeerManagerImpl::CheckForStaleTipAndEvictPeers()
     auto now{GetTime<std::chrono::seconds>()};
 
     EvictExtraOutboundPeers(now);
+    MaybeLogNoAttestationServingPeer(now);
 
     if (now > m_stale_tip_check_time) {
         // Check whether our tip is stale, and if so, allow using an extra
