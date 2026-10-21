@@ -9,6 +9,7 @@
 
 #include <boost/test/unit_test.hpp>
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -25,7 +26,7 @@ BOOST_AUTO_TEST_CASE(claim_leaf_parses_back_to_the_same_hash)
     BOOST_CHECK(book.has_claim());
     BOOST_CHECK(!book.qualified());
     BOOST_CHECK(!book.broadcast());
-    BOOST_CHECK_EQUAL(book.atoms_moved(), 0);
+    BOOST_CHECK_EQUAL(book.atoms_moved(), static_cast<int64_t>(0));
 
     std::vector<unsigned char> parsed_hash;
     std::vector<unsigned char> parsed_key;

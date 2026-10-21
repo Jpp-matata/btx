@@ -8,6 +8,7 @@
 
 #include <boost/test/unit_test.hpp>
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -27,7 +28,7 @@ BOOST_AUTO_TEST_CASE(settle_stays_unqualified_after_a_claim_leaf)
     BOOST_CHECK(!book.launched());
     BOOST_CHECK(!book.gpu());
     BOOST_CHECK(!book.secp_penalty());
-    BOOST_CHECK_EQUAL(book.atoms_moved(), 0);
+    BOOST_CHECK_EQUAL(book.atoms_moved(), static_cast<int64_t>(0));
     BOOST_CHECK_EQUAL(book.automatic_spend(), "0");
     BOOST_CHECK(book.has_claim());
 }

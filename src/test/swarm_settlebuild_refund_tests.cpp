@@ -29,7 +29,7 @@ BOOST_AUTO_TEST_CASE(refund_leaf_parses_back_to_the_same_timeout)
     PQAlgorithm parsed_algo{PQAlgorithm::ML_DSA_44};
     std::vector<unsigned char> parsed_key;
     BOOST_CHECK(ParseP2MRRefundLeaf(book.refund_script(), parsed_timeout, parsed_algo, parsed_key));
-    BOOST_CHECK_EQUAL(parsed_timeout, 160);
+    BOOST_CHECK_EQUAL(parsed_timeout, static_cast<int64_t>(160));
     BOOST_CHECK(parsed_key == pubkey);
     BOOST_CHECK(parsed_algo == PQAlgorithm::ML_DSA_44);
 }
