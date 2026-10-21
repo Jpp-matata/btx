@@ -2203,6 +2203,7 @@ if(WITH_MODELNET)
     swarm_payreg_tests.cpp
     swarm_defwork_tests.cpp
     swarm_defbudget_tests.cpp
+    swarm_trainwire_tests.cpp
     swarm_minehold_request_tests.cpp
     swarm_ckptsave_request_tests.cpp
     swarm_mixedhold_request_tests.cpp
