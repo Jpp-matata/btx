@@ -2120,6 +2120,8 @@ add_library(bitcoin_modelnet STATIC
   swarm_economyclass/swarm_economyclass.cpp
   swarm_agentclass/swarm_agentclass.cpp
   swarm_runtimeclass/swarm_runtimeclass.cpp
+  swarm_kvremote/dstbody.cpp
+  swarm_kvremote/swarm_kvremote.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
