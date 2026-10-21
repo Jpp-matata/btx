@@ -2215,6 +2215,14 @@ if(WITH_MODELNET)
     dt_export_tests.cpp
     dt_cohort_tests.cpp
     dt_twonode_tests.cpp
+    nif_pay_tests.cpp
+    dt_data_tests.cpp
+    dt_rl_tests.cpp
+    dt_parallel_tests.cpp
+    dt_moe_tests.cpp
+    nif_island_tests.cpp
+    nif_sandbox_tests.cpp
+    dt_precision_tests.cpp
     swarm_minehold_request_tests.cpp
     swarm_ckptsave_request_tests.cpp
     swarm_mixedhold_request_tests.cpp

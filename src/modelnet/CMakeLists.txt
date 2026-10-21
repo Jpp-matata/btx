@@ -2150,6 +2150,14 @@ add_library(bitcoin_modelnet STATIC
   dt_export/dt_export.cpp
   dt_cohort/dt_cohort.cpp
   dt_twonode/dt_twonode.cpp
+  nif_pay/nif_pay.cpp
+  dt_data/dt_data.cpp
+  dt_rl/dt_rl.cpp
+  dt_parallel/dt_parallel.cpp
+  dt_moe/dt_moe.cpp
+  nif_island/nif_island.cpp
+  nif_sandbox/nif_sandbox.cpp
+  dt_precision/dt_precision.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
