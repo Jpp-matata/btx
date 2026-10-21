@@ -2287,6 +2287,14 @@ if(WITH_MODELNET)
     grp22_tests.cpp
     grp23_tests.cpp
     grp24_tests.cpp
+    grp25_tests.cpp
+    grp26_tests.cpp
+    grp27_tests.cpp
+    grp28_tests.cpp
+    grp29_tests.cpp
+    grp30_tests.cpp
+    grp31_tests.cpp
+    grp32_tests.cpp
     swarm_minehold_request_tests.cpp
     swarm_ckptsave_request_tests.cpp
     swarm_mixedhold_request_tests.cpp

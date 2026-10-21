@@ -2222,6 +2222,14 @@ add_library(bitcoin_modelnet STATIC
   grp22/grp22.cpp
   grp23/grp23.cpp
   grp24/grp24.cpp
+  grp25/grp25.cpp
+  grp26/grp26.cpp
+  grp27/grp27.cpp
+  grp28/grp28.cpp
+  grp29/grp29.cpp
+  grp30/grp30.cpp
+  grp31/grp31.cpp
+  grp32/grp32.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
