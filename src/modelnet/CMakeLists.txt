@@ -2171,6 +2171,9 @@ add_library(bitcoin_modelnet STATIC
   dt_schedsim/dt_schedsim.cpp
   nif_image/nif_image.cpp
   nif_text/nif_text.cpp
+  nif_fork/nif_fork.cpp
+  dt_kernel/dt_kernel.cpp
+  nif_guard/nif_guard.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp

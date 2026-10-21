@@ -2236,6 +2236,9 @@ if(WITH_MODELNET)
     dt_schedsim_tests.cpp
     nif_image_tests.cpp
     nif_text_tests.cpp
+    nif_fork_tests.cpp
+    dt_kernel_tests.cpp
+    nif_guard_tests.cpp
     swarm_minehold_request_tests.cpp
     swarm_ckptsave_request_tests.cpp
     swarm_mixedhold_request_tests.cpp
