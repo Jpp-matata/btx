@@ -2135,6 +2135,7 @@ add_library(bitcoin_modelnet STATIC
   swarm_artifactrun/swarm_artifactrun.cpp
   swarm_payreg/swarm_payreg.cpp
   swarm_defwork/swarm_defwork.cpp
+  swarm_defbudget/swarm_defbudget.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
