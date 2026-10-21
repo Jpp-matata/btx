@@ -1831,6 +1831,17 @@ add_library(bitcoin_modelnet STATIC
   swarm_holdrot/keep.cpp
   swarm_holdrot/quiet.cpp
   swarm_holdrot/swarm_holdrot.cpp
+  swarm_ckpttrust/blank.cpp
+  swarm_ckpttrust/name.cpp
+  swarm_ckpttrust/record.cpp
+  swarm_ckpttrust/book.cpp
+  swarm_ckpttrust/replay.cpp
+  swarm_ckpttrust/gate.cpp
+  swarm_ckpttrust/stay.cpp
+  swarm_ckpttrust/request.cpp
+  swarm_ckpttrust/keep.cpp
+  swarm_ckpttrust/quiet.cpp
+  swarm_ckpttrust/swarm_ckpttrust.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
