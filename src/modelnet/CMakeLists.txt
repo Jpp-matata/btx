@@ -1947,6 +1947,14 @@ add_library(bitcoin_modelnet STATIC
   swarm_piecepipe/drop.cpp
   swarm_piecepipe/sealed.cpp
   swarm_piecepipe/swarm_piecepipe.cpp
+  swarm_paycycle/identity.cpp
+  swarm_paycycle/split.cpp
+  swarm_paycycle/pools.cpp
+  swarm_paycycle/obligations.cpp
+  swarm_paycycle/quotes.cpp
+  swarm_paycycle/collateral.cpp
+  swarm_paycycle/transfer.cpp
+  swarm_paycycle/swarm_paycycle.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp

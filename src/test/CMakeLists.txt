@@ -2090,6 +2090,14 @@ if(WITH_MODELNET)
     swarm_piecepipe_resume_tests.cpp
     swarm_piecepipe_sealed_tests.cpp
     swarm_piecepipe_split_tests.cpp
+    swarm_paycycle_batch_tests.cpp
+    swarm_paycycle_freeze_tests.cpp
+    swarm_paycycle_fund_tests.cpp
+    swarm_paycycle_pay_tests.cpp
+    swarm_paycycle_publish_tests.cpp
+    swarm_paycycle_quote_tests.cpp
+    swarm_paycycle_reserve_tests.cpp
+    swarm_paycycle_split_tests.cpp
     swarm_minehold_request_tests.cpp
     swarm_ckptsave_request_tests.cpp
     swarm_mixedhold_request_tests.cpp
