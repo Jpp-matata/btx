@@ -2156,6 +2156,16 @@ if(WITH_MODELNET)
     swarm_onechannel_open_tests.cpp
     swarm_onechannel_quote_tests.cpp
     swarm_onechannel_reserve_tests.cpp
+    swarm_decode_done_tests.cpp
+    swarm_decode_engine_tests.cpp
+    swarm_decode_open_tests.cpp
+    swarm_decode_private_tests.cpp
+    swarm_decode_pull_tests.cpp
+    swarm_agentexec_allow_tests.cpp
+    swarm_agentexec_deny_tests.cpp
+    swarm_agentexec_net_tests.cpp
+    swarm_agentexec_private_tests.cpp
+    swarm_agentexec_sha_tests.cpp
     swarm_minehold_request_tests.cpp
     swarm_ckptsave_request_tests.cpp
     swarm_mixedhold_request_tests.cpp

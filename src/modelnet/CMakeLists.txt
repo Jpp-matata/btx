@@ -2071,6 +2071,32 @@ add_library(bitcoin_modelnet STATIC
   swarm_onechannel/ledger.cpp
   swarm_onechannel/flags.cpp
   swarm_onechannel/swarm_onechannel.cpp
+  swarm_decode/names.cpp
+  swarm_decode/record.cpp
+  swarm_decode/book.cpp
+  swarm_decode/output.cpp
+  swarm_decode/status.cpp
+  swarm_decode/open_kind.cpp
+  swarm_decode/open.cpp
+  swarm_decode/prompt_kind.cpp
+  swarm_decode/prompt.cpp
+  swarm_decode/cursor.cpp
+  swarm_decode/memory.cpp
+  swarm_decode/absent.cpp
+  swarm_decode/pull.cpp
+  swarm_decode/swarm_decode_run.cpp
+  swarm_agentexec/quiet.cpp
+  swarm_agentexec/prefix.cpp
+  swarm_agentexec/private.cpp
+  swarm_agentexec/book.cpp
+  swarm_agentexec/allow.cpp
+  swarm_agentexec/tool.cpp
+  swarm_agentexec/digest.cpp
+  swarm_agentexec/journal.cpp
+  swarm_agentexec/result.cpp
+  swarm_agentexec/run.cpp
+  swarm_agentexec/execute.cpp
+  swarm_agentexec/swarm_agentexec.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
