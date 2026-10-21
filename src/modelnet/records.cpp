@@ -386,6 +386,8 @@ UniValue DecodeValue(const FType& t, Reader& r)
         std::string s(raw.begin(), raw.end());
         if (s.find('\0') != std::string::npos) throw std::runtime_error("NUL");
         // Validate UTF-8 by round-tripping through UniValue string.
+        UniValue probe;
+        if (!probe.read(UniValue{s}.write()) || probe.get_str() != s) throw std::runtime_error("invalid UTF-8");
         return s;
     }
     if (t.kind == FType::BYTES) {

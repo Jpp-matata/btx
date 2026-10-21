@@ -195,6 +195,24 @@ BOOST_AUTO_TEST_CASE(typed_record_expiry_above_int64_is_refused)
     BOOST_CHECK_EQUAL(err, "expiry out of range");
 }
 
+BOOST_AUTO_TEST_CASE(typed_record_string_must_be_utf8)
+{
+    UniValue body(UniValue::VOBJ);
+    modelnet::FillRecordCommon(body, 1, modelnet::Digest48{}, 1700000000, 0);
+    body.pushKV("display_name", std::string{"\xff\xfe"});
+    body.pushKV("description", "");
+    std::vector<unsigned char> encoded;
+    std::string err;
+    BOOST_REQUIRE(modelnet::EncodeRecord(modelnet::RECORD_IDENTITY_CARD, body, encoded, err));
+    UniValue decoded;
+    BOOST_CHECK(!modelnet::DecodeRecord(modelnet::RECORD_IDENTITY_CARD, encoded, decoded, err));
+    BOOST_CHECK_EQUAL(err, "invalid UTF-8");
+
+    body.pushKV("display_name", std::string{"caf\xc3\xa9"});
+    BOOST_REQUIRE(modelnet::EncodeRecord(modelnet::RECORD_IDENTITY_CARD, body, encoded, err));
+    BOOST_CHECK(modelnet::DecodeRecord(modelnet::RECORD_IDENTITY_CARD, encoded, decoded, err));
+}
+
 BOOST_AUTO_TEST_CASE(free_first_and_reciprocity)
 {
     modelnet::PaidPlan paid;
