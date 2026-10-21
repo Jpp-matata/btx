@@ -2166,6 +2166,11 @@ if(WITH_MODELNET)
     swarm_agentexec_net_tests.cpp
     swarm_agentexec_private_tests.cpp
     swarm_agentexec_sha_tests.cpp
+    swarm_kvmove_compat_tests.cpp
+    swarm_kvmove_copy_tests.cpp
+    swarm_kvmove_put_tests.cpp
+    swarm_kvmove_quant_tests.cpp
+    swarm_kvmove_remote_tests.cpp
     swarm_minehold_request_tests.cpp
     swarm_ckptsave_request_tests.cpp
     swarm_mixedhold_request_tests.cpp

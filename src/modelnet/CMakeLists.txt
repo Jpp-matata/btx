@@ -2097,6 +2097,12 @@ add_library(bitcoin_modelnet STATIC
   swarm_agentexec/run.cpp
   swarm_agentexec/execute.cpp
   swarm_agentexec/swarm_agentexec.cpp
+  swarm_kvmove/bytes.cpp
+  swarm_kvmove/quant.cpp
+  swarm_kvmove/engine.cpp
+  swarm_kvmove/slot.cpp
+  swarm_kvmove/copy.cpp
+  swarm_kvmove/swarm_kvmove.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
