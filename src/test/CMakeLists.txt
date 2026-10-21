@@ -2195,6 +2195,8 @@ if(WITH_MODELNET)
     swarm_twelve_tests.cpp
     swarm_handoff_tests.cpp
     swarm_defense_tests.cpp
+    swarm_discover_tests.cpp
+    swarm_planner_tests.cpp
     swarm_minehold_request_tests.cpp
     swarm_ckptsave_request_tests.cpp
     swarm_mixedhold_request_tests.cpp
