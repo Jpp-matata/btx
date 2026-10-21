@@ -2191,6 +2191,7 @@ if(WITH_MODELNET)
     swarm_kvremote_tests.cpp
     swarm_disttrain_tests.cpp
     swarm_measure_tests.cpp
+    swarm_inferlink_tests.cpp
     swarm_minehold_request_tests.cpp
     swarm_ckptsave_request_tests.cpp
     swarm_mixedhold_request_tests.cpp
