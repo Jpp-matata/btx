@@ -31,10 +31,12 @@ SwarmConfineResult SwarmRunConfined(const SwarmConfineRequest& request, std::str
     // Opens before the profile and must not open after it (checked in the child).
     const fs::path witness = process_guard::SeatbeltWitness(request.root);
     if (witness.empty()) return Refuse("CONFINEMENT_ABSENT", err);
-    // macOS refuses RLIMIT_AS; process_guard::Wait enforces the footprint.
+    // The kernel enforces neither limit fully here; process_guard::Wait does.
     const uint64_t max_footprint_bytes = static_cast<uint64_t>(request.max_address_bytes);
+    const int max_cpu_seconds = request.max_cpu_seconds;
 #else
     const uint64_t max_footprint_bytes = 0;
+    const int max_cpu_seconds = 0;
 #endif
     int pipefd[2];
     if (!process_guard::ErrorPipe(pipefd)) return Refuse("CONFINEMENT_ABSENT", err);
@@ -73,7 +75,8 @@ SwarmConfineResult SwarmRunConfined(const SwarmConfineRequest& request, std::str
         process_guard::ChildFailure(error_fd);
     }
     close(pipefd[1]);
-    const auto waited = process_guard::Wait(pid, pipefd[0], request.max_wall_seconds, max_footprint_bytes);
+    const auto waited =
+        process_guard::Wait(pid, pipefd[0], request.max_wall_seconds, max_footprint_bytes, max_cpu_seconds);
     if (!waited.executed) return Refuse(waited.timed_out ? "CONFINEMENT_TIMEOUT" : "CONFINEMENT_ABSENT", err);
     SwarmConfineResult result;
     result.launched = true; result.limits_applied = true;

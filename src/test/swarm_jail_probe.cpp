@@ -6,15 +6,23 @@
 // confinement root and run it through SwarmRunConfined or
 // SwarmRunFilesystemJail with no arguments. It records what it can do in
 // <its directory>/probe.out. A marker file in its directory selects a mode:
-// alloc.mode touches 4 GiB, spin.mode burns 20 s of CPU. Each mode writes
-// <mode>.started before and <mode>.done after its work, so a test can tell a
-// stopped child from one that never ran or ran to the end.
+// alloc.mode touches 4 GiB, spin.mode burns 20 s of CPU, spin_ignore.mode
+// does the same with SIGXCPU ignored. Each mode writes <mode>.started before
+// and <mode>.done after its work, so a test can tell a stopped child from one
+// that never ran or ran to the end. Without a mode it also records whether it
+// can look up a Mach service, fork, signal its parent, create POSIX shared
+// memory, and whether it starts in its own directory.
 
 #include <arpa/inet.h>
 #include <fcntl.h>
+#include <mach/mach.h>
 #include <netinet/in.h>
+#include <servers/bootstrap.h>
+#include <signal.h>
+#include <sys/mman.h>
 #include <sys/resource.h>
 #include <sys/socket.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #include <cstdio>
@@ -58,6 +66,51 @@ void Mark(const std::string& path)
     }
 }
 
+bool MachLookup()
+{
+    mach_port_t port = MACH_PORT_NULL;
+    if (bootstrap_look_up(bootstrap_port, "com.apple.system.notification_center", &port) != KERN_SUCCESS) {
+        return false;
+    }
+    mach_port_deallocate(mach_task_self(), port);
+    return true;
+}
+
+bool Forks()
+{
+    const pid_t pid = fork();
+    if (pid == 0) {
+        _exit(0);
+    }
+    if (pid < 0) {
+        return false;
+    }
+    int status = 0;
+    waitpid(pid, &status, 0);
+    return true;
+}
+
+bool PosixShm()
+{
+    const int fd = shm_open("/btx-swarm-probe", O_CREAT | O_RDWR, 0600);
+    if (fd < 0) {
+        return false;
+    }
+    close(fd);
+    shm_unlink("/btx-swarm-probe");
+    return true;
+}
+
+bool StartsIn(const std::string& dir)
+{
+    const int fd = open("cwd.probe", O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+    if (fd < 0) {
+        return false;
+    }
+    close(fd);
+    return access((dir + "/cwd.probe").c_str(), F_OK) == 0;
+}
+
 unsigned long long Limit(int resource)
 {
     rlimit limit{};
@@ -89,7 +142,11 @@ int main(int argc, char** argv)
         Mark(dir + "/alloc.done");
         return 4;
     }
-    if (Opens(dir + "/spin.mode", O_RDONLY)) {
+    const bool ignore_sigxcpu = Opens(dir + "/spin_ignore.mode", O_RDONLY);
+    if (ignore_sigxcpu || Opens(dir + "/spin.mode", O_RDONLY)) {
+        if (ignore_sigxcpu) {
+            signal(SIGXCPU, SIG_IGN);
+        }
         Mark(dir + "/spin.started");
         volatile unsigned long long n = 0;
         const time_t until = time(nullptr) + 20;
@@ -108,5 +165,10 @@ int main(int argc, char** argv)
     std::fprintf(out, "loopback_bind=%d\n", LoopbackBind() ? 1 : 0);
     std::fprintf(out, "nofile=%llu\n", Limit(RLIMIT_NOFILE));
     std::fprintf(out, "cpu=%llu\n", Limit(RLIMIT_CPU));
+    std::fprintf(out, "mach_lookup=%d\n", MachLookup() ? 1 : 0);
+    std::fprintf(out, "fork=%d\n", Forks() ? 1 : 0);
+    std::fprintf(out, "signal_parent=%d\n", kill(getppid(), 0) == 0 ? 1 : 0);
+    std::fprintf(out, "posix_shm=%d\n", PosixShm() ? 1 : 0);
+    std::fprintf(out, "cwd_root=%d\n", StartsIn(dir) ? 1 : 0);
     return std::fclose(out) == 0 ? 0 : 7;
 }

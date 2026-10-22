@@ -165,6 +165,10 @@ BOOST_AUTO_TEST_CASE(macos_helper_runs_jailed)
     BOOST_CHECK(out.find("outside_dir=0\n") != std::string::npos);
     BOOST_CHECK(out.find("etc_hosts=0\n") != std::string::npos);
     BOOST_CHECK(out.find("loopback_bind=0\n") != std::string::npos);
+    // Regression checks for the default-deny profile.
+    for (const char* line : {"mach_lookup=0\n", "fork=0\n", "signal_parent=0\n", "posix_shm=0\n", "cwd_root=1\n"}) {
+        BOOST_CHECK_MESSAGE(out.find(line) != std::string::npos, "probe line " << line);
+    }
 }
 
 // A helper inside root that is a symlink to a binary outside root is refused

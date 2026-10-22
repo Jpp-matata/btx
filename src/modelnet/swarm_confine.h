@@ -17,9 +17,13 @@ namespace modelnet {
  * and no network. Linux uses user/network namespaces and no_new_privs;
  * macOS uses a parameterized default-deny Seatbelt profile, and the child
  * execs only after it proves the profile (a directory outside root stops
- * opening, a loopback bind is refused). macOS refuses RLIMIT_AS, so there the
- * parent enforces max_address_bytes on the physical footprint (sampled every
- * 10 ms, SIGKILL above it; one interval of overshoot). Windows uses a
+ * opening, a loopback bind is refused). The profile also denies fork, Mach
+ * lookups, POSIX IPC and signals to other processes, so the limits cover the
+ * one helper process; a shell helper can run builtins only. macOS refuses a
+ * useful RLIMIT_AS and only sends SIGXCPU at RLIMIT_CPU, so there the parent
+ * enforces max_address_bytes on the physical footprint and max_cpu_seconds
+ * (plus 250 ms) on CPU time, sampled every 10 ms (SIGKILL; one interval of
+ * overshoot). Windows uses a
  * zero-capability AppContainer, private staged files, a one-process Job with
  * memory/CPU/wall limits and an explicit stdio handle allowlist. max_nofile
  * is a POSIX descriptor quota; Windows bounds inherited handles and process
