@@ -9607,18 +9607,23 @@ void PeerManagerImpl::ActiveTipChange(const CBlockIndex& new_tip, bool is_ibd)
     // the scheduler drains — including across the RC activation boundary.
     SetBestBlock(new_tip.nHeight, std::chrono::seconds{new_tip.GetBlockTime()});
     m_matmul_block_lifecycle.NoteActiveTipProgress();
-    AssertLockHeld(::cs_main);
-    m_header_only_competing.clear();
-    m_header_only_followed_skip.clear();
-    g_configured_claimed_tip_child.SetNull();
+    {
+        // ActivateBestChain delivers this with cs_main held, InvalidateBlock
+        // after releasing it (invalidateblock RPC, dumptxoutset rollback).
+        LOCK(::cs_main);
+        m_header_only_competing.clear();
+        m_header_only_followed_skip.clear();
+        g_configured_claimed_tip_child.SetNull();
 
-    // Tip-first trusted-mirror ranking: keep the verify worker's tip cache in
-    // lockstep with ActivateBestChain (same sync delivery as SetBestBlock).
-    if (m_matmul_verify_worker) {
-        m_matmul_verify_worker->SetActiveTip(new_tip.GetBlockHash(),
-                                             new_tip.nHeight);
-        m_matmul_verify_worker->SetCappedAuthorityFrontier(
-            CappedAuthorityAttestedFrontier(m_chainman));
+        // Tip-first trusted-mirror ranking: keep the verify worker's tip
+        // cache in lockstep with ActivateBestChain (same sync delivery as
+        // SetBestBlock).
+        if (m_matmul_verify_worker) {
+            m_matmul_verify_worker->SetActiveTip(new_tip.GetBlockHash(),
+                                                 new_tip.nHeight);
+            m_matmul_verify_worker->SetCappedAuthorityFrontier(
+                CappedAuthorityAttestedFrontier(m_chainman));
+        }
     }
 
     if (!is_ibd) {
