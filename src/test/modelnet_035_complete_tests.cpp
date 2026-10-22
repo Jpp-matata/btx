@@ -15,8 +15,16 @@
 
 #include <boost/test/unit_test.hpp>
 
+#include <chrono>
 #include <string>
 #include <vector>
+
+#ifndef WIN32
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
+#endif
 
 BOOST_FIXTURE_TEST_SUITE(modelnet_035_complete_tests, BasicTestingSetup)
 
@@ -129,6 +137,34 @@ BOOST_AUTO_TEST_CASE(exchange_rejects_a_replaced_blob)
     BOOST_CHECK(!PullExchangeLoopback("10.0.0.8", 1, "u", "p", "repo", manifest, err));
     BOOST_CHECK_EQUAL(err, "BTX035_SCOPE_DENIED");
 }
+
+#ifndef WIN32
+BOOST_AUTO_TEST_CASE(loopback_peer_that_never_answers_times_out)
+{
+    using namespace modelnet;
+    // Nobody accepts on this socket: the kernel completes the handshake and keeps the request, and no answer comes.
+    const int listener = socket(AF_INET, SOCK_STREAM, 0);
+    BOOST_REQUIRE(listener >= 0);
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    BOOST_REQUIRE_EQUAL(inet_pton(AF_INET, "127.0.0.1", &address.sin_addr), 1);
+    BOOST_REQUIRE_EQUAL(bind(listener, reinterpret_cast<sockaddr*>(&address), sizeof(address)), 0);
+    BOOST_REQUIRE_EQUAL(listen(listener, 4), 0);
+    socklen_t length = sizeof(address);
+    BOOST_REQUIRE_EQUAL(getsockname(listener, reinterpret_cast<sockaddr*>(&address), &length), 0);
+    const uint16_t port = ntohs(address.sin_port);
+
+    std::string result;
+    std::string err;
+    const auto start = std::chrono::steady_clock::now();
+    BOOST_CHECK(!PeerRouteLoopback("127.0.0.1", port, "u", "p", "hello", "{}", result, err, std::chrono::milliseconds{300}));
+    BOOST_CHECK_EQUAL(err, "BTX035_TRANSPORT");
+    BOOST_CHECK(!LabCallLoopback("127.0.0.1", port, "u", "p", "lab.info", "{}", result, err, std::chrono::milliseconds{300}));
+    BOOST_CHECK_EQUAL(err, "BTX035_TRANSPORT");
+    BOOST_CHECK(std::chrono::steady_clock::now() - start < std::chrono::seconds{10});
+    close(listener);
+}
+#endif
 
 BOOST_AUTO_TEST_CASE(exchange_manifest_refuses_too_many_or_too_large_objects)
 {
