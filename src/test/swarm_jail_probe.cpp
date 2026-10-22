@@ -7,7 +7,8 @@
 // SwarmRunFilesystemJail with no arguments. It records what it can do in
 // <its directory>/probe.out. A marker file in its directory selects a mode:
 // alloc.mode touches memory until stopped, spin.mode burns CPU until stopped,
-// spinignore.mode does the same with SIGXCPU ignored.
+// spinignore.mode does the same with SIGXCPU ignored, tty.mode tries
+// TIOCSTI on stdin.
 
 #include <CoreFoundation/CoreFoundation.h>
 #include <IOKit/IOKitLib.h>
@@ -15,11 +16,13 @@
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <signal.h>
+#include <sys/ioctl.h>
 #include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include <cerrno>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -116,6 +119,14 @@ int main(int argc, char** argv)
         }
         return 5;
     }
+    // tty.mode: the test made stdin a pty that is not this process's
+    // controlling terminal, so TIOCSTI cannot reach a real terminal. The
+    // tty driver refuses it with EACCES; the sandbox refuses it with EPERM.
+    int tiocsti_errno = -1;
+    if (Opens(dir + "/tty.mode", O_RDONLY)) {
+        const char c = '#';
+        tiocsti_errno = ioctl(STDIN_FILENO, TIOCSTI, &c) == 0 ? 0 : errno;
+    }
     FILE* out = std::fopen((dir + "/probe.out").c_str(), "w");
     if (out == nullptr) {
         return 6;
@@ -136,5 +147,6 @@ int main(int argc, char** argv)
     std::fprintf(out, "fork=%d\n", child > 0 ? 1 : 0);
     std::fprintf(out, "inherited_fds=%d\n", inherited);
     std::fprintf(out, "hardware_uuid=%d\n", HardwareUuidReadable() ? 1 : 0);
+    std::fprintf(out, "tiocsti_errno=%d\n", tiocsti_errno);
     return std::fclose(out) == 0 ? 0 : 7;
 }

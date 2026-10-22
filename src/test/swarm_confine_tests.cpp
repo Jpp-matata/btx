@@ -149,7 +149,33 @@ BOOST_AUTO_TEST_CASE(confined_helper_or_namespace_absent)
 }
 
 #if defined(__APPLE__) && defined(BTX_SWARM_JAIL_PROBE)
+#include <fcntl.h>
+#include <stdlib.h>
+
 namespace {
+
+// Runs `run` with stdin replaced by a new pty that is not this process's
+// controlling terminal (O_NOCTTY), then restores stdin.
+template <typename Run>
+void WithPtyStdin(Run run)
+{
+    const int master = posix_openpt(O_RDWR | O_NOCTTY);
+    BOOST_REQUIRE(master >= 0);
+    BOOST_REQUIRE(grantpt(master) == 0 && unlockpt(master) == 0);
+    const int slave = open(ptsname(master), O_RDWR | O_NOCTTY);
+    BOOST_REQUIRE(slave >= 0);
+    const int saved = dup(STDIN_FILENO);
+    BOOST_REQUIRE(dup2(slave, STDIN_FILENO) == STDIN_FILENO);
+    run();
+    if (saved >= 0) {
+        dup2(saved, STDIN_FILENO);
+        close(saved);
+    } else {
+        close(STDIN_FILENO);
+    }
+    close(slave);
+    close(master);
+}
 
 fs::path CopyProbe(const fs::path& root, const char* marker)
 {
@@ -247,6 +273,22 @@ BOOST_AUTO_TEST_CASE(macos_cpu_limit_enforced_when_sigxcpu_ignored)
     BOOST_CHECK_EQUAL(result.code, "CONFINED");
     BOOST_CHECK(WIFSIGNALED(result.child_status));
     BOOST_CHECK_EQUAL(WTERMSIG(result.child_status), SIGKILL);
+}
+
+// The helper may not drive a terminal it inherits: TIOCSTI on a pty stdin
+// is refused by the sandbox (EPERM), not only by the tty driver (EACCES,
+// since the pty is not the helper's controlling terminal).
+BOOST_AUTO_TEST_CASE(macos_terminal_ioctl_denied)
+{
+    const fs::path root = fs::temp_directory_path() / "btx-swarm-confine-macos-tty";
+    const fs::path helper = CopyProbe(root, "tty.mode");
+    std::string err;
+    modelnet::SwarmConfineResult result;
+    WithPtyStdin([&] { result = modelnet::SwarmRunConfined(BaseRequest(helper, root), err); });
+    const std::string out = ProbeOutput(root);
+    fs::remove_all(root);
+    BOOST_CHECK_EQUAL(result.code, "CONFINED");
+    BOOST_CHECK(out.find("tiocsti_errno=1\n") != std::string::npos);
 }
 #endif
 

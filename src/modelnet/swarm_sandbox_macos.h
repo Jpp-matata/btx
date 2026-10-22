@@ -21,7 +21,10 @@ namespace modelnet {
  * be lifted by the confined process and is inherited across exec and fork.
  */
 
-/** Every network operation and every Mach service lookup denied. */
+/**
+ * Every network operation, every Mach service lookup and every ioctl on a
+ * file or device denied (no TIOCSTI on an inherited terminal).
+ */
 std::string SwarmSandboxNetworkDeniedProfile();
 
 /**

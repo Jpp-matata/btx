@@ -30,10 +30,14 @@ std::string SwarmSandboxQuote(const fs::path& path)
 
 std::string SwarmSandboxNetworkDeniedProfile()
 {
+    // (deny file-ioctl): the helper inherits btxd's stdio. When btxd runs in
+    // a terminal, TIOCSTI on that terminal would queue input that the shell
+    // reads once btxd exits, i.e. commands run outside the sandbox.
     return "(version 1)\n"
            "(allow default)\n"
            "(deny network*)\n"
-           "(deny mach-lookup)\n";
+           "(deny mach-lookup)\n"
+           "(deny file-ioctl)\n";
 }
 
 std::string SwarmSandboxConfineProfile()
