@@ -116,8 +116,9 @@ cp share/examples/modelnet.conf.example ~/.btx/modelnet.conf
 | `resourcegovernor=auto` | Local spare-capacity policy. Never consensus, never auto-spend. |
 | `automining=0` | Idle-schedule mining only after mining is already enabled. Default off. |
 
-Helper-only flags (`modeldir`, `modelstorage`/`modelcache`, `modelseed`,
-`modelpreserverare`, `modelbind`, `modeltransport=pq1`,
-`modeltlscert`, `modeltlskey`, …) belong on the **`btx-modeld`** command line.
+`btxd` also accepts `modeldir`, `modelstorage`, `modelseed`,
+`modelpreserverare` and `modelbind`, and passes them to the helper it starts.
+Helper-only flags (`modelcache`, `modeltransport=pq1`, `modeltlscert`,
+`modeltlskey`, …) belong on a separately run **`btx-modeld`** command line.
 See [share/examples/modelnet.conf.example](../share/examples/modelnet.conf.example)
 and [modelnet/architecture.md](modelnet/architecture.md).
