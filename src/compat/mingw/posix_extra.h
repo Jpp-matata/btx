@@ -343,6 +343,23 @@ inline int btx_recv(SOCKET s, void* buf, int len, int flags)
     return (recv)(s, static_cast<char*>(buf), len, flags);
 }
 
+inline int btx_sendto(SOCKET s, const void* buf, int len, int flags, const struct sockaddr* to, int tolen)
+{
+    return (sendto)(s, static_cast<const char*>(buf), len, flags, to, tolen);
+}
+
+inline int btx_recvfrom(SOCKET s, void* buf, int len, int flags, struct sockaddr* from, int* fromlen)
+{
+    return (recvfrom)(s, static_cast<char*>(buf), len, flags, from, fromlen);
+}
+
+// Winsock has no AF_UNIX socketpair. Callers see a failed socketpair.
+inline int btx_socketpair(int, int, int, int*)
+{
+    errno = ENOSYS;
+    return -1;
+}
+
 #define lstat(...) btx_lstat(__VA_ARGS__)
 #define fork() btx_fork()
 #define pipe(...) btx_pipe(__VA_ARGS__)
@@ -362,6 +379,9 @@ inline int btx_recv(SOCKET s, void* buf, int len, int flags)
 #define connect(...) btx_connect(__VA_ARGS__)
 #define send(...) btx_send(__VA_ARGS__)
 #define recv(...) btx_recv(__VA_ARGS__)
+#define sendto(...) btx_sendto(__VA_ARGS__)
+#define recvfrom(...) btx_recvfrom(__VA_ARGS__)
+#define socketpair(...) btx_socketpair(__VA_ARGS__)
 
 #endif // _WIN32
 #endif

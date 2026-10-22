@@ -6,6 +6,7 @@
 #define BTX_MODELNET_SWARM_COHORTPICK_H
 
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <vector>
 
