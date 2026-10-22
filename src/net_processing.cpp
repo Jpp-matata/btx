@@ -7648,7 +7648,7 @@ void PeerManagerImpl::ReattemptInitialBroadcast(CScheduler& scheduler)
     for (const auto& txid : unbroadcast_txids) {
         // Skip transactions currently in the Dandelion++ stempool to avoid
         // bypassing stem-phase privacy by fluffing them prematurely.
-        if (m_dandelion && m_dandelion->HaveStemTx(txid)) {
+        if (m_dandelion && Dandelion::DandelionManager::SuppressInventoryRelay(m_dandelion->IsInStemPool(txid))) {
             continue;
         }
 
@@ -9296,8 +9296,17 @@ void PeerManagerImpl::ActiveTipChange(const CBlockIndex& new_tip, bool is_ibd)
 void PeerManagerImpl::TransactionAddedToMempool(const NewMempoolTransactionInfo& tx, uint64_t)
 {
     // Reorg-resurrected transactions arrive here without passing through the
-    // normal peer/RPC accept path, so queue inventory relay on every mempool add.
-    RelayTransaction(tx.info.m_tx->GetHash(), tx.info.m_tx->GetWitnessHash());
+    // normal peer/RPC accept path, so they still need an inventory announcement.
+    // A local transaction is placed in the stempool before this callback is
+    // queued. Announcing it here would tell every peer the originator during
+    // the embargo. BroadcastTransaction records the tx in the persisted
+    // unbroadcast set so a restart, which drops the in-memory embargo, can
+    // announce it later.
+    const uint256& txid = tx.info.m_tx->GetHash();
+    if (m_dandelion && Dandelion::DandelionManager::SuppressInventoryRelay(m_dandelion->IsInStemPool(txid))) {
+        return;
+    }
+    RelayTransaction(txid, tx.info.m_tx->GetWitnessHash());
 }
 
 /**
@@ -17492,6 +17501,9 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
             // the normal randomized inventory timing.
             const auto unbroadcast_txids{m_mempool.GetUnbroadcastTxs()};
             for (const auto& txid : unbroadcast_txids) {
+                if (m_dandelion && Dandelion::DandelionManager::SuppressInventoryRelay(m_dandelion->IsInStemPool(txid))) {
+                    continue;
+                }
                 const auto tx{m_mempool.get(txid)};
                 if (tx == nullptr) continue;
 
