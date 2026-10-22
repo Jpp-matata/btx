@@ -199,8 +199,38 @@ bool ScanTcpTable(const char* path, uint16_t port)
     return found;
 }
 
+bool OwnListenSocket(uint16_t port)
+{
+    const long open_max = sysconf(_SC_OPEN_MAX);
+    const int limit = open_max > 0 && open_max < 65536 ? static_cast<int>(open_max) : 65536;
+    for (int fd = 0; fd < limit; ++fd) {
+        sockaddr_storage address{};
+        socklen_t length = sizeof(address);
+        if (getsockname(fd, reinterpret_cast<sockaddr*>(&address), &length) != 0) continue;
+        uint16_t local = 0;
+        if (address.ss_family == AF_INET) {
+            local = ntohs(reinterpret_cast<const sockaddr_in*>(&address)->sin_port);
+        } else if (address.ss_family == AF_INET6) {
+            local = ntohs(reinterpret_cast<const sockaddr_in6*>(&address)->sin6_port);
+        }
+        if (local != port) continue;
+        int type = 0;
+        length = sizeof(type);
+        if (getsockopt(fd, SOL_SOCKET, SO_TYPE, &type, &length) != 0 || type != SOCK_STREAM) continue;
+        // macOS does not report SO_ACCEPTCONN through getsockopt. A stream
+        // socket on this port without a peer is our listener.
+        sockaddr_storage peer{};
+        length = sizeof(peer);
+        if (getpeername(fd, reinterpret_cast<sockaddr*>(&peer), &length) != 0 && errno == ENOTCONN) return true;
+    }
+    return false;
+}
+
 bool OwnListenPort(uint16_t port)
 {
+    // macOS and the BSDs have no /proc/net/tcp: ask each open descriptor
+    // whether it is a listening socket on that port.
+    if (::access("/proc/net/tcp", R_OK) != 0) return OwnListenSocket(port);
     return ScanTcpTable("/proc/net/tcp", port) || ScanTcpTable("/proc/net/tcp6", port);
 }
 
