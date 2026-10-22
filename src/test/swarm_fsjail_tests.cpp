@@ -11,6 +11,7 @@
 #include <sys/stat.h>
 
 #include <fstream>
+#include <iterator>
 #include <string>
 
 namespace {
@@ -95,7 +96,8 @@ BOOST_AUTO_TEST_CASE(path_outside_or_dotdot)
 
 BOOST_AUTO_TEST_CASE(jailed_helper_or_namespace_absent)
 {
-    const fs::path root = fs::temp_directory_path() / "btx-swarm-fsjail-run";
+    // canonical: InsideRoot refuses symlinks, and macOS TMPDIR is below /var.
+    const fs::path root = fs::canonical(fs::temp_directory_path()) / "btx-swarm-fsjail-run";
     const fs::path helper = root / "helper.sh";
     fs::create_directories(root);
     {
@@ -117,5 +119,90 @@ BOOST_AUTO_TEST_CASE(jailed_helper_or_namespace_absent)
     BOOST_CHECK(!(result.launched && result.code == "JAIL_ABSENT"));
     BOOST_CHECK(!(result.jailed && result.code == "JAIL_ABSENT"));
 }
+
+#if defined(__APPLE__) && defined(BTX_SWARM_JAIL_PROBE)
+namespace {
+
+// The Seatbelt profile matches resolved paths and InsideRoot refuses
+// symlinks; TMPDIR on macOS is below the /var symlink.
+fs::path MacRoot(const char* name)
+{
+    const fs::path root = fs::canonical(fs::temp_directory_path()) / name;
+    fs::remove_all(root);
+    fs::create_directories(root);
+    return root;
+}
+
+fs::path CopyProbe(const fs::path& root)
+{
+    const fs::path helper = root / "probe";
+    fs::copy_file(fs::path{BTX_SWARM_JAIL_PROBE}, helper, fs::copy_options::overwrite_existing);
+    BOOST_REQUIRE(chmod(helper.c_str(), S_IRUSR | S_IWUSR | S_IXUSR) == 0);
+    return helper;
+}
+
+std::string ProbeOutput(const fs::path& root)
+{
+    std::ifstream in{root / "probe.out"};
+    return std::string{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+}
+
+} // namespace
+
+// macOS: default-deny Seatbelt instead of a mount namespace. The helper runs
+// and writes inside root, but cannot open the directory above root or
+// /private/etc/hosts, and cannot bind a loopback socket.
+BOOST_AUTO_TEST_CASE(macos_helper_runs_jailed)
+{
+    const fs::path root = MacRoot("btx-swarm-fsjail-macos");
+    std::string err = "stale";
+    const modelnet::SwarmFilesystemJailResult result =
+        modelnet::SwarmRunFilesystemJail(BaseRequest(CopyProbe(root), root), err);
+    const std::string out = ProbeOutput(root);
+    fs::remove_all(root);
+    BOOST_CHECK_EQUAL(result.code, "JAILED");
+    BOOST_CHECK(result.launched && result.jailed && err.empty());
+    BOOST_CHECK(out.find("outside_dir=0\n") != std::string::npos);
+    BOOST_CHECK(out.find("etc_hosts=0\n") != std::string::npos);
+    BOOST_CHECK(out.find("loopback_bind=0\n") != std::string::npos);
+}
+
+// A helper inside root that is a symlink to a binary outside root is refused
+// before fork.
+BOOST_AUTO_TEST_CASE(macos_symlink_out_of_root_refused)
+{
+    const fs::path outside = MacRoot("btx-swarm-fsjail-macos-outside");
+    const fs::path target = CopyProbe(outside);
+    const fs::path root = MacRoot("btx-swarm-fsjail-macos-link");
+    fs::create_symlink(target, root / "probe");
+    std::string err;
+    const modelnet::SwarmFilesystemJailResult result =
+        modelnet::SwarmRunFilesystemJail(BaseRequest(root / "probe", root), err);
+    const bool ran = fs::exists(outside / "probe.out");
+    fs::remove_all(root);
+    fs::remove_all(outside);
+    BOOST_CHECK_EQUAL(result.code, "PATH");
+    BOOST_CHECK(!result.launched && !result.jailed);
+    BOOST_CHECK(!ran);
+}
+
+// A shell script cannot run: its interpreter is outside root.
+BOOST_AUTO_TEST_CASE(macos_interpreter_outside_root_refused)
+{
+    const fs::path root = MacRoot("btx-swarm-fsjail-macos-sh");
+    const fs::path helper = root / "helper.sh";
+    {
+        std::ofstream script{helper};
+        script << "#!/bin/sh\necho escaped > " << fs::PathToString(root / "ran") << "\n";
+    }
+    BOOST_REQUIRE(chmod(helper.c_str(), S_IRUSR | S_IWUSR | S_IXUSR) == 0);
+    std::string err;
+    const modelnet::SwarmFilesystemJailResult result = modelnet::SwarmRunFilesystemJail(BaseRequest(helper, root), err);
+    const bool ran = fs::exists(root / "ran");
+    fs::remove_all(root);
+    BOOST_CHECK_EQUAL(result.code, "JAIL_ABSENT");
+    BOOST_CHECK(!ran);
+}
+#endif
 
 BOOST_AUTO_TEST_SUITE_END()
