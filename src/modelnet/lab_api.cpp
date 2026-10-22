@@ -3646,9 +3646,12 @@ bool DispatchLabApi(const std::string& method, const std::string& request_json, 
         return true;
     }
     LabDiskImage prior_image;
-    ImageFromStore(State(), prior_image);
     SecretCopy prior_secrets;
-    prior_secrets.keys = State().identity_sk;
+    // Only a durable write can roll back, so a read does not copy the store.
+    if (!DurableRead(method)) {
+        ImageFromStore(State(), prior_image);
+        prior_secrets.keys = State().identity_sk;
+    }
     const bool prior_recovery = State().recovery_required;
     const uint64_t prior_generation = State().commit_generation;
     UniValue result(UniValue::VOBJ);
