@@ -1812,7 +1812,9 @@ void EnsureEconomy(ModelCatalog& cat)
     }
 }
 
-void PersistEconomy(ModelCatalog& cat)
+// g_search_mu must be held: Save() walks the index that Put() rewrites on
+// the other unix worker. The campaign lock is taken second, as elsewhere.
+static void PersistEconomyLocked(ModelCatalog& cat)
 {
     std::string err;
     (void)g_search_idx.Save(HelperDir(cat) / "search-index.json", err);
@@ -1823,6 +1825,12 @@ void PersistEconomy(ModelCatalog& cat)
         camps = g_campaigns.List();
     }
     (void)SaveCampaigns(HelperDir(cat), camps, err);
+}
+
+void PersistEconomy(ModelCatalog& cat)
+{
+    std::lock_guard<std::mutex> lock(g_search_mu);
+    PersistEconomyLocked(cat);
 }
 
 bool ReadCatalogBytes(ModelCatalog& cat, const CatalogEntry& e, std::vector<unsigned char>& out, std::string& err)
@@ -6565,7 +6573,7 @@ bool DispatchHelperRpc(ModelCatalog& cat, const UniValue& request, UniValue& res
             return false;
         }
         AfterIndexPut(rec, ConnNowMs());
-        PersistEconomy(cat);
+        PersistEconomyLocked(cat);
         const auto* stored = g_search_idx.Get(rec.model_id);
         result.pushKV("schema_version", 2);
         result.pushKV("model_id", rec.model_id.Hex());
@@ -7795,8 +7803,11 @@ bool DispatchHelperRpc(ModelCatalog& cat, const UniValue& request, UniValue& res
                 err = "unknown release";
                 return false;
             }
-            if (const auto* rec = g_search_idx.Get(camp.model_id)) h.rec = *rec;
-            else h.rec.model_id = camp.model_id;
+            {
+                std::lock_guard<std::mutex> lock(g_search_mu);
+                if (const auto* rec = g_search_idx.Get(camp.model_id)) h.rec = *rec;
+                else h.rec.model_id = camp.model_id;
+            }
             auto e = ComposeEconomyEntry(h, &camp, ObservationFromHit(h, &camp, &cat));
             UniValue one = CampaignToJson(camp);
             one.pushKV("lifecycle_state", ModelLifecycleName(e.lifecycle));
@@ -9067,7 +9078,7 @@ bool DispatchHelperRpc(ModelCatalog& cat, const UniValue& request, UniValue& res
             }
         }
         result = FeedPageJson(items, entries, fq, cov, g_feed.Sequence(), next);
-        PersistEconomy(cat);
+        PersistEconomyLocked(cat);
         return true;
     }
     err_code = "METHOD_NOT_FOUND";
