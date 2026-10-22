@@ -11,6 +11,7 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
 
+#include <chrono>
 #include <fstream>
 #include <iterator>
 #include <string>
@@ -198,6 +199,10 @@ BOOST_AUTO_TEST_CASE(macos_helper_runs_confined)
     BOOST_CHECK(out.find("loopback_bind=0\n") != std::string::npos);
     BOOST_CHECK(out.find("nofile=64\n") != std::string::npos);
     BOOST_CHECK(out.find("cpu=30\n") != std::string::npos);
+    // Regression checks for the default-deny profile.
+    for (const char* line : {"mach_lookup=0\n", "fork=0\n", "signal_parent=0\n", "posix_shm=0\n", "cwd_root=1\n"}) {
+        BOOST_CHECK_MESSAGE(out.find(line) != std::string::npos, "probe line " << line);
+    }
 }
 
 // macOS refuses RLIMIT_AS; the parent kills a child whose footprint passes
@@ -235,6 +240,27 @@ BOOST_AUTO_TEST_CASE(macos_cpu_limit_enforced)
     BOOST_CHECK(!result.launched);
     BOOST_CHECK(started);
     BOOST_CHECK(!done);
+}
+
+// macOS only sends SIGXCPU at RLIMIT_CPU. A helper that ignores it is killed
+// by the parent 250 ms past the limit, long before its 20 s spin ends.
+BOOST_AUTO_TEST_CASE(macos_cpu_limit_holds_when_sigxcpu_ignored)
+{
+    const fs::path root = MacRoot("btx-swarm-confine-macos-spin-ignore");
+    modelnet::SwarmConfineRequest request = BaseRequest(CopyProbe(root, "spin_ignore.mode"), root);
+    request.max_cpu_seconds = 1;
+    std::string err;
+    const auto start = std::chrono::steady_clock::now();
+    const modelnet::SwarmConfineResult result = modelnet::SwarmRunConfined(request, err);
+    const auto seconds = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - start).count();
+    const bool started = fs::exists(root / "spin.started");
+    const bool done = fs::exists(root / "spin.done");
+    fs::remove_all(root);
+    BOOST_CHECK_EQUAL(result.code, "CONFINEMENT_ABSENT");
+    BOOST_CHECK(!result.launched);
+    BOOST_CHECK(started);
+    BOOST_CHECK(!done);
+    BOOST_CHECK_LT(seconds, 10);
 }
 #endif
 

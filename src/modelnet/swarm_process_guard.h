@@ -35,6 +35,7 @@
 #include <arpa/inet.h>
 #include <dlfcn.h>
 #include <libproc.h>
+#include <mach/mach_time.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #endif
@@ -191,11 +192,24 @@ inline bool NetworkProvenDenied()
     return !bound && (error == EPERM || error == EACCES);
 }
 
-inline bool FootprintAbove(pid_t pid, uint64_t limit)
+/**
+ * True once the child is above a limit the macOS kernel does not enforce:
+ * its physical footprint (macOS refuses an RLIMIT_AS below the address
+ * space a process already maps, far above any useful limit), or its CPU time
+ * 250 ms past max_cpu_seconds (macOS only sends SIGXCPU at RLIMIT_CPU, so a
+ * helper that ignores it keeps running). 0 turns a limit off.
+ */
+inline bool OverLimits(pid_t pid, uint64_t max_footprint_bytes, int max_cpu_seconds)
 {
     rusage_info_v4 usage{};
     if (proc_pid_rusage(pid, RUSAGE_INFO_V4, reinterpret_cast<rusage_info_t*>(&usage)) != 0) return false;
-    return usage.ri_phys_footprint > limit;
+    if (max_footprint_bytes != 0 && usage.ri_phys_footprint > max_footprint_bytes) return true;
+    if (max_cpu_seconds <= 0) return false;
+    mach_timebase_info_data_t base{};
+    if (mach_timebase_info(&base) != KERN_SUCCESS || base.denom == 0) return false;
+    // ri_user_time and ri_system_time are Mach absolute-time ticks.
+    const uint64_t cpu_ns = (usage.ri_user_time + usage.ri_system_time) * base.numer / base.denom;
+    return cpu_ns > static_cast<uint64_t>(max_cpu_seconds) * 1'000'000'000ULL + 250'000'000ULL;
 }
 #endif
 
@@ -207,12 +221,13 @@ struct WaitResult {
 };
 
 /**
- * max_footprint_bytes (macOS only, 0 = off): macOS refuses RLIMIT_AS, so the
- * address limit is enforced here on the child's physical footprint. It is
- * sampled every 10 ms; a child can overshoot by what it touches within one
- * interval. The SIGKILL reads as a signal, i.e. not executed.
+ * max_footprint_bytes and max_cpu_seconds (macOS only, 0 = off): see
+ * OverLimits. Both are sampled every 10 ms; a child can overshoot by what it
+ * touches or computes within one interval. The SIGKILL to its process group
+ * reads as a signal, i.e. not executed.
  */
-inline WaitResult Wait(pid_t child, int error_fd, int wall_seconds, uint64_t max_footprint_bytes = 0)
+inline WaitResult Wait(pid_t child, int error_fd, int wall_seconds, uint64_t max_footprint_bytes = 0,
+                       int max_cpu_seconds = 0)
 {
     WaitResult result;
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(wall_seconds);
@@ -229,12 +244,13 @@ inline WaitResult Wait(pid_t child, int error_fd, int wall_seconds, uint64_t max
             break;
         }
 #ifdef __APPLE__
-        if (max_footprint_bytes != 0 && FootprintAbove(child, max_footprint_bytes)) {
+        if (OverLimits(child, max_footprint_bytes, max_cpu_seconds)) {
             kill(-child, SIGKILL);
             kill(child, SIGKILL);
         }
 #else
         (void)max_footprint_bytes;
+        (void)max_cpu_seconds;
 #endif
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
