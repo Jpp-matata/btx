@@ -15,6 +15,7 @@
 #include <uint256.h>
 #include <univalue.h>
 #include <util/fs.h>
+#include <util/fs_helpers.h>
 #include <util/strencodings.h>
 
 #include <algorithm>
@@ -521,7 +522,19 @@ bool LightWatch::Save(const std::string& path, std::string& error) const
             return false;
         }
     }
+    // Commit the temp before it replaces the file. Otherwise a power loss
+    // after the rename can leave a short file under the final name.
+    FILE* file = fsbridge::fopen(tmp, "rb+");
+    const bool committed = file != nullptr && FileCommit(file);
+    if (file != nullptr) fclose(file);
+    if (!committed) {
+        std::error_code ec;
+        fs::remove(tmp, ec);
+        error = "BTX_LIGHTWATCH_IO";
+        return false;
+    }
     fs::rename(tmp, dest);
+    DirectoryCommit(dest.parent_path());
     return true;
 }
 
