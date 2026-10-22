@@ -223,6 +223,39 @@ BOOST_AUTO_TEST_CASE(guard_permit_is_one_use_and_thirty_seconds)
     BOOST_CHECK_EQUAL(err, "BTX035_PAUSED");
 }
 
+BOOST_AUTO_TEST_CASE(guard_table_is_bounded_and_drops_expired_permits)
+{
+    using namespace modelnet;
+    GuardTable table;
+    GuardPermit permit;
+    std::string err;
+    std::string first;
+    for (size_t i = 0; i < GuardTable::kMaxPermits; ++i) {
+        BOOST_REQUIRE(table.Prepare("research.run", std::string(96, 'a'), 1, 1000, permit, err));
+        if (i == 0) first = permit.secret;
+    }
+    BOOST_CHECK_EQUAL(table.Size(), GuardTable::kMaxPermits);
+
+    // Full, and nothing has expired yet: refuse and do not grow.
+    const int64_t last_live_ms = 1000 + GuardTable::kPermitTtlMs;
+    BOOST_CHECK(!table.Prepare("research.run", std::string(96, 'a'), 1, last_live_ms, permit, err));
+    BOOST_CHECK_EQUAL(err, "BTX035_LIMIT_EXCEEDED");
+    BOOST_CHECK_EQUAL(table.Size(), GuardTable::kMaxPermits);
+
+    // A consumed permit stays until it expires, so a second execute is still a replay.
+    std::string receipt;
+    BOOST_CHECK(table.Execute(first, last_live_ms, receipt, err));
+    BOOST_CHECK(!table.Execute(first, last_live_ms, receipt, err));
+    BOOST_CHECK_EQUAL(err, "BTX035_REPLAY");
+
+    // Past the expiry, the next prepare drops the old rows and succeeds.
+    BOOST_CHECK(table.Prepare("research.run", std::string(96, 'a'), 1, last_live_ms + 1, permit, err));
+    BOOST_CHECK_EQUAL(table.Size(), 1U);
+    BOOST_CHECK(!table.Execute(first, last_live_ms + 1, receipt, err));
+    BOOST_CHECK_EQUAL(err, "BTX035_PERMIT");
+    BOOST_CHECK(table.Execute(permit.secret, last_live_ms + 1, receipt, err));
+}
+
 BOOST_AUTO_TEST_CASE(fetch_ticket_exports_once_and_source_query_reads_the_bytes)
 {
     modelnet::ResetLabApi();
