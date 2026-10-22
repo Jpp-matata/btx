@@ -30,6 +30,14 @@ The same wake then calls `NifObserve::Tick`, then `SwarmBound::Pass` once, then 
 
 Libraries elsewhere in `bitcoin_modelnet` can be called by tests. They are not this control plane. The latched pass is not a peer network, a qualified release, or a settlement. One machine and two local ranks are not two hosts. This host can compile and run the Linux unit suites. A Windows, macOS, or GPU result is recorded only when that run happens on that machine.
 
+## Control plane bounds
+
+`btxd` is the control plane. A missing catalog does nothing. Automatic spend atoms stay 0. `preparefundmodelrelease` builds an unsigned plan and does not spend.
+
+Advertised capability is separate from qualified capability. A local model can run with an empty provider key. A KV page is copied only when fingerprints match. Recovery of a recorded balance does not stop a device and does not spend.
+
+Two physical hosts, three peers, a second GPU, Windows, macOS, offline images, and the release gates remain later work.
+
 ## Later releases
 
 Follow-on work toward a fully autonomous network:

@@ -2389,6 +2389,13 @@ add_library(bitcoin_modelnet STATIC
   proc09/proc09.cpp
   set01/set01.cpp
   host01/host01.cpp
+  load01/load01.cpp
+  cap02/cap02.cpp
+  hire01/hire01.cpp
+  pay02/pay02.cpp
+  p2p03/p2p03.cpp
+  set02/set02.cpp
+  lan01/lan01.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp

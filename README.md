@@ -75,6 +75,14 @@ balance-watch RPCs `getbalancewatch` and `getbalanceatheight`, model and
 bounty funding updates, and the `htlc_sha256` presign path. The shipping
 version numbers above stay **0.34.15**.
 
+## Current delivery bounds
+
+`btxd` is the control plane. A missing catalog does nothing. Automatic spend atoms stay 0. `preparefundmodelrelease` builds an unsigned plan and does not spend.
+
+Advertised capability is separate from qualified capability. A local model can run with an empty provider key. A KV page is copied only when fingerprints match. Recovery of a recorded balance does not stop a device and does not spend.
+
+Two physical hosts, three peers, a second GPU, Windows, macOS, offline images, and the release gates remain later work.
+
 ## Later releases
 
 The next releases are the path to a fully autonomous network.
@@ -117,6 +125,7 @@ fabric stay in the passport's capability vector. Details:
 
 ## Table of Contents
 
+- [Current delivery bounds](#current-delivery-bounds)
 - [Later releases](#later-releases)
 - [Start here](#start-here)
 - [Pay With Compute](#pay-with-compute)

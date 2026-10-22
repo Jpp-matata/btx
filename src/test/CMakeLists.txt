@@ -2454,6 +2454,13 @@ if(WITH_MODELNET)
     proc09_tests.cpp
     set01_tests.cpp
     host01_tests.cpp
+    load01_tests.cpp
+    cap02_tests.cpp
+    hire01_tests.cpp
+    pay02_tests.cpp
+    p2p03_tests.cpp
+    set02_tests.cpp
+    lan01_tests.cpp
     swarm_minehold_request_tests.cpp
     swarm_ckptsave_request_tests.cpp
     swarm_mixedhold_request_tests.cpp

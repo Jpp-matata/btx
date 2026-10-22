@@ -1,0 +1,26 @@
+[
+  {
+    "id": "DS-PAY-002",
+    "final_acceptance": "DEFINED_NEEDS_PROCESS",
+    "native_status": "NOT_RUN_NATIVE",
+    "evidence": "RecordFunding records refund and payout paths and does not settle. The objective is stored only when both paths are present, SwarmPayReg::Open and SwarmPayReg::Claim record that open and claim, settled() stays false, and atoms moved stay 0."
+  },
+  {
+    "id": "DS-PAY-003",
+    "final_acceptance": "UNQUALIFIED",
+    "native_status": "NOT_RUN_NATIVE",
+    "evidence": "ProveExit stays unqualified when an exit flag is absent and when unilateral exit, expiry, fee, stale state, and watchtower are all present. This module does not prove a watchtower."
+  },
+  {
+    "id": "DS-OPS-006",
+    "final_acceptance": "UNQUALIFIED",
+    "native_status": "NOT_RUN_NATIVE",
+    "evidence": "Federate returns ORG below two organizations or without local validation. Two organizations with local validation still return UNQUALIFIED. A second organization is refused."
+  },
+  {
+    "id": "DS-REC-006",
+    "final_acceptance": "UNQUALIFIED",
+    "native_status": "NOT_RUN_NATIVE",
+    "evidence": "ExerciseFaults returns HOSTS below two hosts and FAULT when a fault flag is absent. Partition, clock, response, and liquidity together stay UNQUALIFIED. Cross-host faults stay unqualified because one process is not a cross-host partition."
+  }
+]

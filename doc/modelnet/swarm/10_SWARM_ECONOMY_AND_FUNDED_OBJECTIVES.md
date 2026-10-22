@@ -67,6 +67,14 @@ The swarm thread inside btxd returns Spend as the string "0". `automatic_spend_a
 
 No channel is opened by the observer. No mainnet broadcast is made. The research path and the scheduler do not receive a spend key. Wallet work already on this branch includes `getbalancewatch`, `getbalanceatheight`, model and bounty funding updates, and presign of the `htlc_sha256` claim leaf. Helper approval is not a chain spend. Those wallet calls leave `immediately_payable_l2_atoms` and `enforceable_channel_claim_atoms` at zero. A local budget reservation remains an accounting record. SEP-003 still applies: no command in this service signs or broadcasts a transaction.
 
+## Unsigned plans and recorded balances
+
+`btxd` is the control plane. A missing catalog does nothing. Automatic spend atoms stay 0. `preparefundmodelrelease` builds an unsigned plan and does not spend. Recovery of a recorded balance does not stop a device and does not spend.
+
+Advertised capability is separate from qualified capability. A local model can run with an empty provider key. A KV page is copied only when fingerprints match.
+
+Two physical hosts, three peers, a second GPU, Windows, macOS, offline images, and the release gates remain later work.
+
 ## Later releases
 
 Toward a fully autonomous network, accepted work can settle in BTX only under a mandate the operator signed. A funded objective can pay a bounded amount through the existing payment facilities. A routed payment still has to pass the hash-locked claim checks, including the 32-byte preimage pin on the claim leaf. Currency remains BTX.

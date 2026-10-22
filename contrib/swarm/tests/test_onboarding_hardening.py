@@ -84,24 +84,25 @@ def test_dataset_authorization_revocation_fences_release():
     with pytest.raises(MeshError,match='DATA_GRANT_REVOKED'):worker.release_gate(payload,checkpoint)
 
 
-@pytest.mark.asyncio
-async def test_real_cli_invitation_join_and_default_no_compute(tmp_path):
-    owner_dir,worker_dir=tmp_path/'owner',tmp_path/'worker'
-    owner,cfg=initialize(owner_dir,host='127.0.0.1',port=free_port())
-    recipient,wcfg=initialize(worker_dir,host='127.0.0.1',port=free_port())
-    node=SwarmNode(owner_dir,discovery=False)
-    await node.start()
-    try:
-        await wait_leader([node])
-        realm=(await call(node,'realm.create',{'name':'CLI realm','nonce':'cli','owner_domain':'a','policy':default_policy(H('suite'),H('holdout'))}))['id']
-        target=tmp_path/'recipient.json';atomic_write(target,encode(bundle(recipient,wcfg['peers'][recipient.id]['endpoint'])))
-        invitation=tmp_path/'invitation.json'
-        args=argparse.Namespace(data=str(owner_dir),action='invite',realm=realm,peer_bundle=str(target),output=str(invitation),roles='worker,trainer',trust_domain='independent-b',slots=1,vram_bytes=0,expires_hours=1)
-        issued=await dispatch(args);assert not issued['worker_resources_authorized']
-        args=argparse.Namespace(data=str(worker_dir),action='join',invitation=str(invitation),issuer=owner.id)
-        joined=await dispatch(args);assert joined['joined']==realm and not joined['idle_compute']
-        with pytest.raises(MeshError,match='COMPUTE_NOT_AUTHORIZED'):Worker(worker_dir,realm)
-        with pytest.raises(MeshError,match='INVITE_REPLAY'):await dispatch(args)
-        # Both individual signing secrets remain in their own identity directories.
-        assert 'PRIVATE KEY' not in invitation.read_text()
-    finally:await node.close()
+def test_real_cli_invitation_join_and_default_no_compute(tmp_path):
+    async def scenario():
+        owner_dir,worker_dir=tmp_path/'owner',tmp_path/'worker'
+        owner,cfg=initialize(owner_dir,host='127.0.0.1',port=free_port())
+        recipient,wcfg=initialize(worker_dir,host='127.0.0.1',port=free_port())
+        node=SwarmNode(owner_dir,discovery=False)
+        await node.start()
+        try:
+            await wait_leader([node])
+            realm=(await call(node,'realm.create',{'name':'CLI realm','nonce':'cli','owner_domain':'a','policy':default_policy(H('suite'),H('holdout'))}))['id']
+            target=tmp_path/'recipient.json';atomic_write(target,encode(bundle(recipient,wcfg['peers'][recipient.id]['endpoint'])))
+            invitation=tmp_path/'invitation.json'
+            args=argparse.Namespace(data=str(owner_dir),action='invite',realm=realm,peer_bundle=str(target),output=str(invitation),roles='worker,trainer',trust_domain='independent-b',slots=1,vram_bytes=0,expires_hours=1)
+            issued=await dispatch(args);assert not issued['worker_resources_authorized']
+            args=argparse.Namespace(data=str(worker_dir),action='join',invitation=str(invitation),issuer=owner.id)
+            joined=await dispatch(args);assert joined['joined']==realm and not joined['idle_compute']
+            with pytest.raises(MeshError,match='COMPUTE_NOT_AUTHORIZED'):Worker(worker_dir,realm)
+            with pytest.raises(MeshError,match='INVITE_REPLAY'):await dispatch(args)
+            # Both individual signing secrets remain in their own identity directories.
+            assert 'PRIVATE KEY' not in invitation.read_text()
+        finally:await node.close()
+    asyncio.run(scenario())

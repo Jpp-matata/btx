@@ -53,3 +53,11 @@ Backups must include metadata, evidence, active claim material, identity recover
 ## Audit standard
 
 The coordinator must record every new failure and its independent regression test. No known issue is closed solely by renaming a flag, reducing evidence requirements, mocking a backend or increasing a timeout. Static source review, isolated compilation, unit execution, native node execution, real hardware, WAN and independent audit are separate evidence classes.
+
+## Capability and page copies
+
+Advertised capability is separate from qualified capability. A local model can run with an empty provider key. A KV page is copied only when fingerprints match. Recovery of a recorded balance does not stop a device and does not spend.
+
+`btxd` is the control plane. A missing catalog does nothing. Automatic spend atoms stay 0. `preparefundmodelrelease` builds an unsigned plan and does not spend.
+
+Two physical hosts, three peers, a second GPU, Windows, macOS, offline images, and the release gates remain later work.
