@@ -11314,7 +11314,12 @@ static void RefreshAutoStorage(HelperConfig& cfg, ModelCatalog* cat)
     g_runtime.preserve_rare = cfg.preserve_rare;
     g_runtime.follow_peers = cfg.follow_peers;
     g_runtime.upload_bps = cfg.upload_bps;
-    g_runtime.watch_dir = fs::PathToString(cfg.watch_dir);
+    // The unix RPC workers copy watch_dir without a lock, and cfg.watch_dir
+    // never changes after start. Write it only when it differs, so the 60 s
+    // refresh does not free the string while a worker is reading it.
+    if (const std::string watch{fs::PathToString(cfg.watch_dir)}; g_runtime.watch_dir != watch) {
+        g_runtime.watch_dir = watch;
+    }
     g_runtime.public_host_reachable = cfg.public_host_reachable;
     g_swarm.host = cfg.host;
     if (cfg.storage_mode == StorageMode::DISABLED) {
