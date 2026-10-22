@@ -5,8 +5,8 @@ first. Humans: [HUMANS.md](HUMANS.md). Product overview: [README.md](README.md).
 
 ## Two planes (plus hosted)
 
-- Monetary: `btxd` — consensus, wallet, ExactReplay, BanMan, AddrMan. The swarm observer is a thread in this process.
-- Model: `btx-modeld` — search, feed, retrieve, checkout, load, local generate, release coordination, bounties.
+- Monetary: `btxd` — consensus, wallet, ExactReplay, BanMan, AddrMan. Modelnet defaults on. This process starts `btx-modeld` and the swarm observer.
+- Model: `btx-modeld` — the helper `btxd` supervises: search, feed, retrieve, checkout, load, local generate, release coordination, bounties.
 - Hosted: `btx-hcpd` / `btx-hosted` — walletless catalogue; not a fifth consensus plane.
 
 Map: [doc/modelnet/swarm/00_THIS_TREE.md](doc/modelnet/swarm/00_THIS_TREE.md).

@@ -35,7 +35,7 @@ A model is a persistent evolutionary lineage, not merely a download. The product
 
 ## Current behavior
 
-`src/init.cpp` calls `modelnet::StartSwarmObserver` after the model helper when `-modelnet` defaults on. The call starts a thread in the `btxd` process. `-modelnet=0` turns it off. A failure is logged and the monetary node continues. Shutdown joins the thread. There is no second swarm binary and no extra swarm startup flag. `btxd` does not launch `btx-swarmd` or `btx-paynetd`. Ordinary monetary startup does not depend on the reference Python package. That package is not the running control plane.
+Modelnet defaults on. `src/init.cpp` starts the supervised `btx-modeld` and then `modelnet::StartSwarmObserver` in the `btxd` process. That thread is the default swarm membership. `-modelnet=0` is the off switch. A failure is logged and the monetary node continues. Shutdown joins the thread. There is no second swarm binary and no extra swarm startup flag. `btx-swarmd` and `btx-paynetd` are not used, because a separate daemon would make participation something the operator has to turn on. The reference Python package is not the control plane.
 
 About every two seconds the thread writes the catalog to `observers.json` (observers only; no grant, seed, or spend), refreshes the local mesh, integrates the catalog, calls `SwarmFormPlane`, and calls `SwarmPublishLive`. `FormationPlane` does not exec a sidecar, open a socket, add a DNS seed, broadcast, or spend.
 

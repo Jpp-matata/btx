@@ -2,7 +2,7 @@
 
 The swarm an operator is running is a thread inside `btxd`. ModelNet defaults on. `-modelnet=0` turns the thread off. There is no swarm startup flag and no second binary.
 
-`src/init.cpp` calls `modelnet::StartSwarmObserver` after the model helper, passing the node model directory. `StopSwarmObserver` runs at shutdown and joins the thread. A failure inside the thread is logged. The monetary node continues. `btxd` does not launch `btx-swarmd` or `btx-paynetd`. The reference Python package is not the running control plane.
+Modelnet defaults on. `src/init.cpp` starts the supervised helper and then `modelnet::StartSwarmObserver` with the node model directory. That thread is the default swarm membership. `StopSwarmObserver` runs at shutdown and joins the thread. A failure inside the thread is logged. The monetary node continues. `btx-swarmd` and `btx-paynetd` are not used, because participation is this thread rather than another program. The reference Python package is not the running control plane.
 
 ## Current behavior
 

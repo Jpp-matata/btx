@@ -20,7 +20,7 @@ The same mechanisms apply to one person, a community, and a larger site. Differe
 
 | Program | Place in this tree | What it owns |
 |---|---|---|
-| `btxd` | `src/bitcoind.cpp`, `src/init.cpp` | Money. When `-modelnet` is on, also the swarm observer thread |
+| `btxd` | `src/bitcoind.cpp`, `src/init.cpp` | Money, and by default the model helper plus the swarm observer |
 | `btx-cli`, `btx-tx`, `btx-wallet`, `btx-util` | `src/` | Monetary tools |
 | `btx-modeld` | `src/modeld.cpp` | Local model metadata, retrieval, admission policy, distribution state |
 | `btx-modelcheck`, `btx-open` | `src/` | Check and open helpers for model artifacts |
@@ -28,7 +28,13 @@ The same mechanisms apply to one person, a community, and a larger site. Differe
 | `btx-capability`, `btx-capabilityd` | `src/` | Capability tools |
 | `btx-guardd` | `src/btx-guardd.cpp` | Local action mediator. The observer thread does not start it |
 
-`src/init.cpp` calls `modelnet::StartSwarmObserver` after the model helper. `-modelnet=0` skips that call. Shutdown joins the thread. `btxd` does not exec `btx-swarmd` or `btx-paynetd`. `contrib/swarm` is the reference Python package. `btxd` does not start it, and that package is not the control plane.
+Modelnet is the default. When it is compiled, `-modelnet` is on unless the operator passes `-modelnet=0`. `btxd` then starts a supervised `btx-modeld` and `modelnet::StartSwarmObserver` in the same process. That thread is how the node takes part in the swarm. There is no extra swarm flag and no swarm program to launch. Shutdown joins the thread. A failure there is logged and the monetary node continues.
+
+`btx-swarmd` and `btx-paynetd` are not part of this default. A second daemon would be a swarm the operator has to start, which is the opposite of every node participating as it comes up. `contrib/swarm` is a reference package. It is not the control plane, and `btxd` does not need it in order to run the observer.
+
+The default this network is built for is a node that holds a verified model and joins that model's family with no separate join step. Starting nodes is how the swarm gains participants, replicates work, and evolves. The observer already subscribes a verified, complete catalog entry without another switch. A missing catalog still changes nothing: this candidate does not yet fetch that first model or enter a live family on an empty store. Closing that gap is part of the default, not an optional mode. Spend stays 0. There is still no network-wide scheduler assigning work.
+
+`btx-hcpd`, `btx-hosted`, the capability tools, and `btx-guardd` are optional programs for a hosted gateway, capability checks, and a local action mediator. The default path does not ask the operator to start them.
 
 Signing roots and wallet credentials stay out of the model helper. The money datadir and `modeldir` are separate. Observer files live under `modeldir/swarm/`, including `observers.json`, `contribution.json`, and lineage mappings. Those files record observers and local views. They are not a spend key and not a grant to seed or train.
 

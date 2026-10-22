@@ -22,10 +22,11 @@ A BTX node already has compute; the Native Model Network delivers models
 to it. Inference is **local after acquire**. BTX is not a remote inference
 marketplace.
 
-When ModelNet is compiled, `-modelnet` defaults on. `btxd` supervises the
-model helper, then calls `modelnet::StartSwarmObserver` in `src/init.cpp`.
-The observer is a thread inside `btxd`. `-modelnet=0` turns it off. A swarm
-failure does not stop the monetary node.
+When Modelnet is compiled, `-modelnet` defaults on. `btxd` starts a
+supervised `btx-modeld` and the swarm observer thread in the same process.
+That is the default participation path: a node takes part in the swarm by
+running, without a second daemon or an extra flag. `-modelnet=0` is how an
+operator leaves it off. A swarm failure does not stop the monetary node.
 
 About every two seconds the thread reads `catalog.json` into
 `modeldir/swarm/observers.json` when the catalog is usable. Those rows are
@@ -47,9 +48,14 @@ node cycle, the module check, and the safe-slice check. `passed()`,
 `gpu_passed()`, and `windows_passed()` stay false. Spend returns the string
 `0`. Release returns `UNQUALIFIED`.
 
-`btx-swarmd` and `btx-paynetd` are not started by `btxd`. Model RPCs still go
-to the model helper. Retrieval is `FREE_ONLY` and automatic spend atoms stay
-`0`. Detail: [doc/btx-agent-swarm.md](doc/btx-agent-swarm.md).
+There is no `btx-swarmd` and no `btx-paynetd` on this path. The swarm is the
+thread `btxd` already started. A separate swarm program would make
+participation optional. Model RPCs go to the helper `btxd` supervises.
+Retrieval is `FREE_ONLY` and automatic spend atoms stay `0`. A verified
+catalog entry is subscribed with no further switch. An empty store does not
+yet fetch a first model or enter a live family; that acquisition is the
+default still being closed. Detail:
+[doc/modelnet/swarm/00_THIS_TREE.md](doc/modelnet/swarm/00_THIS_TREE.md).
 
 Two markets sit on the model plane:
 
@@ -172,11 +178,13 @@ fabric stay in the passport's capability vector. Details:
 ## This tree — 0.35.0rc1
 
 **This branch reports v0.35.0rc1.** It is the 0.35 release candidate, not
-the shipping tag `v0.35.0`. `btxd` remains the monetary node. With Modelnet
-compiled, `-modelnet` defaults on and `btxd` starts the swarm observer
-thread. The model helper, the hosted gateway, the capability tools, and
-`btx-guardd` are separate programs. `btxd` does not start them as a swarm
-daemon, and it does not start `btx-swarmd` or `btx-paynetd`.
+the shipping tag `v0.35.0`. `btxd` is the monetary node and, by default, the
+swarm participant. With Modelnet compiled, `-modelnet` is on. `btxd` starts
+`btx-modeld` and the swarm observer thread. The hosted gateway, the
+capability tools, and `btx-guardd` are optional programs. They are not
+required for that default. There is no separate `btx-swarmd` or
+`btx-paynetd`, because the swarm is the thread already running inside
+`btxd`.
 
 The candidate is not release-qualified. Automatic spend stays 0. The
 process map, the public contract, and the in-process records are in

@@ -2,6 +2,8 @@
 
 This tree is **0.35.0rc1**. The process map, the public contract, and the in-process records are in [00_THIS_TREE.md](00_THIS_TREE.md).
 
+The swarm is the default. With Modelnet compiled, `-modelnet` is on and `btxd` starts the helper and the observer thread. Participation is that thread, not a second daemon.
+
 The swarm is integrated as a thread inside `btxd`.
 
 `src/init.cpp` calls `modelnet::StartSwarmObserver` after the model helper when `-modelnet` defaults on. `-modelnet=0` skips that call and logs that the model network is disabled. The monetary node still starts. The observer runs on a `std::thread` owned by the `btxd` process. Shutdown calls `StopSwarmObserver` and joins that thread. If a step throws or returns an error, the thread logs the error with the monetary node continuing. A swarm failure does not stop consensus.
@@ -28,7 +30,7 @@ The same wake then calls `NifObserve::Tick`, then `SwarmBound::Pass` once, then 
 
 `Spend` returns `"0"`. `Release` returns `UNQUALIFIED`. `passed()`, `gpu_passed()`, and `windows_passed()` stay false.
 
-`btxd` does not launch `btx-swarmd` or `btx-paynetd`. `contrib/swarm` remains the reference Python package. `btxd` does not start it. That package is not the running control plane.
+`btx-swarmd` and `btx-paynetd` are not launched. The observer thread is the swarm, so a node does not opt in by starting another program. `contrib/swarm` remains the reference Python package. It is not the running control plane.
 
 Libraries elsewhere in `bitcoin_modelnet` can be called by tests. They are not this control plane. The latched pass is not a peer network, a qualified release, or a settlement. One machine and two local ranks are not two hosts. This host can compile and run the Linux unit suites. A Windows, macOS, or GPU result is recorded only when that run happens on that machine.
 

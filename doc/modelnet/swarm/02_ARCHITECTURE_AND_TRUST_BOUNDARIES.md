@@ -2,7 +2,7 @@
 
 Document: **BTX-SWARM-SPEC-02**, revision **0.1.0**, 19 October 2026.
 
-**Implementation scope:** The swarm control plane runs inside `btxd` when ModelNet is on. `btxd` does not exec `btx-swarmd` or `btx-paynetd`. A missing GPU or transfer engine is `ENGINE_ABSENT` and moves no bytes.
+**Implementation scope:** Modelnet defaults on. The swarm runs inside `btxd` as the observer thread, together with the supervised `btx-modeld`. That is the default participation path. `btx-swarmd` and `btx-paynetd` are not a second product the operator starts. A missing GPU or transfer engine is `ENGINE_ABSENT` and moves no bytes.
 
 ## Process model
 

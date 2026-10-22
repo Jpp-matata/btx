@@ -23,10 +23,13 @@ Search ranking, feed position, bounty popularity, pledges, provider counts, and
 campaign UI labels **must not** enter consensus, fork choice, difficulty,
 issuance, miner preference, BanMan, AddrMan, or monetary peer scoring.
 
-The swarm control plane is a thread inside `btxd`
-(`modelnet::StartSwarmObserver`), not a fourth process. `btxd` does not exec
-`btx-swarmd` or `btx-paynetd`. `contrib/swarm` is a reference package, not
-that control plane.
+The swarm is the default. With Modelnet compiled, `-modelnet` is on and
+`btxd` starts `btx-modeld` plus `modelnet::StartSwarmObserver`. That thread
+is the participation path, not a fourth process and not an opt-in daemon.
+`btx-swarmd` and `btx-paynetd` are absent so the operator does not have a
+second program to launch. `contrib/swarm` is a reference package, not that
+control plane. A verified catalog entry is subscribed with no extra switch.
+Fetching the first model onto an empty store is still open.
 
 - `btx-modeld` never holds wallet secrets. Helper down → proxied RPCs **fail closed**; monetary `btxd` stays up.
 - Model ACL / `addmodelnode` / index peers are not BanMan and not AddrMan.
