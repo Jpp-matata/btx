@@ -15,6 +15,7 @@
 #include <signal.h>
 #include <sys/resource.h>
 #include <sys/socket.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #include <cstdio>
@@ -101,5 +102,14 @@ int main(int argc, char** argv)
     std::fprintf(out, "loopback_bind=%d\n", LoopbackBind() ? 1 : 0);
     std::fprintf(out, "nofile=%llu\n", Limit(RLIMIT_NOFILE));
     std::fprintf(out, "cpu=%llu\n", Limit(RLIMIT_CPU));
+    const pid_t child = fork();
+    if (child == 0) {
+        _exit(0);
+    }
+    if (child > 0) {
+        int status = 0;
+        waitpid(child, &status, 0);
+    }
+    std::fprintf(out, "fork=%d\n", child > 0 ? 1 : 0);
     return std::fclose(out) == 0 ? 0 : 7;
 }

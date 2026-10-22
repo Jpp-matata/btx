@@ -138,7 +138,7 @@ SwarmConfineResult SwarmRunConfined(const SwarmConfineRequest& request, std::str
     }
 #if defined(__APPLE__)
     // Built before fork: the child only applies it.
-    const std::string profile = SwarmSandboxNetworkDeniedProfile();
+    const std::string profile = SwarmSandboxConfineProfile();
 #endif
 
     const pid_t pid = fork();
@@ -162,7 +162,8 @@ SwarmConfineResult SwarmRunConfined(const SwarmConfineRequest& request, std::str
         // The address limit is enforced by the parent (see
         // WaitEnforcingLimits). The sandbox denies every network
         // operation and every Mach service lookup (no name resolution
-        // through mDNSResponder either), and is proven before exec.
+        // through mDNSResponder either), and fork, so no process escapes
+        // that watch. It is proven before exec.
         if (!SetHardLimit(RLIMIT_CPU, static_cast<rlim_t>(request.max_cpu_seconds)) ||
             !SetHardLimit(RLIMIT_NOFILE, static_cast<rlim_t>(request.max_nofile))) {
             _exit(126);

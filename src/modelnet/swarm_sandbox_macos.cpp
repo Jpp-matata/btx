@@ -36,6 +36,11 @@ std::string SwarmSandboxNetworkDeniedProfile()
            "(deny mach-lookup)\n";
 }
 
+std::string SwarmSandboxConfineProfile()
+{
+    return SwarmSandboxNetworkDeniedProfile() + "(deny process-fork)\n";
+}
+
 std::string SwarmSandboxJailProfile(const fs::path& root)
 {
     const std::string r = SwarmSandboxQuote(root);

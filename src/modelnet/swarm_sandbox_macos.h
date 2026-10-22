@@ -25,6 +25,13 @@ namespace modelnet {
 std::string SwarmSandboxNetworkDeniedProfile();
 
 /**
+ * The network-denied profile plus no fork, for swarm_confine: the parent
+ * enforces the address and CPU limits on the one process it watches, so
+ * the helper may not create processes it does not watch.
+ */
+std::string SwarmSandboxConfineProfile();
+
+/**
  * The network-denied profile plus a filesystem limited to `root`: reads,
  * writes and exec only inside root. Readable outside root are only the
  * read-only system runtime a dynamically linked macOS binary needs (dyld

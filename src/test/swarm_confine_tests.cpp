@@ -189,6 +189,8 @@ BOOST_AUTO_TEST_CASE(macos_helper_runs_confined)
     BOOST_CHECK(out.find("loopback_bind=0\n") != std::string::npos);
     BOOST_CHECK(out.find("nofile=64\n") != std::string::npos);
     BOOST_CHECK(out.find("cpu=30\n") != std::string::npos);
+    // No fork: the parent enforces the limits on the one process it watches.
+    BOOST_CHECK(out.find("fork=0\n") != std::string::npos);
 }
 
 // macOS ignores RLIMIT_AS; the parent kills a child whose footprint passes
