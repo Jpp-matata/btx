@@ -258,6 +258,17 @@ void ReloadRegistryLocked()
     RegistryCorrupt() = false;
 }
 
+/**
+ * Load the durable file before a change, so the write that follows keeps the
+ * rows an earlier run wrote. False when the file cannot be read: the caller
+ * then leaves it in place for recovery instead of overwriting it from memory.
+ */
+bool ReloadBeforeWriteLocked()
+{
+    ReloadRegistryLocked();
+    return !RegistryCorrupt();
+}
+
 std::string StrictDigestLocked(const std::string& model_id)
 {
     const auto memory = StrictModels().find(model_id);
@@ -315,26 +326,29 @@ void RegisterStrictModel(const std::string& model_id, StrictAdmissionRecord reco
 {
     if (model_id.empty()) return;
     std::lock_guard<std::mutex> lock(StrictMu());
+    const bool writable = ReloadBeforeWriteLocked();
     DurableStrict()[model_id] = record.digest;
     DurableLegacy().erase(model_id);
     StrictModels()[model_id] = std::move(record);
-    WriteRegistryFile();
+    if (writable) WriteRegistryFile();
 }
 
 void RegisterLegacyModel(const std::string& model_id)
 {
     if (model_id.empty()) return;
     std::lock_guard<std::mutex> lock(StrictMu());
+    const bool writable = ReloadBeforeWriteLocked();
     DurableLegacy()[model_id] = true;
     DurableStrict().erase(model_id);
     StrictModels().erase(model_id);
-    WriteRegistryFile();
+    if (writable) WriteRegistryFile();
 }
 
 bool RecordModelAdmission(const std::string& model_id, const std::string& digest, const std::string& decision, std::string& err)
 {
     if (model_id.empty() || decision.empty()) return Fail(err, "BTX035_SCHEMA");
     std::lock_guard<std::mutex> lock(StrictMu());
+    if (!ReloadBeforeWriteLocked()) return Fail(err, "BTX035_RECOVERY_REQUIRED");
     if (DurableStrict().count(model_id) == 0) DurableStrict()[model_id] = digest;
     else if (DurableStrict()[model_id].empty()) DurableStrict()[model_id] = digest;
     AdmissionRow row;
@@ -351,10 +365,11 @@ void RevokeModel(const std::string& model_id)
 {
     if (model_id.empty()) return;
     std::lock_guard<std::mutex> lock(StrictMu());
+    const bool writable = ReloadBeforeWriteLocked();
     DurableRevoked()[model_id] = true;
     const auto it = DurableAdmissions().find(model_id);
     if (it != DurableAdmissions().end()) it->second.decision = "REVOKED";
-    WriteRegistryFile();
+    if (writable) WriteRegistryFile();
 }
 
 void ClearAdmissionMemory()
@@ -373,7 +388,10 @@ void RememberQuarantine(const std::string& model_id)
 {
     if (model_id.empty()) return;
     std::lock_guard<std::mutex> lock(StrictMu());
-    WriteRegistryFile();
+    const bool writable = ReloadBeforeWriteLocked();
+    // The reload replaced the in-memory set with the file's list. Keep this id.
+    AddQuarantine(model_id);
+    if (writable) WriteRegistryFile();
 }
 
 bool RouteMayServe(const std::string& model_id, bool byte_hash_matches, std::string& admission)

@@ -50,6 +50,9 @@ AdmissionResult Admit(Assurance assurance,
 
 void Quarantine(const std::string& legacy_id);
 
+/** Add one id to the in-memory quarantine set without writing the registry file. */
+void AddQuarantine(const std::string& legacy_id);
+
 /** Replace the in-memory quarantine set. An empty list clears it. */
 void ReplaceQuarantine(const std::vector<std::string>& legacy_ids);
 

@@ -8,12 +8,20 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <mutex>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
 namespace modelnet {
 namespace {
+
+/** Guards QuarantineSet(). A caller that holds StrictMu() takes this one second. */
+std::mutex& QuarantineMu()
+{
+    static std::mutex mu;
+    return mu;
+}
 
 std::unordered_set<std::string>& QuarantineSet()
 {
@@ -97,14 +105,21 @@ AdmissionResult Admit(Assurance assurance,
     return result;
 }
 
+void AddQuarantine(const std::string& legacy_id)
+{
+    std::lock_guard<std::mutex> lock(QuarantineMu());
+    QuarantineSet().insert(legacy_id);
+}
+
 void Quarantine(const std::string& legacy_id)
 {
-    QuarantineSet().insert(legacy_id);
+    AddQuarantine(legacy_id);
     RememberQuarantine(legacy_id);
 }
 
 void ReplaceQuarantine(const std::vector<std::string>& legacy_ids)
 {
+    std::lock_guard<std::mutex> lock(QuarantineMu());
     QuarantineSet().clear();
     for (const std::string& id : legacy_ids) {
         if (!id.empty()) QuarantineSet().insert(id);
@@ -113,6 +128,7 @@ void ReplaceQuarantine(const std::vector<std::string>& legacy_ids)
 
 std::vector<std::string> QuarantineIds()
 {
+    std::lock_guard<std::mutex> lock(QuarantineMu());
     std::vector<std::string> ids;
     ids.reserve(QuarantineSet().size());
     for (const std::string& id : QuarantineSet()) ids.push_back(id);
@@ -122,13 +138,19 @@ std::vector<std::string> QuarantineIds()
 
 void ClearQuarantineMemory()
 {
+    std::lock_guard<std::mutex> lock(QuarantineMu());
     QuarantineSet().clear();
 }
 
 ServeResult Serve(const std::string& legacy_id, bool byte_hash_matches)
 {
     ServeResult result;
-    if (QuarantineSet().count(legacy_id) != 0) {
+    bool quarantined{false};
+    {
+        std::lock_guard<std::mutex> lock(QuarantineMu());
+        quarantined = QuarantineSet().count(legacy_id) != 0;
+    }
+    if (quarantined) {
         result.code = "BTX035_QUARANTINE";
         return result;
     }

@@ -367,4 +367,53 @@ BOOST_AUTO_TEST_CASE(strict_admission_follows_the_registry_file)
     modelnet::ResetLabApi();
 }
 
+BOOST_AUTO_TEST_CASE(registry_write_after_restart_keeps_earlier_rows)
+{
+    BOOST_REQUIRE(!m_path_root.empty());
+    TempTree root{m_path_root / "lab-lifecycle-restart"};
+    LabDirEnv env(root.path);
+    AdmissionGuard admission;
+
+    const std::string refused = "btx035-lifecycle-refused";
+    const std::string revoked = "btx035-lifecycle-revoked";
+    const std::string held = "btx035-lifecycle-held";
+    std::string err;
+    std::string code;
+    BOOST_REQUIRE(modelnet::RecordModelAdmission(refused, std::string(96, 'a'), "BTX035_REPLAY", err));
+    BOOST_REQUIRE(modelnet::RecordModelAdmission(revoked, std::string(96, 'b'), "ADMITTED", err));
+    modelnet::RevokeModel(revoked);
+    modelnet::Quarantine(held);
+
+    const auto check_denied = [&] {
+        BOOST_CHECK(!modelnet::LivePathAllowed(refused, false, code));
+        BOOST_CHECK_EQUAL(code, "BTX035_ADMISSION");
+        BOOST_CHECK(!modelnet::LivePathAllowed(revoked, false, code));
+        BOOST_CHECK_EQUAL(code, "BTX035_QUARANTINE");
+        BOOST_CHECK(!modelnet::LivePathAllowed(held, false, code));
+        BOOST_CHECK_EQUAL(code, "BTX035_QUARANTINE");
+    };
+    check_denied();
+
+    // A restart drops process memory. The first registry call after it is a write.
+    modelnet::ClearAdmissionMemory();
+    BOOST_REQUIRE(modelnet::RecordModelAdmission("btx035-lifecycle-later", std::string(96, 'c'), "ADMITTED", err));
+    check_denied();
+    modelnet::ClearAdmissionMemory();
+    modelnet::Quarantine("btx035-lifecycle-held-later");
+    check_denied();
+    modelnet::ClearAdmissionMemory();
+    modelnet::RegisterLegacyModel("btx035-lifecycle-legacy-later");
+    check_denied();
+
+    // An unreadable registry stays in place for recovery and is not overwritten from memory.
+    const fs::path file = root.path / "admission-registry.json";
+    WriteFile(file, "{");
+    BOOST_CHECK(!modelnet::RecordModelAdmission("btx035-lifecycle-after-corrupt", std::string(96, 'd'), "ADMITTED", err));
+    BOOST_CHECK_EQUAL(err, "BTX035_RECOVERY_REQUIRED");
+    modelnet::Quarantine("btx035-lifecycle-held-corrupt");
+    BOOST_CHECK_EQUAL(ReadFile(file), "{");
+    BOOST_CHECK(!modelnet::LivePathAllowed("btx035-lifecycle-unknown", false, code));
+    BOOST_CHECK_EQUAL(code, "BTX035_RECOVERY_REQUIRED");
+}
+
 BOOST_AUTO_TEST_SUITE_END()
