@@ -122,7 +122,7 @@ class Worker:
                     self.store.export_file(self.realm,payload["suite_artifact"],work/"suite.json")
                     suite=decode((work/"suite.json").read_bytes())
                 batch,sequence=workload_shape(op,payload,suite)
-                host_bytes=admit_workload(cfg,batch,sequence,ceiling=ceiling)
+                host_bytes=admit_workload(cfg,batch,sequence,ceiling=ceiling,training=op=="torch.train")
             self.policy=self.governor.acquire(job["lease"],self.realm,job["vram_bytes"],host_bytes=host_bytes);reserved=True
             require(op in self.policy["allowed_executors"],"EXECUTOR_POLICY")
             for key,name in (("dataset_artifact","dataset.safetensors"),("parent_artifact","parent.safetensors"),("suite_artifact","suite.json")):

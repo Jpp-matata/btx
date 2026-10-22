@@ -9,7 +9,7 @@ from btxmesh.executor import execute
 from btxmesh.governor import DEFAULT_HOST_BYTES as GOVERNOR_DEFAULT_HOST_BYTES, Governor
 from btxmesh.kv import choose_execution, prefix_should_transfer
 from btxmesh.runtime import (
-    DEFAULT_HOST_BYTES, DecoderConfig, admit_workload, attention_bytes, host_byte_budget, parameter_elements,
+    DEFAULT_HOST_BYTES, DecoderConfig, admit_workload, attention_bytes, host_byte_budget, logit_bytes, parameter_elements,
 )
 from btxmesh.storage import atomic_write
 
@@ -41,10 +41,28 @@ def test_oversized_attention_rejected_before_allocation():
     assert attention == 1 << 47
     assert attention > DEFAULT_HOST_BYTES
     params = parameter_elements(cfg) * 4
-    assert host_byte_budget(cfg, batch, sequence) == params + params + params + attention
+    assert host_byte_budget(cfg, batch, sequence) >= params + params + params + attention
     assert DEFAULT_HOST_BYTES == GOVERNOR_DEFAULT_HOST_BYTES == 2 * 1024**3
     with pytest.raises(MeshError, match="HOST_BUDGET"):
         admit_workload(cfg, batch, sequence)
+
+
+def test_logits_and_kept_activations_are_counted():
+    # One attention matrix is 1 GiB and fits, but the logits alone are 8 GiB,
+    # and a training step keeps about four copies of them.
+    cfg = DecoderConfig(vocab=65536, width=64, layers=1, heads=1, context=8192)
+    params = parameter_elements(cfg) * 4
+    assert params + params + params + attention_bytes(4, cfg.heads, 8192) < DEFAULT_HOST_BYTES
+    assert logit_bytes(4, 8192, cfg.vocab) == 8 * 1024**3
+    with pytest.raises(MeshError, match="HOST_BUDGET"):
+        admit_workload(cfg, 4, 8192)
+    # Backward keeps one softmax per layer, so depth counts too.
+    deep = DecoderConfig(vocab=8, width=8, layers=96, heads=1, context=4096)
+    assert attention_bytes(4, deep.heads, 4096) < DEFAULT_HOST_BYTES
+    with pytest.raises(MeshError, match="HOST_BUDGET"):
+        admit_workload(deep, 4, 4096)
+    # Inference keeps no gradients, so the same shape costs less than training.
+    assert host_byte_budget(cfg, 1, 1024, training=False) < host_byte_budget(cfg, 1, 1024)
 
 
 def test_two_reservations_cannot_exceed_the_host_budget(tmp_path):

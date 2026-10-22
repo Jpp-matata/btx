@@ -37,7 +37,7 @@ def execute(request:dict,output:Path):
         require(isinstance(suite["cases"],list) and 1<=len(suite["cases"])<=10000,"SUITE_CASES")
     batch,sequence=workload_shape(op,p,suite)
     ceiling=configured_host_ceiling({"host_bytes":request["host_bytes"]} if "host_bytes" in request else None)
-    admit_workload(cfg,batch,sequence,ceiling=ceiling)
+    admit_workload(cfg,batch,sequence,ceiling=ceiling,training=op=="torch.train")
     model=Decoder.from_checkpoint(raw,device="cpu")
     model.host_ceiling=ceiling
     if op=="torch.train":

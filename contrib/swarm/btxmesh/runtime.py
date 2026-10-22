@@ -47,10 +47,25 @@ def attention_bytes(batch,heads,sequence):
     return batch*heads*sequence*sequence*4
 
 
-def host_byte_budget(cfg,batch,sequence):
-    """Parameters, gradients, SGD momentum, and one attention workspace."""
+def logit_bytes(batch,sequence,vocab):
+    # One float32 score per position and token.
+    return batch*sequence*vocab*4
+
+
+def host_byte_budget(cfg,batch,sequence,training=True):
+    """Parameters, gradients, SGD momentum, and the activations of one step.
+
+    Training keeps each layer's softmax and causal mask for backward, about
+    twenty width-sized activations per layer, and the logits with their
+    log-softmax and both gradients. Inference keeps none of it. The factors
+    cover peak RSS measured on CPU with torch 2.10.
+    """
     parameters=parameter_elements(cfg)*4
-    return parameters+parameters+parameters+attention_bytes(batch,cfg.heads,sequence)
+    attention=attention_bytes(batch,cfg.heads,sequence)
+    activation=batch*sequence*cfg.width*4
+    logits=logit_bytes(batch,sequence,cfg.vocab)
+    if training:return 3*parameters+(5*cfg.layers+12)*attention//4+20*cfg.layers*activation+4*logits
+    return 3*parameters+3*attention+4*cfg.layers*activation+2*logits
 
 
 def configured_host_ceiling(policy=None):
@@ -58,12 +73,12 @@ def configured_host_ceiling(policy=None):
     return integer(policy["host_bytes"],1,2**62,"HOST_BUDGET")
 
 
-def admit_workload(cfg,batch,sequence,ceiling=None):
+def admit_workload(cfg,batch,sequence,ceiling=None,training=True):
     """Reject a legal shape whose bytes cannot fit before any tensor exists."""
     ceiling=DEFAULT_HOST_BYTES if ceiling is None else integer(ceiling,1,2**62,"HOST_BUDGET")
     integer(batch,1,256);integer(sequence,1,32768)
     attention=attention_bytes(batch,cfg.heads,sequence)
-    budget=host_byte_budget(cfg,batch,sequence)
+    budget=host_byte_budget(cfg,batch,sequence,training)
     require(attention<=ceiling,"HOST_BUDGET")
     require(budget<=ceiling,"HOST_BUDGET")
     return budget
