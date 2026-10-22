@@ -84,7 +84,7 @@ infrastructure, Native Model Network helper, and test suites.
 This working tree is **0.35.0rc1** (`CLIENT_VERSION_MINOR=35`,
 `CLIENT_VERSION_BUILD=0`, `CLIENT_VERSION_RC=1`,
 `CLIENT_VERSION_IS_RELEASE=true`). `btxd -version` prints `v0.35.0rc1`.
-P2P subversion is `/BTX:0.35.0rc1/`. This is not the shipping tag
+P2P subversion is `/BTX:0.35.0/` (no rc). This is not the shipping tag
 `v0.35.0`. The last shipping tag remains **v0.34.15**. Do not recut
 `v0.34.15`, `v0.34.14`, `v0.34.13`, `v0.34.12`, or `v0.34.10`.
 

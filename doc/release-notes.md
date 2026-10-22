@@ -82,7 +82,7 @@ See [release-notes-0.35.0.md](release-notes/release-notes-0.35.0.md)
 and [doc/modelnet/swarm/00_THIS_TREE.md](modelnet/swarm/00_THIS_TREE.md).
 The 0.34.15 notes remain the previous shipping line:
 [release-notes-0.34.15.md](release-notes/release-notes-0.34.15.md).
-0.34.14 remains the previous shipping tag. See
+0.34.14 was the shipping tag before it. See
 [release-notes-0.34.14.md](release-notes/release-notes-0.34.14.md).
 The `v0.34` tag and 0.34.0 seal remain the pool-close cut. 0.34.1 is
 withdrawn: it partitions nodes from mainnet. 0.34.2 is withdrawn for

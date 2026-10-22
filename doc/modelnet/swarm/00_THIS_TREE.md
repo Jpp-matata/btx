@@ -1,6 +1,6 @@
 # This tree — 0.35.0rc1
 
-`CLIENT_VERSION_MAJOR` is 0, `CLIENT_VERSION_MINOR` is 35, `CLIENT_VERSION_BUILD` is 0, `CLIENT_VERSION_RC` is 1, and `CLIENT_VERSION_IS_RELEASE` is true. `btxd -version` prints `v0.35.0rc1`. P2P subversion is `/BTX:0.35.0rc1/`.
+`CLIENT_VERSION_MAJOR` is 0, `CLIENT_VERSION_MINOR` is 35, `CLIENT_VERSION_BUILD` is 0, `CLIENT_VERSION_RC` is 1, and `CLIENT_VERSION_IS_RELEASE` is true. `btxd -version` prints `v0.35.0rc1`. P2P subversion is `/BTX:0.35.0/` (no rc).
 
 This branch is the 0.35 release candidate. It is not a qualified release and it is not the shipping tag `v0.35.0`. The last shipping tag remains **v0.34.15**. Do not recut `v0.34.15`, `v0.34.14`, `v0.34.13`, `v0.34.12`, or `v0.34.10`.
 
