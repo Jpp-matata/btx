@@ -34,7 +34,9 @@ namespace modelnet {
  * Mach service lookup (swarm_sandbox_macos.h), and execs only after a
  * loopback bind is refused. The parent enforces max_address_bytes on the
  * child's physical footprint: sampled every 10 ms, SIGKILL above the
- * limit (child_status then reports that signal). Other platforms exit 126:
+ * limit. The kernel only sends SIGXCPU at the CPU limit, so the same loop
+ * sends SIGKILL once the child's CPU time is 250 ms past max_cpu_seconds
+ * (child_status then reports that signal). Other platforms exit 126:
  * no confinement, no exec.
  */
 struct SwarmConfineRequest {

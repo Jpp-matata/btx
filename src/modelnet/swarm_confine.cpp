@@ -14,6 +14,7 @@
 #include <modelnet/swarm_sandbox_macos.h>
 
 #include <libproc.h>
+#include <mach/mach_time.h>
 #include <signal.h>
 #include <time.h>
 #endif
@@ -73,18 +74,29 @@ bool SetHardLimit(int resource, rlim_t value)
 // FOOTPRINT_POLL_NS and sends SIGKILL once the footprint is above the
 // limit, so an allocation can overshoot by what the child touches within
 // one interval. The status then reports that signal.
+//
+// RLIMIT_CPU on macOS only sends SIGXCPU at the limit; the kernel never
+// follows with SIGKILL, so a child that ignores SIGXCPU keeps running. The
+// same loop sends SIGKILL once the child's CPU time is CPU_GRACE_NS past the
+// limit. proc_pid_rusage reports CPU time in Mach absolute time units.
 constexpr long FOOTPRINT_POLL_NS{10'000'000};
+constexpr uint64_t CPU_GRACE_NS{250'000'000};
 
-bool FootprintAbove(pid_t pid, uint64_t limit)
+bool AboveLimits(pid_t pid, uint64_t limit, uint64_t cpu_limit_ns)
 {
     rusage_info_v4 usage{};
     if (proc_pid_rusage(pid, RUSAGE_INFO_V4, reinterpret_cast<rusage_info_t*>(&usage)) != 0) {
         return false;
     }
-    return usage.ri_phys_footprint > limit;
+    mach_timebase_info_data_t timebase{};
+    if (mach_timebase_info(&timebase) != KERN_SUCCESS || timebase.denom == 0) {
+        return true;
+    }
+    const uint64_t cpu_ns = (usage.ri_user_time + usage.ri_system_time) * timebase.numer / timebase.denom;
+    return usage.ri_phys_footprint > limit || cpu_ns > cpu_limit_ns;
 }
 
-pid_t WaitEnforcingFootprint(pid_t pid, int& status, uint64_t limit)
+pid_t WaitEnforcingLimits(pid_t pid, int& status, uint64_t limit, uint64_t cpu_limit_ns)
 {
     bool killed = false;
     while (true) {
@@ -95,7 +107,7 @@ pid_t WaitEnforcingFootprint(pid_t pid, int& status, uint64_t limit)
             }
             return waited;
         }
-        if (!killed && FootprintAbove(pid, limit)) {
+        if (!killed && AboveLimits(pid, limit, cpu_limit_ns)) {
             kill(pid, SIGKILL);
             killed = true;
         }
@@ -148,7 +160,7 @@ SwarmConfineResult SwarmRunConfined(const SwarmConfineRequest& request, std::str
         }
 #elif defined(__APPLE__)
         // The address limit is enforced by the parent (see
-        // WaitEnforcingFootprint). The sandbox denies every network
+        // WaitEnforcingLimits). The sandbox denies every network
         // operation and every Mach service lookup (no name resolution
         // through mDNSResponder either), and is proven before exec.
         if (!SetHardLimit(RLIMIT_CPU, static_cast<rlim_t>(request.max_cpu_seconds)) ||
@@ -170,7 +182,8 @@ SwarmConfineResult SwarmRunConfined(const SwarmConfineRequest& request, std::str
     int status = 0;
     pid_t waited = -1;
 #if defined(__APPLE__)
-    waited = WaitEnforcingFootprint(pid, status, static_cast<uint64_t>(request.max_address_bytes));
+    waited = WaitEnforcingLimits(pid, status, static_cast<uint64_t>(request.max_address_bytes),
+                                 static_cast<uint64_t>(request.max_cpu_seconds) * 1'000'000'000 + CPU_GRACE_NS);
 #else
     do {
         waited = waitpid(pid, &status, 0);

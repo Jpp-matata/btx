@@ -6,11 +6,13 @@
 // confinement root and run it through SwarmRunConfined or
 // SwarmRunFilesystemJail with no arguments. It records what it can do in
 // <its directory>/probe.out. A marker file in its directory selects a mode:
-// alloc.mode touches memory until stopped, spin.mode burns CPU until stopped.
+// alloc.mode touches memory until stopped, spin.mode burns CPU until stopped,
+// spinignore.mode does the same with SIGXCPU ignored.
 
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <netinet/in.h>
+#include <signal.h>
 #include <sys/resource.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -78,7 +80,11 @@ int main(int argc, char** argv)
         sleep(5);
         return 4;
     }
-    if (Opens(dir + "/spin.mode", O_RDONLY)) {
+    const bool ignore_xcpu = Opens(dir + "/spinignore.mode", O_RDONLY);
+    if (ignore_xcpu) {
+        signal(SIGXCPU, SIG_IGN);
+    }
+    if (ignore_xcpu || Opens(dir + "/spin.mode", O_RDONLY)) {
         volatile unsigned long long n = 0;
         const time_t until = time(nullptr) + 20;
         while (time(nullptr) < until) {

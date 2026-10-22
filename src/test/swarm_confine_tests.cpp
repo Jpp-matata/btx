@@ -222,6 +222,22 @@ BOOST_AUTO_TEST_CASE(macos_cpu_limit_enforced)
     BOOST_CHECK(WIFSIGNALED(result.child_status));
     BOOST_CHECK(WTERMSIG(result.child_status) == SIGXCPU || WTERMSIG(result.child_status) == SIGKILL);
 }
+
+// The kernel only sends SIGXCPU at RLIMIT_CPU. A helper that ignores it is
+// killed by the parent shortly after the limit, not after its own 20 s.
+BOOST_AUTO_TEST_CASE(macos_cpu_limit_enforced_when_sigxcpu_ignored)
+{
+    const fs::path root = fs::temp_directory_path() / "btx-swarm-confine-macos-spinignore";
+    const fs::path helper = CopyProbe(root, "spinignore.mode");
+    modelnet::SwarmConfineRequest request = BaseRequest(helper, root);
+    request.max_cpu_seconds = 1;
+    std::string err;
+    const modelnet::SwarmConfineResult result = modelnet::SwarmRunConfined(request, err);
+    fs::remove_all(root);
+    BOOST_CHECK_EQUAL(result.code, "CONFINED");
+    BOOST_CHECK(WIFSIGNALED(result.child_status));
+    BOOST_CHECK_EQUAL(WTERMSIG(result.child_status), SIGKILL);
+}
 #endif
 
 BOOST_AUTO_TEST_SUITE_END()
