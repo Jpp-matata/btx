@@ -615,6 +615,7 @@ BTX_BASE_SCRIPTS = [
     'wallet_sendall_pq.py',
     'wallet_p2mr_locked_key_lookup.py --descriptors',
     'wallet_sweeptoself.py',
+    'wallet_pq_cache_mismatch_load.py --descriptors',
     'feature_btx_matmul_consensus.py',
     'feature_shieldedv2dev_datadir_isolation.py',
     'feature_autoupdate_installer.py',
