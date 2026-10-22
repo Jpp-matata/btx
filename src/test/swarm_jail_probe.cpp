@@ -5,7 +5,8 @@
 // Helper for the macOS swarm confinement tests. The tests copy it into a
 // confinement root and run it through SwarmRunConfined or
 // SwarmRunFilesystemJail with no arguments. It records what it can do in
-// <its directory>/probe.out. A marker file in its directory selects a mode:
+// <its directory>/probe.out, after creating <its directory>/started in every
+// mode. A marker file in its directory selects a mode:
 // alloc.mode touches memory until stopped, spin.mode burns CPU until stopped,
 // spinignore.mode does the same with SIGXCPU ignored, tty.mode tries
 // TIOCSTI on stdin.
@@ -86,6 +87,11 @@ int main(int argc, char** argv)
     const std::string dir = self.substr(0, self.rfind('/'));
     if (dir.empty()) {
         return 2;
+    }
+    // Written first in every mode, so a test can tell a helper that ran
+    // from one that was killed or refused before exec.
+    if (FILE* started = std::fopen((dir + "/started").c_str(), "w")) {
+        std::fclose(started);
     }
     int inherited = 0;
     for (int fd = STDERR_FILENO + 1; fd < 1024; ++fd) {

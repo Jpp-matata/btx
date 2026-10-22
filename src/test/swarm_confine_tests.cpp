@@ -237,7 +237,11 @@ BOOST_AUTO_TEST_CASE(macos_address_limit_enforced)
     request.max_address_bytes = 256LL << 20;
     std::string err;
     const modelnet::SwarmConfineResult result = modelnet::SwarmRunConfined(request, err);
+    const bool started = fs::exists(root / "started");
     fs::remove_all(root);
+    // The helper ran before the signal: a kill before exec would also
+    // report CONFINED with SIGKILL.
+    BOOST_CHECK(started);
     BOOST_CHECK_EQUAL(result.code, "CONFINED");
     BOOST_CHECK(WIFSIGNALED(result.child_status));
     BOOST_CHECK_EQUAL(WTERMSIG(result.child_status), SIGKILL);
@@ -253,7 +257,11 @@ BOOST_AUTO_TEST_CASE(macos_cpu_limit_enforced)
     request.max_cpu_seconds = 1;
     std::string err;
     const modelnet::SwarmConfineResult result = modelnet::SwarmRunConfined(request, err);
+    const bool started = fs::exists(root / "started");
     fs::remove_all(root);
+    // The helper ran before the signal: a kill before exec would also
+    // report CONFINED with SIGKILL.
+    BOOST_CHECK(started);
     BOOST_CHECK_EQUAL(result.code, "CONFINED");
     BOOST_CHECK(WIFSIGNALED(result.child_status));
     BOOST_CHECK(WTERMSIG(result.child_status) == SIGXCPU || WTERMSIG(result.child_status) == SIGKILL);
@@ -269,7 +277,11 @@ BOOST_AUTO_TEST_CASE(macos_cpu_limit_enforced_when_sigxcpu_ignored)
     request.max_cpu_seconds = 1;
     std::string err;
     const modelnet::SwarmConfineResult result = modelnet::SwarmRunConfined(request, err);
+    const bool started = fs::exists(root / "started");
     fs::remove_all(root);
+    // The helper ran before the signal: a kill before exec would also
+    // report CONFINED with SIGKILL.
+    BOOST_CHECK(started);
     BOOST_CHECK_EQUAL(result.code, "CONFINED");
     BOOST_CHECK(WIFSIGNALED(result.child_status));
     BOOST_CHECK_EQUAL(WTERMSIG(result.child_status), SIGKILL);
