@@ -44,7 +44,12 @@ std::string SwarmSandboxConfineProfile()
 std::string SwarmSandboxJailProfile(const fs::path& root)
 {
     const std::string r = SwarmSandboxQuote(root);
+    // (deny process-fork): a jailed helper could otherwise start processes
+    // up to the user's RLIMIT_NPROC (its default, not 1); they stay in the
+    // sandbox, so this bounds resource use, not access. The
+    // jail sets no rlimits, so this is the only process-count bound it has.
     return SwarmSandboxNetworkDeniedProfile() +
+           "(deny process-fork)\n"
            "(deny iokit-open iokit-get-properties)\n"
            "(deny process-info* (require-not (target self)))\n"
            "(deny signal (require-not (target self)))\n"
