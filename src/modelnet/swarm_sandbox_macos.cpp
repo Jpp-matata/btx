@@ -58,8 +58,11 @@ std::string SwarmSandboxJailProfile(const fs::path& root)
     // up to the user's RLIMIT_NPROC (its default, not 1); they stay in the
     // sandbox, so this bounds resource use, not access. The
     // jail sets no rlimits, so this is the only process-count bound it has.
+    // (deny ipc-posix*): POSIX shared memory and semaphore names live
+    // outside root and outlive the helper; a Linux jail has no /dev/shm.
     return SwarmSandboxNetworkDeniedProfile() +
            "(deny process-fork)\n"
+           "(deny ipc-posix*)\n"
            "(deny iokit-open iokit-get-properties)\n"
            "(deny process-info* (require-not (target self)))\n"
            "(deny signal (require-not (target self)))\n"

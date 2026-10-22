@@ -17,6 +17,7 @@
 #include <netinet/in.h>
 #include <signal.h>
 #include <sys/ioctl.h>
+#include <sys/mman.h>
 #include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
@@ -148,6 +149,13 @@ int main(int argc, char** argv)
     std::fprintf(out, "inherited_fds=%d\n", inherited);
     std::fprintf(out, "hardware_uuid=%d\n", HardwareUuidReadable() ? 1 : 0);
     std::fprintf(out, "tiocsti_errno=%d\n", tiocsti_errno);
+    const std::string shm_name = "/btx-swarm-probe-" + std::to_string(getpid());
+    const int shm = shm_open(shm_name.c_str(), O_CREAT | O_EXCL | O_RDWR, 0600);
+    if (shm >= 0) {
+        close(shm);
+        shm_unlink(shm_name.c_str());
+    }
+    std::fprintf(out, "posix_shm=%d\n", shm >= 0 ? 1 : 0);
     char* cwd = getcwd(nullptr, 0);
     std::fprintf(out, "cwd_root=%d\n", cwd != nullptr && dir == cwd ? 1 : 0);
     std::free(cwd);
