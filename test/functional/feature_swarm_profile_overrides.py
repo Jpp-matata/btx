@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 # Copyright (c) 2026 The BTX developers. Distributed under the MIT license.
 """CLI profile overrides persist and change real helper policy, without money authority."""
+import hashlib
 import json
+import os
 from pathlib import Path
 import socket
 import subprocess
@@ -21,7 +23,17 @@ class SwarmProfileOverridesTest(BitcoinTestFramework):
         self.modeldir = Path(self.options.tmpdir) / "models"
         self.extra_args = [[f"-modeldir={self.modeldir}", "-modelbind=off"]]
         super().setup_nodes()
-        self.socket_path = self.nodes[0].datadir_path / self.chain / "modelnet" / "modeld.sock"
+        requested = self.nodes[0].datadir_path / self.chain / "modelnet" / "modeld.sock"
+        encoded = os.fsencode(requested)
+        # Matches UnixRpcListenPath: a sun_path that does not fit is hashed
+        # into the private runtime directory. An explicit -modelrpcsocket would
+        # stop btxd from owning the helper.
+        if len(encoded) >= 108:
+            runtime = os.environ.get("XDG_RUNTIME_DIR")
+            digest = hashlib.sha256(encoded).digest()[:8].hex()
+            self.socket_path = Path(runtime) / "btx-modeld" / f"{digest}.sock"
+        else:
+            self.socket_path = requested
 
     def setup_network(self):
         self.setup_nodes()
