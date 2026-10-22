@@ -476,7 +476,7 @@ bool LightWatch::Save(const std::string& path, std::string& error) const
         error = "BTX_LIGHTWATCH_IO";
         return false;
     }
-    out << "btx-lightwatch 1\n";
+    out << "btx-lightwatch 2\n";
     out << "start " << m_start << "\n";
     out << "cursor " << m_cursor << "\n";
     out << "filter_ready " << (m_filter_ready ? 1 : 0) << "\n";
@@ -497,6 +497,10 @@ bool LightWatch::Save(const std::string& path, std::string& error) const
     for (const LightWatchFetch& fetch : m_fetched) {
         out << "fetch " << fetch.height << " " << fetch.block_hash.GetHex() << "\n";
     }
+    // A file cut at the end of a line still parses. The trailer counts the
+    // records, so a lost spend or credit is refused instead of read as ready.
+    out << "end " << m_descriptors.size() << " " << m_hashes.size() << " " << m_events.size() << " "
+        << m_fetched.size() << "\n";
     out.close();
     if (!out) {
         std::error_code ec;
@@ -579,7 +583,7 @@ bool LightWatch::ReadSnapshot(std::istream& in, std::string& error)
     };
     std::string magic;
     int version{0};
-    if (!(in >> magic >> version) || magic != "btx-lightwatch" || version != 1) return reject();
+    if (!(in >> magic >> version) || magic != "btx-lightwatch" || (version != 1 && version != 2)) return reject();
     *this = LightWatch{};
 
     for (int index = 0; index < static_cast<int>(kMandatory.size()); ++index) {
@@ -632,9 +636,10 @@ bool LightWatch::ReadSnapshot(std::istream& in, std::string& error)
     Phase phase = Phase::DESC;
     int last_hash = -1;
     bool saw_hash = false;
+    bool saw_end = false;
     std::string tag;
     while (in >> tag) {
-        if (MandatoryTag(tag)) return reject();
+        if (saw_end || MandatoryTag(tag)) return reject();
         if (tag == "desc") {
             if (phase != Phase::DESC) return reject();
             std::string descriptor;
@@ -685,11 +690,24 @@ bool LightWatch::ReadSnapshot(std::istream& in, std::string& error)
             if (!m_fetched.empty() && fetch.height < m_fetched.back().height) return reject();
             fetch.block_hash = *parsed;
             m_fetched.push_back(fetch);
+        } else if (tag == "end" && version == 2) {
+            std::size_t descriptors{0};
+            std::size_t hashes{0};
+            std::size_t events{0};
+            std::size_t fetched{0};
+            if (!(in >> descriptors >> hashes >> events >> fetched)) return reject();
+            if (descriptors != m_descriptors.size() || hashes != m_hashes.size() || events != m_events.size() ||
+                fetched != m_fetched.size()) {
+                return reject();
+            }
+            saw_end = true;
         } else {
             return reject();
         }
     }
     if (in.bad() || !in.eof()) return reject();
+    // Version 1 had no trailer. It is still read, and the next Save writes version 2.
+    if (version == 2 && !saw_end) return reject();
     return AcceptSnapshot(error);
 }
 

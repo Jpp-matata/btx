@@ -25,6 +25,7 @@
 
 #include <cstdio>
 #include <fstream>
+#include <iterator>
 #include <map>
 #include <stdexcept>
 #include <string>
@@ -378,6 +379,72 @@ BOOST_AUTO_TEST_CASE(lightwatch_truncated_event_is_not_ready_and_reorg_waits_for
     BOOST_REQUIRE_MESSAGE(bound.Sync(rpc, error), error);
     BOOST_CHECK(bound.IsCurrentAt(1, 1, rpc));
     BOOST_CHECK_EQUAL(bound.BalanceAt(1).immature, 3 * COIN);
+}
+
+BOOST_AUTO_TEST_CASE(lightwatch_file_cut_at_a_line_end_is_refused)
+{
+    const CScript script = GetScriptForDestination(PKHash(GenerateRandomKey().GetPubKey()));
+    const CScript sink = GetScriptForDestination(PKHash(GenerateRandomKey().GetPubKey()));
+    const MadeBlock decoy = MakeBlock(uint256{}, uint256{}, {CTxOut(COIN, sink)}, {}, {Element(script)});
+    const MadeBlock paid = MakeBlock(decoy.hash, decoy.header, {CTxOut(7 * COIN, script)}, {}, {Element(script)});
+    const MadeBlock spent = MakeBlock(paid.hash, paid.header, {CTxOut(6 * COIN, sink)},
+                                      {CTxIn(Txid::FromUint256(paid.txid), 0)}, {Element(script)});
+
+    LightWatch watch;
+    std::string error;
+    BOOST_REQUIRE(watch.AddDescriptor("raw(" + HexStr(script) + ")", error));
+    BOOST_REQUIRE(watch.ApplyFilter(0, decoy.hash, decoy.prev, decoy.encoded, decoy.header, &decoy.block, error) == LightWatch::Step::APPLIED);
+    BOOST_REQUIRE(watch.ApplyFilter(1, paid.hash, paid.prev, paid.encoded, paid.header, &paid.block, error) == LightWatch::Step::APPLIED);
+    BOOST_REQUIRE(watch.ApplyFilter(2, spent.hash, spent.prev, spent.encoded, spent.header, &spent.block, error) == LightWatch::Step::APPLIED);
+    BOOST_REQUIRE_EQUAL(watch.BalanceAt(1).amount, 7 * COIN);
+    BOOST_REQUIRE_EQUAL(watch.BalanceAt(2).amount, 0);
+
+    const std::string path = PathToString(m_path_root / "lightwatch-lines.txt");
+    BOOST_REQUIRE(watch.Save(path, error));
+    const auto read = [&]() {
+        std::ifstream input(path, std::ios::binary);
+        return std::string(std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>());
+    };
+    const auto write = [&](const std::string& text) {
+        std::ofstream output(path, std::ios::binary | std::ios::trunc);
+        output << text;
+    };
+    const std::string text = read();
+    BOOST_REQUIRE(!text.empty() && text.back() == '\n');
+
+    // Every record before a line end is well formed, so a cut there used to
+    // load: without the spend line the spent coin was a ready 7, and without
+    // the credit line the coin was a ready 0.
+    int cuts{0};
+    for (std::size_t end = text.find('\n'); end != std::string::npos && end + 1 < text.size(); end = text.find('\n', end + 1)) {
+        for (const std::size_t cut : {end, end + 1}) {
+            write(text.substr(0, cut));
+            LightWatch torn;
+            BOOST_CHECK_MESSAGE(!torn.Load(path, error), "file cut at byte " << cut << " was loaded");
+            BOOST_CHECK(!torn.BalanceAt(2).ready);
+            ++cuts;
+        }
+    }
+    BOOST_CHECK_GT(cuts, 10);
+
+    // The trailer counts records, so a line missing from the middle is refused too.
+    const std::size_t spend_line = text.find("\nevent 2 ");
+    BOOST_REQUIRE(spend_line != std::string::npos);
+    write(text.substr(0, spend_line) + text.substr(text.find('\n', spend_line + 1)));
+    LightWatch missing;
+    BOOST_CHECK(!missing.Load(path, error));
+
+    // A version 1 file has no trailer. It is still read, and saving it writes version 2.
+    std::string v1 = text.substr(0, text.rfind("end "));
+    BOOST_REQUIRE_EQUAL(v1.rfind("btx-lightwatch 2\n", 0), 0U);
+    v1.replace(0, std::string("btx-lightwatch 2").size(), "btx-lightwatch 1");
+    write(v1);
+    LightWatch old;
+    BOOST_REQUIRE(old.Load(path, error));
+    BOOST_CHECK_EQUAL(old.BalanceAt(1).amount, 7 * COIN);
+    BOOST_CHECK_EQUAL(old.BalanceAt(2).amount, 0);
+    BOOST_REQUIRE(old.Save(path, error));
+    BOOST_CHECK(read() == text);
 }
 
 BOOST_AUTO_TEST_SUITE_END()
