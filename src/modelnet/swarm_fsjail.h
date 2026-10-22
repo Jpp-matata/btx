@@ -34,7 +34,8 @@ namespace modelnet {
  * processes. The child execs only after a directory outside root that
  * opened before the sandbox no longer opens and a loopback bind is refused;
  * otherwise it exits 126. The helper runs by its path below the canonical
- * root. Other platforms exit 126: no jail, no exec.
+ * root, with root as its working directory (as "/" is on Linux). Other
+ * platforms exit 126: no jail, no exec.
  */
 struct SwarmFilesystemJailRequest {
     fs::path helper;

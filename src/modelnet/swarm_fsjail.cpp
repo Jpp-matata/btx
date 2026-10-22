@@ -295,6 +295,11 @@ SwarmFilesystemJailResult SwarmRunFilesystemJail(const SwarmFilesystemJailReques
             DirectoryOpenable(witness.c_str()) || !SwarmSandboxNetworkProvenDenied()) {
             _exit(126);
         }
+        // On Linux the helper starts in the jail's "/". Start it in root
+        // here too, so that a relative path resolves inside root.
+        if (chdir(root.c_str()) != 0) {
+            _exit(126);
+        }
 #else
         // No filesystem jail on this platform: never exec unjailed.
         _exit(126);

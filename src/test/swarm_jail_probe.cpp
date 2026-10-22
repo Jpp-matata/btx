@@ -148,5 +148,8 @@ int main(int argc, char** argv)
     std::fprintf(out, "inherited_fds=%d\n", inherited);
     std::fprintf(out, "hardware_uuid=%d\n", HardwareUuidReadable() ? 1 : 0);
     std::fprintf(out, "tiocsti_errno=%d\n", tiocsti_errno);
+    char* cwd = getcwd(nullptr, 0);
+    std::fprintf(out, "cwd_root=%d\n", cwd != nullptr && dir == cwd ? 1 : 0);
+    std::free(cwd);
     return std::fclose(out) == 0 ? 0 : 7;
 }
