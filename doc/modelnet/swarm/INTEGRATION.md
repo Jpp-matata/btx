@@ -1,5 +1,7 @@
 # Swarm integration in this tree
 
+This tree is **0.35.0rc1**. The process map, the public contract, and the in-process records are in [00_THIS_TREE.md](00_THIS_TREE.md).
+
 The swarm is integrated as a thread inside `btxd`.
 
 `src/init.cpp` calls `modelnet::StartSwarmObserver` after the model helper when `-modelnet` defaults on. `-modelnet=0` skips that call and logs that the model network is disabled. The monetary node still starts. The observer runs on a `std::thread` owned by the `btxd` process. Shutdown calls `StopSwarmObserver` and joins that thread. If a step throws or returns an error, the thread logs the error with the monetary node continuing. A swarm failure does not stop consensus.

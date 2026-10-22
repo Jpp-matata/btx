@@ -3,7 +3,7 @@
 
 Verbs: init, doctor, host, preview, search, get, pull, show, ls, files, path,
 open, share, transfers, check, pins, alias, rm-alias, unhost, link, bounty-draft
-(title, JSON, or @FILE), watch-scan, plus 0.34.9-dev cloud/follow/events/mirror/
+(title, JSON, or @FILE), watch-scan, plus cloud/follow/events/mirror/
 profile (fail closed if the helper lacks the method).
 
 Human door: stderr one_liners / next hints. Agent door: stdout JSON; --json
@@ -76,7 +76,7 @@ DEFAULT_SOCKET = os.path.join(".", "e2e-scratch", "modeld.sock")
 # Agent door. Default is human (stderr hints) + JSON stdout. --json is stdout only.
 JSON_MODE = False
 CLI_SCHEMA_VERSION = 2
-DEV349_NOTE = "0.34.9-dev; fails closed if helper lacks method"
+DEV349_NOTE = "0.35.0rc1; fails closed if helper lacks method"
 
 # First-run URI examples. btx:// is a model resource; BIP21 payment is btx:<P2MR>.
 # bitcoin: is not a BTX payment URI. Placeholders only — this CLI never spends.
@@ -209,7 +209,7 @@ verbs:
   watch-scan [DIR]               scanmodelwatch
                                  (filesystem drop folder; NOT a publisher watch)
 
-  0.34.9-dev (not shipped; fail closed if the helper has no method):
+  0.35.0rc1 (fail closed if the helper has no method):
   cloud add|test|status          setcloudstorage / testcloudstorage /
                                  getcloudstorageinfo. add takes endpoint/bucket/
                                  prefix/region/layout/provider/credential-ref.
@@ -1939,7 +1939,7 @@ def _emit_dev(
         "schema_version": CLI_SCHEMA_VERSION,
         "kind": kind,
         "client": "btx-model",
-        "client_version": "0.34.9-dev",
+        "client_version": "0.35.0rc1",
         "released": False,
         "ok": True,
         "available": True,

@@ -20,8 +20,7 @@ synthetic MODEL token (not a hosted model):
 btx://pqwy06q0q7wwzy70aeq45sxnlvq3mr067yt4jzphzvnfn2c4zc24zxz665zdprf0nwgskvqq9cq365u9n8l25
 ```
 
-Last shipping tag is **v0.34.8**. This tree is **0.34.9-dev**
-(`CLIENT_VERSION_IS_RELEASE=false`).
+This tree is **0.35.0rc1**. The last shipping tag remains **v0.34.15**.
 
 ## Swarm inside btxd
 

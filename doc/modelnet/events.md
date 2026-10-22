@@ -1,7 +1,7 @@
 # Model events (0.34.8 surface)
 
-**Status:** last shipping tag **v0.34.8**. This tree is **0.34.9-dev**
-(`CLIENT_VERSION_IS_RELEASE=false`). `getmodelevents` /
+**Status:** this tree is **0.35.0rc1**. The last shipping tag remains
+**v0.34.15**. `getmodelevents` /
 `getmodeleventsequence` / `waitformodelevent` exist in this helper (unit-
 tested). The CLI wrapper **fails closed** if an older helper lacks the
 method. An unknown helper RPC returns `METHOD_NOT_FOUND` immediately (no

@@ -1,9 +1,11 @@
-# BTX Native Model Network (0.34.9)
+# BTX Native Model Network
 
-**Status:** **0.34.9** (`CLIENT_VERSION_IS_RELEASE=true`). Shipping tag
-**v0.34.9**. The Native Model Network shipped in 0.34.7; this index covers
-that plane plus 0.34.8 first-run / HCP and 0.34.9 host / load / generate /
-registry independence.
+**Status:** this tree is **0.35.0rc1**. `btxd -version` prints `v0.35.0rc1`.
+It is not the shipping tag `v0.35.0`. The last shipping tag remains
+**v0.34.15**. The Native Model Network shipped in 0.34.7; the pages below
+still describe that plane, including 0.34.8 first-run / HCP and 0.34.9
+host / load / generate / registry independence. The 0.35 process map is
+[swarm/00_THIS_TREE.md](swarm/00_THIS_TREE.md).
 
 **Readers:** people start at [HUMANS.md](../../HUMANS.md). Autonomous agents
 start at [AGENTS.md](../../AGENTS.md). The strategic essay is
@@ -151,8 +153,7 @@ AdamW step (sequence 4, hidden 8), loopback two-rank exchange with
 `TickBind` then runs the in-process checks once. `passed()`, `gpu_passed()`,
 and `windows_passed()` stay false. Spend is `"0"`. Release is `UNQUALIFIED`.
 
-**0.34.9-dev Hosted Control Plane** (`IS_RELEASE=false`; code is in this
-tree): `btx-hcpd` is a loopback
+**Hosted Control Plane** in this **0.35.0rc1** tree: `btx-hcpd` is a loopback
 gateway with **34 typed REST operations** and **no** `/rpc` passthrough.
 `btx-hosted` is the walletless discovery preset (`automatic_spend_atoms=0`).
 OAuth is never in `btxd`. There is no public HTTP capability API on `btxd` or

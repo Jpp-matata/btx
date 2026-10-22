@@ -105,21 +105,21 @@ path. Machine sequences belong in [AGENTS.md](AGENTS.md).
 
 ### 1. Run the current line
 
-The shipping tag is **v0.34.15**. `CLIENT_VERSION_IS_RELEASE=true`. For a
-validating node that becomes useful without waiting for a full historical
-sync, the fast-start snapshot is **assumeutxo-219000**.
+This tree is **0.35.0rc1**. `btxd -version` prints `v0.35.0rc1`. It is not
+the shipping tag `v0.35.0`. The last shipping tag remains **v0.34.15**.
+For a validating node that becomes useful without waiting for a full
+historical sync, the fast-start snapshot is **assumeutxo-219000**.
 
 Install and first-run: [doc/btx-download-and-go.md](doc/btx-download-and-go.md).
-Notes: [doc/release-notes/release-notes-0.34.15.md](doc/release-notes/release-notes-0.34.15.md).
+This candidate: [doc/release-notes/release-notes-0.35.0.md](doc/release-notes/release-notes-0.35.0.md)
+and [doc/modelnet/swarm/00_THIS_TREE.md](doc/modelnet/swarm/00_THIS_TREE.md).
+The previous shipping line: [doc/release-notes/release-notes-0.34.15.md](doc/release-notes/release-notes-0.34.15.md).
 
 End-to-end host / search / retrieve / run / bounty:
 [doc/modelnet/end-to-end.md](doc/modelnet/end-to-end.md).
 Using and proving the model network: [doc/modelnet/howto.md](doc/modelnet/howto.md).
 Local generate after acquire: [doc/modelnet/generate.md](doc/modelnet/generate.md).
 
-This working tree is **0.34.12rc1**. GitHub tag **v0.34.10** is the last
-shipping client. See
-[doc/release-notes/release-notes-0.34.11.md](doc/release-notes/release-notes-0.34.11.md).
 Host, seed, search, share, watch folder,
 `showmodel` / `unhostmodel` / `exportmodellink`, **load** / **generate**,
 mining `first_run` doctor tiles, bounty `checklist` / `--validate`, and doctor:

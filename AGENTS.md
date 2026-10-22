@@ -2,8 +2,11 @@
 
 Humans: read [HUMANS.md](HUMANS.md), then ignore this file. Product overview:
 [README.md](README.md). This is the operations manual for coding agents,
-research agents, and automation in BTX **0.34.15** (`CLIENT_VERSION_BUILD=15`,
-`CLIENT_VERSION_RC=0`, `IS_RELEASE=true`). Shipping tag **v0.34.15**.
+research agents, and automation in BTX **0.35.0rc1** (`CLIENT_VERSION_MINOR=35`,
+`CLIENT_VERSION_BUILD=0`, `CLIENT_VERSION_RC=1`, `IS_RELEASE=true`).
+`btxd -version` prints `v0.35.0rc1`. This is not the shipping tag `v0.35.0`.
+The last shipping tag remains **v0.34.15**. Structure:
+[doc/modelnet/swarm/00_THIS_TREE.md](doc/modelnet/swarm/00_THIS_TREE.md).
 
 Default posture is **read-only**. Do not compile, commit, push, spend, evaluate,
 or mutate unless the operator asked or a finite `AgentMandate` covers the action.
@@ -19,6 +22,11 @@ or mutate unless the operator asked or a finite `AgentMandate` covers the action
 Search ranking, feed position, bounty popularity, pledges, provider counts, and
 campaign UI labels **must not** enter consensus, fork choice, difficulty,
 issuance, miner preference, BanMan, AddrMan, or monetary peer scoring.
+
+The swarm control plane is a thread inside `btxd`
+(`modelnet::StartSwarmObserver`), not a fourth process. `btxd` does not exec
+`btx-swarmd` or `btx-paynetd`. `contrib/swarm` is a reference package, not
+that control plane.
 
 - `btx-modeld` never holds wallet secrets. Helper down → proxied RPCs **fail closed**; monetary `btxd` stays up.
 - Model ACL / `addmodelnode` / index peers are not BanMan and not AddrMan.
@@ -146,7 +154,7 @@ scanmodelwatch                   # filesystem -modelwatch=<dir>; not a publisher
 searchmodels | getmodel (FREE_ONLY) | exportmodelpath
 loadmodel | unloadmodel | generatemodel | getmodelhostprofile
 createbountydraft | listbountydrafts | getbountydraft | updatebountydraft | deletebountydraft | validatebountyterms
-# 0.34.8-dev (RPCs exist; this tree IS_RELEASE=false; fail closed if an older helper lacks method):
+# Helper RPCs (this tree is 0.35.0rc1; fail closed if an older helper lacks the method):
 getcloudstorageinfo | testcloudstorage | setcloudstorage
 # catalog aliases (result.alias_of names the private method):
 addmodelstorage | listmodelstorage | getmodelcapabilities
@@ -253,8 +261,10 @@ do not advertise them in `getbountycapabilities` until execution is real.
 
 ## Release and session constraints
 
-This tree is **0.34.15** (`CLIENT_VERSION_IS_RELEASE=true`). Shipping tag
-**v0.34.15**. Do not recut `v0.34.14`, `v0.34.13`, or `v0.34.12`.
+This tree is **0.35.0rc1** (`CLIENT_VERSION_IS_RELEASE=true`,
+`CLIENT_VERSION_RC=1`). It is not the shipping tag `v0.35.0`. The last
+shipping tag remains **v0.34.15**. Do not recut `v0.34.15`, `v0.34.14`,
+`v0.34.13`, or `v0.34.12`.
 
 - No unapproved git push, merge, or `CLIENT_VERSION` bump.
 - Do not compile (`cmake`, `ninja`, `cmake --build`) unless the operator asked.

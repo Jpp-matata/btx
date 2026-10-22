@@ -12,12 +12,15 @@ genesis, and implements **Dandelion++ transaction relay** (BIP 156) for
 network-layer anonymity.
 
 **0.34.7** connected that money to **discovery**, **public-model retrieval**,
-**release campaigns**, **creation bounties**, and **preservation**. This
-tree is **0.34.9** on that isolated model plane: origin-independent
-fetch, `.btx` / `btx://` retrieve, checkout, optional GPU **load**, and
-**local generate** when the replica matches this host. A BTX node already
-has compute; the Native Model Network delivers models to it. Inference is
-**local after acquire**. BTX is not a remote inference marketplace.
+**release campaigns**, **creation bounties**, and **preservation**. Later
+0.34 lines added origin-independent fetch, `.btx` / `btx://` retrieve,
+checkout, optional GPU **load**, and **local generate** when the replica
+matches this host. This branch is **0.35.0rc1**. The map of processes,
+documents, and in-process records is
+[doc/modelnet/swarm/00_THIS_TREE.md](doc/modelnet/swarm/00_THIS_TREE.md).
+A BTX node already has compute; the Native Model Network delivers models
+to it. Inference is **local after acquire**. BTX is not a remote inference
+marketplace.
 
 When ModelNet is compiled, `-modelnet` defaults on. `btxd` supervises the
 model helper, then calls `modelnet::StartSwarmObserver` in `src/init.cpp`.
@@ -66,14 +69,15 @@ shielded state. Do not read this tree as shipping a live shielded pool.
 This repository contains the full node implementation, wallet, mining
 infrastructure, Native Model Network helper, and test suites.
 
-This working tree is **0.34.15** (`CLIENT_VERSION_BUILD=15`,
-`CLIENT_VERSION_RC=0`, `CLIENT_VERSION_IS_RELEASE=true`). Shipping tag
-**v0.34.15**. Do not recut `v0.34.14`, `v0.34.13`, `v0.34.12`, or `v0.34.10`.
+This working tree is **0.35.0rc1** (`CLIENT_VERSION_MINOR=35`,
+`CLIENT_VERSION_BUILD=0`, `CLIENT_VERSION_RC=1`,
+`CLIENT_VERSION_IS_RELEASE=true`). `btxd -version` prints `v0.35.0rc1`.
+P2P subversion is `/BTX:0.35.0rc1/`. This is not the shipping tag
+`v0.35.0`. The last shipping tag remains **v0.34.15**. Do not recut
+`v0.34.15`, `v0.34.14`, `v0.34.13`, `v0.34.12`, or `v0.34.10`.
 
-This branch also contains the current 0.35 lab tip, including the wallet
-balance-watch RPCs `getbalancewatch` and `getbalanceatheight`, model and
-bounty funding updates, and the `htlc_sha256` presign path. The shipping
-version numbers above stay **0.34.15**.
+Notes: [doc/release-notes/release-notes-0.35.0.md](doc/release-notes/release-notes-0.35.0.md).
+Structure: [doc/modelnet/swarm/00_THIS_TREE.md](doc/modelnet/swarm/00_THIS_TREE.md).
 
 ## Current delivery bounds
 
@@ -129,7 +133,8 @@ fabric stay in the passport's capability vector. Details:
 - [Later releases](#later-releases)
 - [Start here](#start-here)
 - [Pay With Compute](#pay-with-compute)
-- [Current release — v0.34.15](#current-release--v03415)
+- [This tree — 0.35.0rc1](#this-tree--0350rc1)
+- [Previous shipping release — v0.34.15](#previous-shipping-release--v03415)
 - [Previous release — v0.34.14](#previous-release--v03414)
 - [Earlier release — v0.34.13](#earlier-release--v03413)
 - [Earlier shipping line — v0.34.9](#earlier-shipping-line--v0349)
@@ -164,10 +169,24 @@ fabric stay in the passport's capability vector. Details:
 
 ---
 
-## Current release — v0.34.15
+## This tree — 0.35.0rc1
 
-**Shipping tag is v0.34.15.** `CLIENT_VERSION_IS_RELEASE=true`.
-`btxd -version` prints `v0.34.15`. P2P subversion is `/BTX:0.34.15/`.
+**This branch reports v0.35.0rc1.** It is the 0.35 release candidate, not
+the shipping tag `v0.35.0`. `btxd` remains the monetary node. With Modelnet
+compiled, `-modelnet` defaults on and `btxd` starts the swarm observer
+thread. The model helper, the hosted gateway, the capability tools, and
+`btx-guardd` are separate programs. `btxd` does not start them as a swarm
+daemon, and it does not start `btx-swarmd` or `btx-paynetd`.
+
+The candidate is not release-qualified. Automatic spend stays 0. The
+process map, the public contract, and the in-process records are in
+[doc/modelnet/swarm/00_THIS_TREE.md](doc/modelnet/swarm/00_THIS_TREE.md).
+Notes: [doc/release-notes/release-notes-0.35.0.md](doc/release-notes/release-notes-0.35.0.md).
+
+## Previous shipping release — v0.34.15
+
+**Shipping tag was v0.34.15.** `CLIENT_VERSION_IS_RELEASE=true`.
+`btxd -version` printed `v0.34.15`. P2P subversion was `/BTX:0.34.15/`.
 Do not recut `v0.34.14` or `v0.34.13`.
 
 Miner work remains the only consensus. The 0.34.14 activation height
@@ -724,8 +743,7 @@ While Epoch A still uses ExactReplay as consensus authority, a validating
 node runs `-matmulvalidation=consensus` and needs no pin. CPU archives that
 cannot ExactReplay may opt into trusted-mirror with attestors they choose;
 that is community-fork topology, not a shipped signer set. The 0.34.1
-monetary handover still applies; this tree is **0.34.9** (shipping tag
-**v0.34.9**). Historical
+monetary handover still applies. This tree is **0.35.0rc1**. Historical
 notes live in
 [doc/btx-gpu-verified-network-transition.md](doc/btx-gpu-verified-network-transition.md).
 
@@ -741,7 +759,7 @@ feature, not a live surface. See [Shielded Pool](#shielded-pool).
 ## GPU-verified network (three-phase)
 
 That three-phase topology is **community-fork work**. The 0.34.1 monetary
-handover still applies; this tree is **0.34.9** (shipping tag **v0.34.9**).
+handover still applies. This tree is **0.35.0rc1**.
 
 Profile 1 ExactReplay is the Epoch-A consensus check. It needs a qualified
 GPU. The recommended mode is `-matmulvalidation=consensus`: **this node**

@@ -11,8 +11,8 @@ The `note` / `coverage_disclaimer` strings state **current network view; not a
 complete global directory**. Low `remote_count` is normal. Never interpret results
 as a global census.
 
-**Release posture:** last shipping tag is **v0.34.8**. This tree is
-**0.34.9-dev** (`CLIENT_VERSION_IS_RELEASE=false`). First-run walkthrough:
+**Release posture:** this tree is **0.35.0rc1**. The last shipping tag
+remains **v0.34.15**. First-run walkthrough:
 [first-run.md](first-run.md). Local generate: [generate.md](generate.md). CLI:
 [../../contrib/modelnet/btx-model](../../contrib/modelnet/btx-model).
 

@@ -2,7 +2,7 @@
 
 Document: **BTX-SWARM-SPEC-01**, revision **0.1.0**, 19 October 2026.
 
-**Implementation scope:** With ModelNet on, `btxd` runs the swarm as a thread in the monetary process. The thread records observers. It does not spend, and it does not admit a second host. This tree is not a qualified replacement for the 0.35 release candidate.
+**Implementation scope:** This tree is **0.35.0rc1**. With ModelNet on, `btxd` runs the swarm as a thread in the monetary process. The thread records observers. It does not spend, and it does not admit a second host. The candidate is not release-qualified. The process map is [00_THIS_TREE.md](00_THIS_TREE.md).
 
 ## Mission and boundaries
 

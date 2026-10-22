@@ -1,7 +1,13 @@
 # src/modelnet
 
-Implementation of the Native Model Network helper library (`bitcoin_modelnet`)
-and the `btx-modeld` / `btx-modelcheck` / `btx-open` binaries.
+Implementation of the Native Model Network library (`bitcoin_modelnet`).
+This tree is **0.35.0rc1**. The process map is
+[doc/modelnet/swarm/00_THIS_TREE.md](../../doc/modelnet/swarm/00_THIS_TREE.md).
+
+Programs built from this library include `btx-modeld`, `btx-modelcheck`,
+`btx-open`, `btx-capability`, `btx-capabilityd`, `btx-hcpd`, and
+`btx-hosted`. `btx-guardd` is built with the node. The swarm control plane
+is the observer thread inside `btxd`, not a separate binary.
 
 Operator and researcher documentation lives in [doc/modelnet/](../../doc/modelnet/README.md):
 
