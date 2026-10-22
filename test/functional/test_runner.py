@@ -13,6 +13,7 @@ For a description of arguments recognized by test scripts, see
 """
 
 import argparse
+import atexit
 from collections import deque
 import configparser
 import csv
@@ -859,6 +860,16 @@ def main():
         dynamic_port_min = 20_000 + ((os.getpid() * 97) % 25_000)
         os.environ["TEST_RUNNER_PORT_MIN"] = str(dynamic_port_min)
         logging.debug("Assigned TEST_RUNNER_PORT_MIN=%s", dynamic_port_min)
+
+    # btx-modeld moves its unix socket under XDG_RUNTIME_DIR when the path it
+    # is given does not fit in sun_path (108 bytes on Linux). The runner's
+    # directory names push a node's <datadir>/regtest/modelnet/modeld.sock
+    # past that, so give the tests a short private directory if there is none.
+    if not os.environ.get("XDG_RUNTIME_DIR"):
+        runtime_dir = tempfile.mkdtemp(prefix="btxrt")
+        os.environ["XDG_RUNTIME_DIR"] = runtime_dir
+        atexit.register(shutil.rmtree, runtime_dir, ignore_errors=True)
+        logging.debug("Set XDG_RUNTIME_DIR=%s", runtime_dir)
 
     logging.debug("Temporary test directory at %s" % tmpdir)
 
