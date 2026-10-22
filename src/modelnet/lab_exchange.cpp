@@ -77,6 +77,25 @@ void AppendPeerList(std::vector<std::string>& tokens, const std::string& list)
     }
 }
 
+/** Base64 of `user:password` for an HTTP Basic Authorization header. */
+std::string BasicCredential(const std::string& user, const std::string& password)
+{
+    const std::string raw = user + ":" + password;
+    static const char* kB64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string auth;
+    for (size_t i = 0; i < raw.size(); i += 3) {
+        const unsigned int a = static_cast<unsigned char>(raw[i]);
+        const unsigned int b = i + 1 < raw.size() ? static_cast<unsigned char>(raw[i + 1]) : 0;
+        const unsigned int c = i + 2 < raw.size() ? static_cast<unsigned char>(raw[i + 2]) : 0;
+        const unsigned int triple = (a << 16) | (b << 8) | c;
+        auth.push_back(kB64[(triple >> 18) & 63]);
+        auth.push_back(kB64[(triple >> 12) & 63]);
+        auth.push_back(i + 1 < raw.size() ? kB64[(triple >> 6) & 63] : '=');
+        auth.push_back(i + 2 < raw.size() ? kB64[triple & 63] : '=');
+    }
+    return auth;
+}
+
 // Loopback only. Does not dial DNS or any host other than 127.0.0.1.
 bool ParseLoopbackEndpoint(const std::string& endpoint, std::string& host, uint16_t& port, std::string& err)
 {
@@ -176,21 +195,8 @@ bool LabCallLoopback(const std::string& host, uint16_t port, const std::string& 
     const std::string body = rpc_body.write();
     std::ostringstream request;
     request << "POST / HTTP/1.1\r\nHost: 127.0.0.1:" << port
-            << "\r\nAuthorization: Basic ";
-    const std::string raw = rpc_user + ":" + rpc_password;
-    static const char* kB64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    std::string auth;
-    for (size_t i = 0; i < raw.size(); i += 3) {
-        const unsigned int a = static_cast<unsigned char>(raw[i]);
-        const unsigned int b = i + 1 < raw.size() ? static_cast<unsigned char>(raw[i + 1]) : 0;
-        const unsigned int c = i + 2 < raw.size() ? static_cast<unsigned char>(raw[i + 2]) : 0;
-        const unsigned int triple = (a << 16) | (b << 8) | c;
-        auth.push_back(kB64[(triple >> 18) & 63]);
-        auth.push_back(kB64[(triple >> 12) & 63]);
-        auth.push_back(i + 1 < raw.size() ? kB64[(triple >> 6) & 63] : '=');
-        auth.push_back(i + 2 < raw.size() ? kB64[triple & 63] : '=');
-    }
-    request << auth << "\r\nContent-Type: application/json\r\nContent-Length: " << body.size()
+            << "\r\nAuthorization: Basic " << BasicCredential(rpc_user, rpc_password)
+            << "\r\nContent-Type: application/json\r\nContent-Length: " << body.size()
             << "\r\nConnection: close\r\n\r\n"
             << body;
 
@@ -266,11 +272,10 @@ bool PeerRouteLoopback(const std::string& host, uint16_t port, const std::string
     }
     std::ostringstream request;
     request << "POST /btx-model/3/" << route << " HTTP/1.1\r\nHost: 127.0.0.1:" << port
+            << "\r\nAuthorization: Basic " << BasicCredential(rpc_user, rpc_password)
             << "\r\nContent-Type: application/json\r\nContent-Length: " << body_json.size()
             << "\r\nConnection: close\r\n\r\n"
             << body_json;
-    (void)rpc_user;
-    (void)rpc_password;
 #ifdef _WIN32
     WSADATA wsa;
     if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) return Fail(err, "BTX035_TRANSPORT");
