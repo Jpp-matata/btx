@@ -23,9 +23,16 @@ bool Blocked(const SwarmDevice& device)
     return device.battery || device.thermal_hot || device.metered;
 }
 
+// device.json, peers.json and mesh-state.json are a few hundred bytes to a few
+// kB. The observer reads them on every failing pass, so bound the read.
+constexpr uint64_t kSwarmFileLimit = 1024ull * 1024ull;
+
 bool ReadFile(const fs::path& path, std::string& raw)
 {
     if (!fs::exists(path)) return true;
+    std::error_code ec;
+    const auto size = fs::file_size(path, ec);
+    if (ec || size > kSwarmFileLimit) return false;
     std::ifstream in(path, std::ios::binary);
     if (!in) return false;
     raw.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
@@ -80,12 +87,10 @@ SwarmDevice StockDevice()
 bool ReadDeviceFile(const fs::path& path, SwarmDevice& device, std::string& err)
 {
     std::string raw;
-    std::ifstream in(path, std::ios::binary);
-    if (!in) {
+    if (!ReadFile(path, raw)) {
         err = "DEVICE_READ";
         return false;
     }
-    raw.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
     UniValue root;
     if (!root.read(raw) || !root.isObject()) {
         err = "DEVICE_JSON";

@@ -475,4 +475,26 @@ BOOST_AUTO_TEST_CASE(coding_lineage_survives_the_coordinator)
     (void)lineage;
 }
 
+BOOST_AUTO_TEST_CASE(oversized_swarm_inputs_are_not_read)
+{
+    const fs::path dir = m_args.GetDataDirBase() / "swarm_oversized";
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+    fs::create_directories(dir / "swarm");
+    const std::string pad(1024 * 1024, ' ');
+    std::string err;
+    WriteFile(dir / "swarm" / "device.json", "{\"idle_contribution\":false}" + pad);
+    BOOST_CHECK(!modelnet::SwarmRefreshLocalMesh(dir, err));
+    BOOST_CHECK_EQUAL(err, "DEVICE_READ");
+    WriteFile(dir / "swarm" / "device.json", "{\"idle_contribution\":false}");
+    WriteFile(dir / "swarm" / "peers.json", "{\"peers\":[]}" + pad);
+    BOOST_CHECK(!modelnet::SwarmRefreshLocalMesh(dir, err));
+    BOOST_CHECK_EQUAL(err, "PEERS_READ");
+    WriteFile(dir / "swarm" / "peers.json", "{\"peers\":[]}");
+    WriteFile(dir / "swarm" / "mesh-state.json", "{\"drained\":true}" + pad);
+    BOOST_REQUIRE(modelnet::SwarmRefreshLocalMesh(dir, err));
+    BOOST_CHECK_LT(fs::file_size(dir / "swarm" / "mesh-state.json"), 4096U);
+    fs::remove_all(dir, ec);
+}
+
 BOOST_AUTO_TEST_SUITE_END()
