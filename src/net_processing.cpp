@@ -12942,7 +12942,8 @@ void PeerManagerImpl::MaybeLogAttestationServe(const char* reason,
                                                int32_t height,
                                                NodeId peer)
 {
-    AssertLockNotHeld(cs_main);
+    // Takes no lock. The GETMMATTEST handler calls this inside LOCK(cs_main)
+    // for "no_such_block", so do not assert cs_main is free.
     LogDebug(BCLog::NET,
              "getmmattest peer=%d block=%s height=%d reason=%s\n",
              peer, hash.ToString(), height, reason);

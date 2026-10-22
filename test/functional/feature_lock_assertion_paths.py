@@ -2,15 +2,19 @@
 # Copyright (c) 2026 The BTX developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or https://opensource.org/license/mit/.
-"""Node paths that ran into their own lock assertions.
+"""Two node paths that ran into their own lock assertions.
 
 - invalidateblock delivers ActiveTipChange after InvalidateBlock has
   released cs_main.
+- GETMMATTEST for a block a serving node does not know is logged from
+  inside the handler's LOCK(cs_main) scope.
 
-A DEBUG_LOCKORDER build used to abort there. Every build must answer
+A DEBUG_LOCKORDER build used to abort on both. Every build must answer
 and keep running.
 """
 
+from test_framework.messages import msg_getmmattest
+from test_framework.p2p import P2PInterface
 from test_framework.test_framework import BitcoinTestFramework
 from test_framework.util import assert_equal
 from test_framework.wallet_util import generate_keypair
@@ -46,6 +50,14 @@ class LockAssertionPathsTest(BitcoinTestFramework):
         assert_equal(node.getblockcount(), 2)
         node.reconsiderblock(tip)
         assert_equal(node.getbestblockhash(), tip)
+
+        self.log.info("Ask the serving node for a block it does not know")
+        peer = node.add_p2p_connection(P2PInterface())
+        with node.assert_debug_log(["reason=no_such_block"]):
+            peer.send_message(msg_getmmattest(block_hash=0x1d2 << 200))
+            peer.sync_with_ping()
+        assert_equal(node.getblockcount(), 3)
+        assert peer.is_connected
 
         self.stop_node(0, expected_stderr=INLINE_SIGNER_WARNING)
 
