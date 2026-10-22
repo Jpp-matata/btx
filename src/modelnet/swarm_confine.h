@@ -23,9 +23,10 @@ namespace modelnet {
  * helper that is not lexically inside root, or a path containing "..",
  * is PATH.
  *
- * The child then sets RLIMIT_AS, RLIMIT_CPU, and RLIMIT_NOFILE, unshares
- * a user namespace and a network namespace, and execs the helper with no
- * extra arguments. Fork failure, or a child exit of 126, is
+ * The child then sets RLIMIT_AS, RLIMIT_CPU, and RLIMIT_NOFILE, reads
+ * each one back with getrlimit (a mismatch exits 126), unshares a user
+ * namespace and a network namespace, and execs the helper with no extra
+ * arguments. Fork failure, or a child exit of 126, is
  * CONFINEMENT_ABSENT. An executed child is CONFINED.
  *
  * macOS has no network namespace, and refuses RLIMIT_AS below the size a
