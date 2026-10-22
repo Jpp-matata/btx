@@ -45,7 +45,7 @@ std::string SwarmSandboxJailProfile(const fs::path& root)
 {
     const std::string r = SwarmSandboxQuote(root);
     return SwarmSandboxNetworkDeniedProfile() +
-           "(deny iokit-open)\n"
+           "(deny iokit-open iokit-get-properties)\n"
            "(deny process-info* (require-not (target self)))\n"
            "(deny signal (require-not (target self)))\n"
            "(deny process-exec (require-not (subpath " + r + ")))\n"

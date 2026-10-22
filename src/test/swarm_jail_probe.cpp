@@ -9,6 +9,8 @@
 // alloc.mode touches memory until stopped, spin.mode burns CPU until stopped,
 // spinignore.mode does the same with SIGXCPU ignored.
 
+#include <CoreFoundation/CoreFoundation.h>
+#include <IOKit/IOKitLib.h>
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <netinet/in.h>
@@ -49,6 +51,21 @@ bool LoopbackBind()
     const bool bound = bind(fd, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr)) == 0;
     close(fd);
     return bound;
+}
+
+bool HardwareUuidReadable()
+{
+    const io_service_t service = IOServiceGetMatchingService(MACH_PORT_NULL, IOServiceMatching("IOPlatformExpertDevice"));
+    if (service == 0) {
+        return false;
+    }
+    const CFTypeRef uuid = IORegistryEntryCreateCFProperty(service, CFSTR("IOPlatformUUID"), kCFAllocatorDefault, 0);
+    IOObjectRelease(service);
+    if (uuid == nullptr) {
+        return false;
+    }
+    CFRelease(uuid);
+    return true;
 }
 
 unsigned long long Limit(int resource)
@@ -118,5 +135,6 @@ int main(int argc, char** argv)
     }
     std::fprintf(out, "fork=%d\n", child > 0 ? 1 : 0);
     std::fprintf(out, "inherited_fds=%d\n", inherited);
+    std::fprintf(out, "hardware_uuid=%d\n", HardwareUuidReadable() ? 1 : 0);
     return std::fclose(out) == 0 ? 0 : 7;
 }

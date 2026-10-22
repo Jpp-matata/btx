@@ -37,7 +37,8 @@ std::string SwarmSandboxConfineProfile();
  * read-only system runtime a dynamically linked macOS binary needs (dyld
  * shared cache and system libraries), /dev/null, /dev/random,
  * /dev/urandom, /dev/dtracehelper and the directory "/" itself. IOKit
- * clients and other processes (info, signals) are denied. `root` must be
+ * clients, IORegistry properties (such as the hardware UUID and serial
+ * number) and other processes (info, signals) are denied. `root` must be
  * canonical: the kernel matches resolved paths.
  */
 std::string SwarmSandboxJailProfile(const fs::path& root);

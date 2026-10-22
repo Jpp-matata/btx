@@ -156,6 +156,7 @@ BOOST_AUTO_TEST_CASE(macos_helper_runs_jailed)
     BOOST_CHECK(out.find("outside_dir=0\n") != std::string::npos);
     BOOST_CHECK(out.find("etc_hosts=0\n") != std::string::npos);
     BOOST_CHECK(out.find("loopback_bind=0\n") != std::string::npos);
+    BOOST_CHECK(out.find("hardware_uuid=0\n") != std::string::npos);
 }
 
 // A helper inside root that is a symlink to a binary outside root is not

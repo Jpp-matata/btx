@@ -2630,6 +2630,7 @@ endif()
 if(WITH_MODELNET AND APPLE)
   # The macOS swarm confinement tests copy this helper into their jail root.
   add_executable(test_swarm_jail_probe swarm_jail_probe.cpp)
+  target_link_libraries(test_swarm_jail_probe "-framework IOKit" "-framework CoreFoundation")
   add_dependencies(test_btx test_swarm_jail_probe)
   target_compile_definitions(test_btx PRIVATE
     BTX_SWARM_JAIL_PROBE=\"$<TARGET_FILE:test_swarm_jail_probe>\"
