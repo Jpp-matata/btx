@@ -21,8 +21,10 @@
 #include <signal.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
+#include <sys/ipc.h>
 #include <sys/resource.h>
 #include <sys/socket.h>
+#include <sys/shm.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -176,6 +178,22 @@ int main(int argc, char** argv)
         shm_unlink(shm_name.c_str());
     }
     std::fprintf(out, "posix_shm=%d\n", shm >= 0 ? 1 : 0);
+    // sysv.id: a System V segment the test created outside the helper.
+    // The helper must not attach to it. It creates none itself: creation is
+    // not mediated by the sandbox and the system table is small.
+    int sysv_attach = -1;
+    if (FILE* id_file = std::fopen((dir + "/sysv.id").c_str(), "r")) {
+        int id = -1;
+        if (std::fscanf(id_file, "%d", &id) == 1) {
+            void* segment = shmat(id, nullptr, SHM_RDONLY);
+            sysv_attach = segment != reinterpret_cast<void*>(-1) ? 1 : 0;
+            if (sysv_attach == 1) {
+                shmdt(segment);
+            }
+        }
+        std::fclose(id_file);
+    }
+    std::fprintf(out, "sysv_attach=%d\n", sysv_attach);
     char* cwd = getcwd(nullptr, 0);
     std::fprintf(out, "cwd_root=%d\n", cwd != nullptr && dir == cwd ? 1 : 0);
     std::free(cwd);

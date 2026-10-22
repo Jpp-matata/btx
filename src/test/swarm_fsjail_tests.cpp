@@ -120,6 +120,9 @@ BOOST_AUTO_TEST_CASE(jailed_helper_or_namespace_absent)
 }
 
 #if defined(__APPLE__) && defined(BTX_SWARM_JAIL_PROBE)
+#include <sys/ipc.h>
+#include <sys/shm.h>
+
 #include <fcntl.h>
 #include <stdlib.h>
 
@@ -174,9 +177,17 @@ BOOST_AUTO_TEST_CASE(macos_helper_runs_jailed)
 {
     const fs::path root = fs::temp_directory_path() / "btx-swarm-fsjail-macos";
     const fs::path helper = CopyProbe(root);
+    // A System V segment of this process: the jailed helper must not attach.
+    const int sysv = shmget(IPC_PRIVATE, 4096, IPC_CREAT | 0600);
+    BOOST_REQUIRE(sysv >= 0);
+    {
+        std::ofstream id_file{root / "sysv.id"};
+        id_file << sysv;
+    }
     std::string err = "stale";
     const modelnet::SwarmFilesystemJailResult result = modelnet::SwarmRunFilesystemJail(BaseRequest(helper, root), err);
     const std::string out = ProbeOutput(root);
+    shmctl(sysv, IPC_RMID, nullptr);
     fs::remove_all(root);
     BOOST_CHECK_EQUAL(result.code, "JAILED");
     BOOST_CHECK(result.launched && result.jailed && err.empty());
@@ -187,6 +198,7 @@ BOOST_AUTO_TEST_CASE(macos_helper_runs_jailed)
     BOOST_CHECK(out.find("hardware_uuid=0\n") != std::string::npos);
     BOOST_CHECK(out.find("cwd_root=1\n") != std::string::npos);
     BOOST_CHECK(out.find("posix_shm=0\n") != std::string::npos);
+    BOOST_CHECK(out.find("sysv_attach=0\n") != std::string::npos);
 }
 
 // A helper inside root that is a symlink to a binary outside root is not

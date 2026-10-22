@@ -41,9 +41,9 @@ std::string SwarmSandboxConfineProfile();
  * shared cache and system libraries), /dev/null, /dev/random,
  * /dev/urandom, /dev/dtracehelper and the directory "/" itself. IOKit
  * clients, IORegistry properties (such as the hardware UUID and serial
- * number), POSIX shared memory and semaphores, and other processes (info,
- * signals) are denied. `root` must be canonical: the kernel matches
- * resolved paths.
+ * number), POSIX IPC, access to System V IPC objects (creating one is
+ * not checked), and other processes (info, signals) are denied. `root`
+ * must be canonical: the kernel matches resolved paths.
  */
 std::string SwarmSandboxJailProfile(const fs::path& root);
 

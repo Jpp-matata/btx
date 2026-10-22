@@ -60,9 +60,13 @@ std::string SwarmSandboxJailProfile(const fs::path& root)
     // jail sets no rlimits, so this is the only process-count bound it has.
     // (deny ipc-posix*): POSIX shared memory and semaphore names live
     // outside root and outlive the helper; a Linux jail has no /dev/shm.
+    // (deny ipc-sysv*): System V segments, queues and semaphores are keyed
+    // by number, not path, so the file rules do not cover them; without it
+    // a jailed helper can attach to and read another process's segment.
     return SwarmSandboxNetworkDeniedProfile() +
            "(deny process-fork)\n"
            "(deny ipc-posix*)\n"
+           "(deny ipc-sysv*)\n"
            "(deny iokit-open iokit-get-properties)\n"
            "(deny process-info* (require-not (target self)))\n"
            "(deny signal (require-not (target self)))\n"
