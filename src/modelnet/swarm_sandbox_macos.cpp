@@ -38,7 +38,13 @@ std::string SwarmSandboxNetworkDeniedProfile()
 
 std::string SwarmSandboxConfineProfile()
 {
-    return SwarmSandboxNetworkDeniedProfile() + "(deny process-fork)\n";
+    // (deny signal (require-not (target self))): a confined helper must not
+    // be able to signal btxd or any other same-uid process. The confine
+    // profile is otherwise (allow default), which leaves signal open; the
+    // jail profile already carries the same rule.
+    return SwarmSandboxNetworkDeniedProfile() +
+           "(deny process-fork)\n"
+           "(deny signal (require-not (target self)))\n";
 }
 
 std::string SwarmSandboxJailProfile(const fs::path& root)
