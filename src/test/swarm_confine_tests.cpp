@@ -8,8 +8,10 @@
 
 #include <boost/test/unit_test.hpp>
 
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+#include <unistd.h>
 
 #include <csignal>
 
@@ -178,8 +180,13 @@ BOOST_AUTO_TEST_CASE(macos_helper_runs_confined)
     const fs::path helper = CopyProbe(root, nullptr);
     modelnet::SwarmConfineRequest request = BaseRequest(helper, root);
     request.max_address_bytes = 1LL << 30;
+    // A connected socket that is not close-on-exec, like btxd's peers.
+    int pair[2];
+    BOOST_REQUIRE(socketpair(AF_UNIX, SOCK_STREAM, 0, pair) == 0);
     std::string err = "stale";
     const modelnet::SwarmConfineResult result = modelnet::SwarmRunConfined(request, err);
+    close(pair[0]);
+    close(pair[1]);
     const std::string out = ProbeOutput(root);
     fs::remove_all(root);
     BOOST_CHECK_EQUAL(result.code, "CONFINED");
@@ -191,6 +198,7 @@ BOOST_AUTO_TEST_CASE(macos_helper_runs_confined)
     BOOST_CHECK(out.find("cpu=30\n") != std::string::npos);
     // No fork: the parent enforces the limits on the one process it watches.
     BOOST_CHECK(out.find("fork=0\n") != std::string::npos);
+    BOOST_CHECK(out.find("inherited_fds=0\n") != std::string::npos);
 }
 
 // macOS ignores RLIMIT_AS; the parent kills a child whose footprint passes

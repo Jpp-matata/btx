@@ -66,6 +66,12 @@ int main(int argc, char** argv)
     if (dir.empty()) {
         return 2;
     }
+    int inherited = 0;
+    for (int fd = STDERR_FILENO + 1; fd < 1024; ++fd) {
+        if (fcntl(fd, F_GETFD) != -1) {
+            ++inherited;
+        }
+    }
     if (Opens(dir + "/alloc.mode", O_RDONLY)) {
         // Volatile page writes: the compiler may not drop an allocation
         // that is never read (it would, with malloc and memset alone).
@@ -111,5 +117,6 @@ int main(int argc, char** argv)
         waitpid(child, &status, 0);
     }
     std::fprintf(out, "fork=%d\n", child > 0 ? 1 : 0);
+    std::fprintf(out, "inherited_fds=%d\n", inherited);
     return std::fclose(out) == 0 ? 0 : 7;
 }

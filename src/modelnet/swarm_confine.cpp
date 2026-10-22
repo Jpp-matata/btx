@@ -171,6 +171,12 @@ SwarmConfineResult SwarmRunConfined(const SwarmConfineRequest& request, std::str
         if (!SwarmSandboxApply(profile) || !SwarmSandboxNetworkProvenDenied()) {
             _exit(126);
         }
+        // The sandbox does not check descriptors that are already open, and
+        // btxd's P2P sockets are not close-on-exec: close them, as
+        // swarm_fsjail does.
+        for (int fd = STDERR_FILENO + 1; fd < 1024; ++fd) {
+            close(fd);
+        }
 #else
         // No confinement primitive on this platform: never exec unconfined.
         _exit(126);

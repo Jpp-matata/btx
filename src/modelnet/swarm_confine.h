@@ -32,9 +32,9 @@ namespace modelnet {
  * child sets RLIMIT_CPU and RLIMIT_NOFILE (verified with getrlimit),
  * applies a kernel sandbox that denies every network operation, every
  * Mach service lookup and fork (swarm_sandbox_macos.h), and execs only
- * after a loopback bind is refused. The parent enforces max_address_bytes
- * on the child's physical footprint: sampled every 10 ms, SIGKILL above the
- * limit. The kernel only sends SIGXCPU at the CPU limit, so the same loop
+ * after a loopback bind is refused and descriptors 3-1023 are closed.
+ * The parent enforces max_address_bytes on the child's physical
+ * footprint: sampled every 10 ms, SIGKILL above the limit. The kernel only sends SIGXCPU at the CPU limit, so the same loop
  * sends SIGKILL once the child's CPU time is 250 ms past max_cpu_seconds
  * (child_status then reports that signal). Other platforms exit 126:
  * no confinement, no exec.
