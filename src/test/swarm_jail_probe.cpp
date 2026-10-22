@@ -15,7 +15,9 @@
 #include <IOKit/IOKitLib.h>
 #include <arpa/inet.h>
 #include <fcntl.h>
+#include <mach/mach.h>
 #include <netinet/in.h>
+#include <servers/bootstrap.h>
 #include <signal.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
@@ -56,6 +58,17 @@ bool LoopbackBind()
     const bool bound = bind(fd, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr)) == 0;
     close(fd);
     return bound;
+}
+
+// A Mach service every macOS has (notifyd). The profiles deny every lookup.
+bool MachLookupAllowed()
+{
+    mach_port_t port = MACH_PORT_NULL;
+    const kern_return_t kr = bootstrap_look_up(bootstrap_port, "com.apple.system.notification_center", &port);
+    if (kr == KERN_SUCCESS) {
+        mach_port_deallocate(mach_task_self(), port);
+    }
+    return kr == KERN_SUCCESS;
 }
 
 bool HardwareUuidReadable()
@@ -154,6 +167,7 @@ int main(int argc, char** argv)
     std::fprintf(out, "fork=%d\n", child > 0 ? 1 : 0);
     std::fprintf(out, "inherited_fds=%d\n", inherited);
     std::fprintf(out, "hardware_uuid=%d\n", HardwareUuidReadable() ? 1 : 0);
+    std::fprintf(out, "mach_lookup=%d\n", MachLookupAllowed() ? 1 : 0);
     std::fprintf(out, "tiocsti_errno=%d\n", tiocsti_errno);
     const std::string shm_name = "/btx-swarm-probe-" + std::to_string(getpid());
     const int shm = shm_open(shm_name.c_str(), O_CREAT | O_EXCL | O_RDWR, 0600);

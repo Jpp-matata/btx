@@ -220,6 +220,7 @@ BOOST_AUTO_TEST_CASE(macos_helper_runs_confined)
     BOOST_CHECK(WIFEXITED(result.child_status));
     BOOST_CHECK_EQUAL(WEXITSTATUS(result.child_status), 0);
     BOOST_CHECK(out.find("loopback_bind=0\n") != std::string::npos);
+    BOOST_CHECK(out.find("mach_lookup=0\n") != std::string::npos);
     BOOST_CHECK(out.find("nofile=64\n") != std::string::npos);
     BOOST_CHECK(out.find("cpu=30\n") != std::string::npos);
     // No fork: the parent enforces the limits on the one process it watches.
