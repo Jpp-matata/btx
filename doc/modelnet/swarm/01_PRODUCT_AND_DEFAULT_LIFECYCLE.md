@@ -65,3 +65,17 @@ Follow-on work toward a fully autonomous network:
 - Settlement of accepted work in BTX only under an operator-signed mandate.
 
 Those claims wait on verification with two physical hosts, a second GPU, Windows, macOS, a linked remote execution engine, an offline release image, the hardware profiles, and the sealed acceptance catalogue. One machine and two local ranks are not two hosts. Spend stays 0 until a mandate exists.
+
+### Later-release lifecycle checks
+
+Later releases add the following.
+
+- They separate advertised capability from qualified capability.
+- They run a second research cycle rather than latching the first.
+- They recover a recorded balance while the model runtime is down, without stopping the device and without an automatic spend.
+- They compare a fixed local corpus against a single-agent score and a combined score.
+- They run a local model when no provider key is set.
+- They copy a KV page between workers when fingerprints match.
+- They keep local discovery, assignment, and inference working when optional cloud integration is off.
+- They treat an unsigned funding plan as not yet a settlement.
+- They qualify two physical hosts, three peers, a second GPU, Windows, macOS, offline images, and the release gates before calling the network release-ready.

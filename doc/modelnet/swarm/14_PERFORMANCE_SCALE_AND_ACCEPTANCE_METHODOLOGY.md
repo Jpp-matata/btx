@@ -79,3 +79,17 @@ Later releases move toward a fully autonomous network. Until the verification na
 - A private defensive case requires an explicit customer grant. Private prompts stay off until that grant exists.
 - Settlement requires an operator-signed mandate and an isolated-regtest payment. Until then spend stays `0`.
 - Windows, macOS, an offline release image, the hardware profiles, and the sealed acceptance catalogue stay unverified.
+
+### Later-release acceptance checks
+
+Later releases add these acceptance runs. A recipe in this section is not a PASS. Until a named run is complete, that run stays `NOT_RUN`.
+
+- Separate advertised capability from qualified capability.
+- Run a second research cycle rather than latching the first.
+- Recover a recorded balance while the model runtime is down, without stopping the device and without an automatic spend.
+- Compare a fixed local corpus against a single-agent score and a combined score.
+- Run a local model when no provider key is set.
+- Copy a KV page between workers when fingerprints match.
+- Keep local discovery, assignment, and inference working when optional cloud integration is off.
+- Treat an unsigned funding plan as not yet a settlement.
+- Qualify two physical hosts, three peers, a second GPU, Windows, macOS, offline images, and the release gates before calling the network release-ready.

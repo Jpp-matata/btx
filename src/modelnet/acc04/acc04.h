@@ -8,49 +8,59 @@
 #include <modelnet/nifdt_contract/contract.h>
 
 #include <cstdint>
+#include <map>
 #include <string>
-#include <vector>
 
 namespace modelnet {
 
 /**
- * Acc04. Closed records for ADM-003, RUN-001 through RUN-004, RSI-001
- * through RSI-003, REALM-001 through REALM-003, MDT-001 through MDT-004,
- * and WAN-001.
+ * Acc04. Pass latches the in-process checks for ASR-PAY-001 through
+ * ASR-PUB-004. A later Pass clears err and returns true without repeating
+ * those calls.
  *
- * Apply checks, in order, and stores nothing on failure. An empty or
- * unknown id returns ID. Empty text returns FIELD. aux below 0 returns
- * BOUND. aux above 100 returns CAP. flag false returns ABSENT. Exact text
- * vllm, sglang, lmcache, nixl, mooncake, rdma, deepinfer, dualpipe, fp8, or
- * fp4 returns NIFDT_ENGINE_ABSENT. Text that contains private returns
- * NIFDT_PRIVATE_DATA. ADM-003 with text kill returns ADVISORY. RUN-002 with
- * text passthrough returns SCOPE. RUN-003 with text recall returns SENT.
- * RSI-001 with text inherit returns GRANT. RSI-002 with text skip returns
- * REGRESSION. RSI-003 with text transfer returns GENERATION. REALM-002 with
- * text bridge returns BRIDGE. REALM-003 with text transitive returns TRUST.
- * MDT-001 with text monetary returns STORE. MDT-002 with text latest returns
- * DISAGREE. MDT-004 with text rewrite returns FOREIGN. WAN-001 with text
- * older returns ROLLBACK. Any other accepted id stores its text once. The
- * same text again returns NIFDT_REPLAY and keeps the first. Different text
- * returns UNCHANGED. classification() is SIMULATION_NOT_HARDWARE_MEASUREMENT.
+ * ASR-PAY-001 calls SwarmPayReg::Open and Reserve. The same outpoint cannot
+ * fund a second pool. ASR-PAY-002 calls Claim and FailCompute and keeps the
+ * claim. ASR-PAY-003 calls Terms and refuses a later atom or timeout change.
+ * ASR-PAY-004 calls Settle, which stays NIFDT_UNQUALIFIED.
+ * ASR-PRT-001 calls AcceptCanonicalEnvelope and StrictParseJson. A duplicate
+ * key is not an envelope. ASR-PRT-002 calls LeaseTable::Cancel while work is
+ * still in flight, then ReleaseIfQuiescent, which stays refused.
+ * ASR-RES-001 calls HostResourceBroker::Configure and Reserve on one ceiling.
+ * ASR-RES-002 calls UploadScheduler::Admit with a per-identity cap and a
+ * finite slot count. ASR-SEC-001 calls SwarmTrustLabel. A self-declared
+ * label does not replace the policy label. ASR-SEC-002 calls NifScope on
+ * the default local policy and SendWan, which has no route.
+ * ASR-REC-001 calls SwarmRecoverFault02 with a durable payment claim.
+ * ASR-REC-002 calls SwarmCommandLog::Append, Commit, and Truncate. A
+ * committed index cannot be removed. ASR-OBS-001 calls SwarmProbeEngine and
+ * SwarmQualifyEngine. Advertised and qualified stay false. ASR-MIG-001 and
+ * ASR-MIG-002 call MigrateSafe::Move. A higher assurance is refused, and
+ * Fail keeps the stored body. ASR-ACC-001 stays on hosts() 1. ASR-ACC-002
+ * calls SwarmProbeEngine on a missing file and Gpu. ASR-PUB-001 calls
+ * SafeGitPath on a path that enters a git directory. ASR-PUB-002 calls
+ * GitObjectDigest and RefJournal::AuthorizeAndStage and Publish. ASR-PUB-003
+ * calls DocClaim::Claim on a qualification sentence. ASR-PUB-004 calls
+ * SwarmNoteNotTrainLicense and VerifyProvenanceEvidence.
  *
+ * final_acceptance() is CLOSED_IN_PROCESS, DEFINED_NEEDS_PROCESS, or
+ * UNQUALIFIED for those ids, and empty for any other id. Apply stores
+ * nothing and returns ID.
+ * passed(), gpu_passed(), windows_passed(), release_qualified(), and
+ * hardware_qualified() stay false. qualified(), advertised(), launched(),
+ * gpu(), and broadcast() stay false. hosts() and physical_hosts() stay 1.
+ * Hosts with n other than 1 returns HOSTS. bytes_moved() stays 0.
  * Release returns NIFDT_UNQUALIFIED. Spend returns NIFDT_AUTOMATIC_SPEND.
- * qualified(), release_qualified(), hardware_qualified(), advertised(),
- * launched(), gpu(), gpu_passed(), windows_passed(), and broadcast() stay
- * false, including after RSI-003 is refused. hosts() and physical_hosts()
- * stay 1. Hosts with n other than 1 returns HOSTS. bytes_moved() stays 0.
  * Vendor and Gpu return NIFDT_ENGINE_ABSENT.
- * This class opens no file, socket, or process.
+ * The temporary log directory is removed before Pass returns.
  */
 class Acc04 {
 public:
+    bool Pass(std::string& err);
     bool Apply(const std::string& id, const std::string& text, int64_t aux, bool flag, std::string& err);
-    bool stored(const std::string& id) const;
-    std::string text(const std::string& id) const;
-    std::string classification() const;
+    const char* final_acceptance(const std::string& id) const;
     bool Hosts(int64_t n, std::string& err);
     bool Release(std::string& err);
-    bool Gpu(std::string& err);
+    bool Gpu(std::string& err) const;
     bool Vendor(std::string& err);
     bool Spend(std::string& err);
 
@@ -62,6 +72,7 @@ public:
     bool qualified() const { return false; }
     bool release_qualified() const { return false; }
     bool hardware_qualified() const { return false; }
+    bool passed() const { return false; }
     bool advertised() const { return false; }
     int64_t hosts() const { return static_cast<int64_t>(1); }
     int64_t physical_hosts() const { return static_cast<int64_t>(1); }
@@ -69,11 +80,8 @@ public:
     std::string automatic_spend() const { return NIFDT_AUTOMATIC_SPEND; }
 
 private:
-    struct Row {
-        std::string id;
-        std::string text;
-    };
-    std::vector<Row> m_rows;
+    bool m_done{false};
+    std::map<std::string, std::string> m_journal;
 };
 
 } // namespace modelnet

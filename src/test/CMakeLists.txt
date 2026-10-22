@@ -2337,6 +2337,8 @@ if(WITH_MODELNET)
     acc05_tests.cpp
     acc06_tests.cpp
     acc07_tests.cpp
+    acc08_tests.cpp
+    acc09_tests.cpp
     nt01_tests.cpp
     nt02_tests.cpp
     nt03_tests.cpp
@@ -2424,6 +2426,34 @@ if(WITH_MODELNET)
     cyc01_tests.cpp
     ext01_tests.cpp
     tick_bind_tests.cpp
+    prf01_tests.cpp
+    prf02_tests.cpp
+    prf03_tests.cpp
+    prf04_tests.cpp
+    prf05_tests.cpp
+    prf06_tests.cpp
+    prf07_tests.cpp
+    prf08_tests.cpp
+    prf09_tests.cpp
+    qat01_tests.cpp
+    qat02_tests.cpp
+    qat03_tests.cpp
+    qat04_tests.cpp
+    qat05_tests.cpp
+    qat06_tests.cpp
+    rel01_tests.cpp
+    obs01_tests.cpp
+    proc01_tests.cpp
+    proc02_tests.cpp
+    proc03_tests.cpp
+    proc04_tests.cpp
+    proc05_tests.cpp
+    proc06_tests.cpp
+    proc07_tests.cpp
+    proc08_tests.cpp
+    proc09_tests.cpp
+    set01_tests.cpp
+    host01_tests.cpp
     swarm_minehold_request_tests.cpp
     swarm_ckptsave_request_tests.cpp
     swarm_mixedhold_request_tests.cpp

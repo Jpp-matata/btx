@@ -2272,6 +2272,8 @@ add_library(bitcoin_modelnet STATIC
   acc05/acc05.cpp
   acc06/acc06.cpp
   acc07/acc07.cpp
+  acc08/acc08.cpp
+  acc09/acc09.cpp
   nt01/nt01.cpp
   nt02/nt02.cpp
   nt03/nt03.cpp
@@ -2359,6 +2361,34 @@ add_library(bitcoin_modelnet STATIC
   cyc01/cyc01.cpp
   ext01/ext01.cpp
   tick_bind/tick_bind.cpp
+  prf01/prf01.cpp
+  prf02/prf02.cpp
+  prf03/prf03.cpp
+  prf04/prf04.cpp
+  prf05/prf05.cpp
+  prf06/prf06.cpp
+  prf07/prf07.cpp
+  prf08/prf08.cpp
+  prf09/prf09.cpp
+  qat01/qat01.cpp
+  qat02/qat02.cpp
+  qat03/qat03.cpp
+  qat04/qat04.cpp
+  qat05/qat05.cpp
+  qat06/qat06.cpp
+  rel01/rel01.cpp
+  obs01/obs01.cpp
+  proc01/proc01.cpp
+  proc02/proc02.cpp
+  proc03/proc03.cpp
+  proc04/proc04.cpp
+  proc05/proc05.cpp
+  proc06/proc06.cpp
+  proc07/proc07.cpp
+  proc08/proc08.cpp
+  proc09/proc09.cpp
+  set01/set01.cpp
+  host01/host01.cpp
   free_grant.cpp
   router.cpp
   transport_pq.cpp
@@ -2387,6 +2417,7 @@ add_library(bitcoin_modelnet STATIC
   auto_storage.cpp
   piece_ranges.cpp
   supervisor.cpp
+  swarm_runtime/supervisor.cpp
   reachability.cpp
   relay_reserve.cpp
   provider_route.cpp

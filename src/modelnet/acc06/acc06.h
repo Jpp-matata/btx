@@ -6,57 +6,154 @@
 #define BITCOIN_MODELNET_ACC06_ACC06_H
 
 #include <modelnet/nifdt_contract/contract.h>
+#include <modelnet/swarm_defense/swarm_defense.h>
+#include <modelnet/swarm_defwork/swarm_defwork.h>
+#include <modelnet/swarm_planner/swarm_planner.h>
 
+#include <cstddef>
 #include <cstdint>
+#include <map>
+#include <set>
 #include <string>
 #include <vector>
 
 namespace modelnet {
 
 /**
- * Acceptance 06. Closed records for MIG-001, MIG-002, MIG-003, BUILD-001,
- * BUILD-002, BUILD-003, INC-001, INC-002, DEV-001, DEV-002, DEV-003,
- * E2E-001, E2E-002, E2E-003, E2E-004, and E2E-005.
+ * Acceptance 06 for DS-PLAN-001 through DS-STD-006.
  *
- * Apply checks in order and stores nothing on failure. An empty or unknown
- * id returns ID. Empty text returns FIELD. aux below 0 returns BOUND. aux
- * above 100 returns CAP. flag false returns ABSENT. Exact text vllm, sglang,
- * lmcache, nixl, mooncake, rdma, deepinfer, dualpipe, fp8, or fp4 returns
- * NIFDT_ENGINE_ABSENT. Text that contains private returns NIFDT_PRIVATE_DATA.
- * MIG-001 with text wallet returns UNTOUCHED. MIG-002 with text fabricate
- * returns LEGACY. MIG-003 with text downgrade returns PROTOCOL. BUILD-002
- * with text windows or macos returns NIFDT_UNQUALIFIED. windows_passed()
- * stays false after the windows text. BUILD-003 with text skip returns
- * MEASURE. INC-001 with text blocklist returns SCOPE. INC-002 with text
- * self returns RUNBOOK. DEV-002 with text grep returns EVIDENCE. DEV-003
- * with text doc returns JOURNEY. E2E-001 with text assign returns AUTHORITY.
- * E2E-002 with text altered returns MISMATCH. E2E-003 with text hook returns
- * SAFE. E2E-004 with text one-attestor returns QUORUM. E2E-005 with text
- * shrink returns THRESHOLD. Any other accepted id stores its text once.
- * The same text again returns NIFDT_REPLAY and keeps the first. Different
- * text returns UNCHANGED. classification() is
- * SIMULATION_NOT_HARDWARE_MEASUREMENT.
+ * Hypotheses, dependencies, retracted evidence, independent dispatch, and
+ * dependent invalidation go through SwarmPlanner. D0-D4 effects, present
+ * human approval, exact asset and blast checks, idempotent receipts,
+ * unknown effects, canary rollback, and out-of-scope retaliation go
+ * through SwarmDefWork. Embargo, sanitization, cross-case search, and
+ * training consent go through SwarmDefense.
  *
- * Release returns NIFDT_UNQUALIFIED even after every accepted id is stored.
- * qualified(), release_qualified(), hardware_qualified(), advertised(),
- * launched(), gpu(), broadcast(), gpu_passed(), and windows_passed() stay
- * false. hosts() and physical_hosts() stay 1. Hosts with n other than 1
- * returns HOSTS. Spend returns NIFDT_AUTOMATIC_SPEND. bytes_moved() stays 0.
- * Vendor and Gpu return NIFDT_ENGINE_ABSENT.
- * This class opens no file, socket, or process.
+ * Workload signals, plan bounds, backpressure, local procedures, TLP 2.0
+ * recipient and purpose checks, versioned retractions, STIX external-id
+ * mapping, collection paging, raw-event lineage, per-backend rule checks,
+ * event parsing, and the typed import subset are enforced here.
+ *
+ * passed(), gpu_passed(), windows_passed(), qualified(),
+ * release_qualified(), and hardware_qualified() stay false. hosts() stays
+ * 1. Spend returns NIFDT_AUTOMATIC_SPEND. This class opens no file,
+ * socket, or process.
  */
 class Acc06 {
 public:
-    bool Apply(const std::string& id, const std::string& text, int64_t aux, bool flag, std::string& err);
-    bool stored(const std::string& id) const;
-    std::string text(const std::string& id) const;
-    std::string classification() const;
-    bool Hosts(int64_t n, std::string& err);
-    bool Release(std::string& err);
-    bool Gpu(std::string& err);
-    bool Vendor(std::string& err);
-    bool Spend(std::string& err);
+    static constexpr int64_t kPlanBound = 8;
+    static constexpr int64_t kSyncLimit = 100;
+    static constexpr std::size_t kEveMax = 1024;
 
+    Acc06();
+
+    bool AdmitWork(const std::string& id, std::string& err);
+    bool AdmitEvidence(const std::string& id, std::string& err);
+    bool Depend(const std::string& before, const std::string& after, std::string& err);
+    bool Dispatch(const std::string& id, std::string& err) const;
+    bool Finish(const std::string& id, std::string& err);
+    bool RetractEvidence(const std::string& id, std::string& err);
+
+    bool hypothesis_persisted(const std::string& id) const;
+    bool evidence_persisted(const std::string& id) const;
+    bool evidence_retracted(const std::string& id) const;
+    int64_t plan_history() const;
+
+    bool DefineSignal(const std::string& workload, const std::string& signal, std::string& err);
+    bool RecordSignal(const std::string& workload, const std::string& signal, int64_t amount, std::string& err);
+    int64_t progress_of(const std::string& workload) const;
+    std::string signal_of(const std::string& workload) const;
+
+    bool AdmitPlan(const std::string& plan_id, int64_t cost, std::string& err);
+    bool SetBackpressure(bool saturated, std::string& err);
+    bool plan_held(const std::string& plan_id) const;
+    int64_t committed_plan_cost() const;
+    bool saturated() const;
+
+    bool KeepProcedure(const std::string& id, const std::string& body, std::string& err);
+    bool ReplaceProcedure(const std::string& id, const std::string& body, std::string& err);
+    bool LoseQuorum(std::string& err);
+    bool LoseRuntime(std::string& err);
+    std::string procedure_of(const std::string& id) const;
+    bool quorum_present() const;
+    bool runtime_present() const;
+
+    bool ProposeEffect(const std::string& case_id, const std::string& action_id, const std::string& level,
+                       const std::string& asset, int64_t blast, std::string& err);
+    bool ApprovePresent(const std::string& case_id, const std::string& action_id, bool human, std::string& err);
+    bool ExecuteExact(const std::string& case_id, const std::string& action_id, const std::string& asset,
+                      int64_t blast, std::string& err);
+    bool ReconcileUnknown(const std::string& action_id, std::string& err);
+    bool CheckCanary(const std::string& action_id, bool canary_ok, std::string& err);
+    bool RefuseRetaliation(const std::string& target, std::string& err);
+
+    bool proposed(const std::string& action_id) const;
+    bool approved(const std::string& action_id) const;
+    bool has_receipt(const std::string& action_id) const;
+    int64_t receipt_count() const;
+    bool rolled_back(const std::string& action_id) const;
+    bool ambiguous(const std::string& action_id) const;
+    std::string asset_of(const std::string& action_id) const;
+    int64_t blast_of(const std::string& action_id) const;
+
+    bool OpenCase(const std::string& customer, const std::string& case_id, const std::string& asset,
+                  const std::string& policy_gen, int64_t until_ms, int64_t now_ms, std::string& err);
+    bool KeepEvidence(const std::string& case_id, const std::string& evidence_id,
+                      const std::vector<unsigned char>& bytes, std::string& err);
+    bool PublishShare(const std::string& case_id, const std::string& artifact_id, bool embargo_expired,
+                      bool sanitized, bool validated, std::string& err);
+    bool SearchEvidence(const std::string& case_id, const std::string& evidence_id, std::string& err);
+    bool GrantTraining(const std::string& case_id, std::string& err);
+    bool published(const std::string& artifact_id) const;
+    bool training_allowed(const std::string& case_id) const;
+    const std::vector<unsigned char>& evidence_body(const std::string& evidence_id) const;
+
+    bool AuthorizeShare(const std::string& originator, const std::string& recipient, const std::string& purpose,
+                        const std::string& marking, const std::vector<std::string>& allowed,
+                        const std::string& stated_purpose, const std::string& originator_org,
+                        const std::string& recipient_org, bool public_release, std::string& err);
+    bool share_authorized(const std::string& originator, const std::string& recipient, const std::string& purpose,
+                          const std::string& marking) const;
+    int64_t share_count() const;
+
+    bool PutArtifact(const std::string& id, const std::string& body, std::string& err);
+    bool DisseminateRetraction(const std::string& id, int64_t version, const std::string& reason, std::string& err);
+    std::string artifact_body(const std::string& id) const;
+    int64_t artifact_version(const std::string& id) const;
+    bool artifact_retracted(const std::string& id) const;
+    int64_t retraction_notices() const;
+
+    bool MapExternalId(const std::string& object_id, const std::string& version, const std::string& source,
+                       const std::string& external_id, std::string& err);
+    std::string object_for_external(const std::string& source, const std::string& external_id) const;
+    std::string stix_version(const std::string& object_id) const;
+
+    bool OpenCollection(const std::string& id, bool can_read, bool can_write, std::string& err);
+    bool AddToCollection(const std::string& id, const std::string& object_id, std::string& err);
+    bool SyncCollection(const std::string& id, int64_t limit, std::vector<std::string>& page, bool& more,
+                        std::string& err);
+    int64_t collection_size(const std::string& id) const;
+
+    bool PreserveOcsf(const std::string& event_id, const std::string& mapping_version, const std::string& raw,
+                      std::string& err);
+    std::string ocsf_raw(const std::string& event_id) const;
+    bool ocsf_has_version(const std::string& event_id, const std::string& mapping_version) const;
+
+    bool ValidateRule(const std::string& rule_id, const std::string& detection, std::string& err);
+    bool rule_validated(const std::string& rule_id) const;
+    int64_t advertised_backends() const;
+    bool AdvertiseBackend(const std::string& name, std::string& err);
+
+    bool ParseEve(const std::string& event_id, const std::string& body, std::string& err);
+    std::string eve_body(const std::string& event_id) const;
+
+    bool ImportTyped(const std::string& command_type, std::string& err);
+    bool cacao_imported(const std::string& command_type) const;
+
+    bool Release(std::string& err) const;
+    bool Spend(std::string& err) const;
+
+    bool passed() const { return false; }
     bool launched() const { return false; }
     bool gpu() const { return false; }
     bool gpu_passed() const { return false; }
@@ -65,18 +162,85 @@ public:
     bool qualified() const { return false; }
     bool release_qualified() const { return false; }
     bool hardware_qualified() const { return false; }
-    bool advertised() const { return false; }
     int64_t hosts() const { return static_cast<int64_t>(1); }
     int64_t physical_hosts() const { return static_cast<int64_t>(1); }
     int64_t bytes_moved() const { return static_cast<int64_t>(0); }
     std::string automatic_spend() const { return NIFDT_AUTOMATIC_SPEND; }
 
+    bool Apply(const std::string& id, const std::string& text, int64_t aux, bool flag, std::string& err);
+
 private:
-    struct Row {
-        std::string id;
-        std::string text;
+    struct SignalDef {
+        std::string signal;
+        int64_t progress{0};
     };
-    std::vector<Row> m_rows;
+    struct PlanRow {
+        int64_t cost{0};
+    };
+    struct Procedure {
+        std::string body;
+    };
+    struct ShareAuth {
+        std::string originator;
+        std::string recipient;
+        std::string purpose;
+        std::string marking;
+    };
+    struct Artifact {
+        std::string body;
+        int64_t version{1};
+        bool retracted{false};
+    };
+    struct Notice {
+        std::string id;
+        int64_t version{0};
+        std::string reason;
+    };
+    struct StixRow {
+        std::string object_id;
+        std::string version;
+        std::string source;
+        std::string external_id;
+    };
+    struct Collection {
+        bool can_read{false};
+        bool can_write{false};
+        std::vector<std::string> objects;
+        std::size_t cursor{0};
+    };
+    struct OcsfRow {
+        std::string raw;
+        std::vector<std::string> versions;
+    };
+    struct Backend {
+        std::string name;
+        std::string token;
+    };
+    struct EveRow {
+        std::string body;
+    };
+
+    SwarmPlanner m_planner;
+    SwarmDefWork m_work;
+    SwarmDefense m_defense;
+    std::map<std::string, SignalDef> m_signals;
+    std::map<std::string, PlanRow> m_plans;
+    int64_t m_plan_cost{0};
+    bool m_saturated{false};
+    std::map<std::string, Procedure> m_procedures;
+    bool m_quorum{true};
+    bool m_runtime{true};
+    std::vector<ShareAuth> m_shares;
+    std::map<std::string, Artifact> m_artifacts;
+    std::vector<Notice> m_notices;
+    std::vector<StixRow> m_stix;
+    std::map<std::string, Collection> m_collections;
+    std::map<std::string, OcsfRow> m_ocsf;
+    std::vector<Backend> m_backends;
+    std::set<std::string> m_rules;
+    std::map<std::string, EveRow> m_eve;
+    std::set<std::string> m_cacao;
+    std::map<std::string, std::string> m_journal;
 };
 
 } // namespace modelnet

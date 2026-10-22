@@ -4,18 +4,23 @@
 
 #include <modelnet/acc06/acc06.h>
 #include <modelnet/nifdt_contract/contract.h>
+#include <modelnet/swarm_defense/codes.h>
+#include <modelnet/swarm_defwork/codes.h>
+#include <modelnet/swarm_planner/codes.h>
 #include <test/util/setup_common.h>
 
 #include <boost/test/unit_test.hpp>
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace {
 
-void Idle(modelnet::Acc06& eng)
+void ExpectQuiet(const modelnet::Acc06& eng)
 {
     std::string err;
+    BOOST_CHECK(!eng.passed());
     BOOST_CHECK(!eng.launched());
     BOOST_CHECK(!eng.gpu());
     BOOST_CHECK(!eng.gpu_passed());
@@ -24,342 +29,452 @@ void Idle(modelnet::Acc06& eng)
     BOOST_CHECK(!eng.qualified());
     BOOST_CHECK(!eng.release_qualified());
     BOOST_CHECK(!eng.hardware_qualified());
-    BOOST_CHECK(!eng.advertised());
     BOOST_CHECK_EQUAL(eng.hosts(), static_cast<int64_t>(1));
     BOOST_CHECK_EQUAL(eng.physical_hosts(), static_cast<int64_t>(1));
     BOOST_CHECK_EQUAL(eng.bytes_moved(), static_cast<int64_t>(0));
     BOOST_CHECK_EQUAL(eng.automatic_spend(), modelnet::NIFDT_AUTOMATIC_SPEND);
     BOOST_CHECK_EQUAL(eng.automatic_spend(), "0");
-    BOOST_CHECK(!eng.Vendor(err));
-    BOOST_CHECK_EQUAL(err, modelnet::NIFDT_ENGINE_ABSENT);
-    BOOST_CHECK_EQUAL(err, "ENGINE_ABSENT");
-    BOOST_CHECK(!eng.Release(err));
-    BOOST_CHECK_EQUAL(err, modelnet::NIFDT_UNQUALIFIED);
-    BOOST_CHECK_EQUAL(err, "UNQUALIFIED");
-    BOOST_CHECK(!eng.Gpu(err));
-    BOOST_CHECK_EQUAL(err, modelnet::NIFDT_ENGINE_ABSENT);
-    BOOST_CHECK(!eng.gpu_passed());
     BOOST_CHECK(!eng.Spend(err));
     BOOST_CHECK_EQUAL(err, modelnet::NIFDT_AUTOMATIC_SPEND);
     BOOST_CHECK_EQUAL(err, "0");
-    BOOST_CHECK_EQUAL(eng.classification(), "SIMULATION_NOT_HARDWARE_MEASUREMENT");
+    BOOST_CHECK(!eng.Release(err));
+    BOOST_CHECK_EQUAL(err, modelnet::NIFDT_UNQUALIFIED);
+    BOOST_CHECK(!eng.release_qualified());
 }
-
-struct KnownRow {
-    const char* id;
-    const char* refusal;
-    const char* code;
-};
-
-const KnownRow kKnown[] = {
-    {"MIG-001", "wallet", "UNTOUCHED"},
-    {"MIG-002", "fabricate", "LEGACY"},
-    {"MIG-003", "downgrade", "PROTOCOL"},
-    {"BUILD-001", nullptr, nullptr},
-    {"BUILD-002", "windows", "UNQUALIFIED"},
-    {"BUILD-003", "skip", "MEASURE"},
-    {"INC-001", "blocklist", "SCOPE"},
-    {"INC-002", "self", "RUNBOOK"},
-    {"DEV-001", nullptr, nullptr},
-    {"DEV-002", "grep", "EVIDENCE"},
-    {"DEV-003", "doc", "JOURNEY"},
-    {"E2E-001", "assign", "AUTHORITY"},
-    {"E2E-002", "altered", "MISMATCH"},
-    {"E2E-003", "hook", "SAFE"},
-    {"E2E-004", "one-attestor", "QUORUM"},
-    {"E2E-005", "shrink", "THRESHOLD"},
-};
 
 } // namespace
 
 BOOST_FIXTURE_TEST_SUITE(acc06_tests, BasicTestingSetup)
 
-BOOST_AUTO_TEST_CASE(id_text_aux_and_flag)
+BOOST_AUTO_TEST_CASE(pass_latches)
 {
     modelnet::Acc06 eng;
     std::string err = "stale";
+    const int64_t history_before = eng.plan_history();
 
-    BOOST_CHECK(!eng.Apply("", "", static_cast<int64_t>(0), true, err));
-    BOOST_CHECK_EQUAL(err, "ID");
-    BOOST_CHECK(!eng.stored(""));
-
-    BOOST_CHECK(!eng.Apply("MIG-004", "s1", static_cast<int64_t>(1), true, err));
-    BOOST_CHECK_EQUAL(err, "ID");
-    BOOST_CHECK(!eng.stored("MIG-004"));
-
-    BOOST_CHECK(!eng.Apply("BUILD-004", "s1", static_cast<int64_t>(1), true, err));
-    BOOST_CHECK_EQUAL(err, "ID");
-    BOOST_CHECK(!eng.stored("BUILD-004"));
-
-    BOOST_CHECK(!eng.Apply("E2E-006", "wallet", static_cast<int64_t>(1), true, err));
-    BOOST_CHECK_EQUAL(err, "ID");
-    BOOST_CHECK(!eng.stored("E2E-006"));
-
-    BOOST_CHECK(!eng.Apply("MIG-001", "", static_cast<int64_t>(-1), false, err));
-    BOOST_CHECK_EQUAL(err, "FIELD");
-    BOOST_CHECK(!eng.stored("MIG-001"));
-
-    BOOST_CHECK(!eng.Apply("MIG-001", "s1", static_cast<int64_t>(-1), true, err));
-    BOOST_CHECK_EQUAL(err, "BOUND");
-    BOOST_CHECK(!eng.stored("MIG-001"));
-
-    BOOST_CHECK(!eng.Apply("MIG-001", "s1", static_cast<int64_t>(101), false, err));
-    BOOST_CHECK_EQUAL(err, "CAP");
-    BOOST_CHECK(!eng.stored("MIG-001"));
-
-    BOOST_CHECK(!eng.Apply("MIG-001", "s1", static_cast<int64_t>(0), false, err));
-    BOOST_CHECK_EQUAL(err, "ABSENT");
-    BOOST_CHECK(!eng.stored("MIG-001"));
-
-    BOOST_CHECK(!eng.Apply("BUILD-002", "windows", static_cast<int64_t>(-1), true, err));
-    BOOST_CHECK_EQUAL(err, "BOUND");
-    BOOST_CHECK(!eng.stored("BUILD-002"));
-    BOOST_CHECK(!eng.windows_passed());
-
-    BOOST_CHECK(!eng.Apply("BUILD-002", "windows", static_cast<int64_t>(1), false, err));
-    BOOST_CHECK_EQUAL(err, "ABSENT");
-    BOOST_CHECK(!eng.stored("BUILD-002"));
-    BOOST_CHECK(!eng.windows_passed());
-
-    BOOST_CHECK(eng.Apply("MIG-001", "s1", static_cast<int64_t>(100), true, err));
+    // DS-PLAN-001: hypotheses, dependencies, and negative evidence stay stored.
+    BOOST_REQUIRE(eng.AdmitWork("hyp", err));
     BOOST_CHECK(err.empty());
-    BOOST_CHECK(eng.stored("MIG-001"));
-    BOOST_CHECK_EQUAL(eng.text("MIG-001"), "s1");
-    BOOST_CHECK(eng.Apply("BUILD-001", "s1", static_cast<int64_t>(0), true, err));
+    BOOST_CHECK(eng.hypothesis_persisted("hyp"));
+    BOOST_CHECK(!eng.AdmitWork("hyp", err));
+    BOOST_CHECK_EQUAL(err, modelnet::kSwarmPlannerReplay);
+    BOOST_CHECK(eng.hypothesis_persisted("hyp"));
+
+    BOOST_REQUIRE(eng.AdmitWork("before", err));
+    BOOST_REQUIRE(eng.AdmitWork("after", err));
+    BOOST_REQUIRE(eng.Depend("before", "after", err));
+    BOOST_CHECK(!eng.Dispatch("after", err));
+    BOOST_CHECK_EQUAL(err, modelnet::kSwarmPlannerBlocked);
+    BOOST_CHECK(!eng.Depend("before", "after", err));
+    BOOST_CHECK_EQUAL(err, modelnet::kSwarmPlannerReplay);
+    BOOST_CHECK(!eng.Dispatch("after", err));
+    BOOST_CHECK_EQUAL(err, modelnet::kSwarmPlannerBlocked);
+
+    BOOST_REQUIRE(eng.AdmitEvidence("neg", err));
+    BOOST_CHECK(eng.evidence_persisted("neg"));
+    BOOST_CHECK(!eng.evidence_retracted("neg"));
+    const int64_t history_admitted = eng.plan_history();
+    BOOST_CHECK(history_admitted > history_before);
+    BOOST_REQUIRE(eng.RetractEvidence("neg", err));
+    BOOST_CHECK(eng.evidence_persisted("neg"));
+    BOOST_CHECK(eng.evidence_retracted("neg"));
+    BOOST_CHECK(eng.plan_history() == history_admitted + static_cast<int64_t>(1));
+    BOOST_CHECK(!eng.RetractEvidence("neg", err));
+    BOOST_CHECK_EQUAL(err, modelnet::kSwarmPlannerReplay);
+    BOOST_CHECK(eng.evidence_retracted("neg"));
+    BOOST_CHECK(eng.hypothesis_persisted("hyp"));
+
+    // DS-PLAN-002: independent work can dispatch together; a conflict waits.
+    BOOST_REQUIRE(eng.AdmitWork("left", err));
+    BOOST_REQUIRE(eng.AdmitWork("right", err));
+    BOOST_CHECK(eng.Dispatch("left", err));
     BOOST_CHECK(err.empty());
-    BOOST_CHECK_EQUAL(eng.text("BUILD-001"), "s1");
+    BOOST_CHECK(eng.Dispatch("right", err));
+    BOOST_CHECK(err.empty());
+    BOOST_REQUIRE(eng.AdmitWork("first", err));
+    BOOST_REQUIRE(eng.AdmitWork("second", err));
+    BOOST_REQUIRE(eng.Depend("first", "second", err));
+    BOOST_CHECK(!eng.Dispatch("second", err));
+    BOOST_CHECK_EQUAL(err, modelnet::kSwarmPlannerBlocked);
+    BOOST_CHECK(eng.Dispatch("left", err));
+    BOOST_REQUIRE(eng.Finish("first", err));
+    BOOST_CHECK(eng.Dispatch("second", err));
+    BOOST_CHECK(err.empty());
+
+    // DS-PLAN-003: only the signal named for that workload counts.
+    BOOST_REQUIRE(eng.DefineSignal("triage", "cases", err));
+    BOOST_REQUIRE(eng.DefineSignal("hunt", "leads", err));
+    BOOST_CHECK(!eng.DefineSignal("triage", "leads", err));
+    BOOST_CHECK_EQUAL(err, "SIGNAL");
+    BOOST_CHECK_EQUAL(eng.signal_of("triage"), "cases");
+    BOOST_CHECK(!eng.RecordSignal("triage", "leads", static_cast<int64_t>(5), err));
+    BOOST_CHECK_EQUAL(err, "SIGNAL");
+    BOOST_CHECK_EQUAL(eng.progress_of("triage"), static_cast<int64_t>(0));
+    BOOST_CHECK_EQUAL(eng.progress_of("hunt"), static_cast<int64_t>(0));
+    BOOST_CHECK(!eng.RecordSignal("triage", "cases", static_cast<int64_t>(0), err));
+    BOOST_CHECK_EQUAL(err, "PROGRESS");
+    BOOST_CHECK_EQUAL(eng.progress_of("triage"), static_cast<int64_t>(0));
+    BOOST_REQUIRE(eng.RecordSignal("triage", "cases", static_cast<int64_t>(2), err));
+    BOOST_REQUIRE(eng.RecordSignal("hunt", "leads", static_cast<int64_t>(1), err));
+    BOOST_REQUIRE(eng.RecordSignal("triage", "cases", static_cast<int64_t>(1), err));
+    BOOST_CHECK_EQUAL(eng.progress_of("triage"), static_cast<int64_t>(3));
+    BOOST_CHECK_EQUAL(eng.progress_of("hunt"), static_cast<int64_t>(1));
+
+    // DS-PLAN-004: a retracted evidence predecessor invalidates the dependent.
+    BOOST_REQUIRE(eng.AdmitEvidence("ev4", err));
+    BOOST_REQUIRE(eng.AdmitWork("ev4", err));
+    BOOST_REQUIRE(eng.AdmitWork("job4", err));
+    BOOST_REQUIRE(eng.Depend("ev4", "job4", err));
+    BOOST_CHECK(!eng.Dispatch("job4", err));
+    BOOST_CHECK_EQUAL(err, modelnet::kSwarmPlannerBlocked);
+    BOOST_REQUIRE(eng.RetractEvidence("ev4", err));
+    BOOST_CHECK(eng.evidence_persisted("ev4"));
+    BOOST_CHECK(eng.evidence_retracted("ev4"));
+    BOOST_CHECK(!eng.Dispatch("job4", err));
+    BOOST_CHECK_EQUAL(err, modelnet::kSwarmPlannerInvalid);
+    BOOST_CHECK(eng.hypothesis_persisted("job4"));
+
+    // DS-PLAN-005: cost bound and backpressure both refuse, and the held plan stays.
+    BOOST_CHECK(!eng.AdmitPlan("over", modelnet::Acc06::kPlanBound + static_cast<int64_t>(1), err));
+    BOOST_CHECK_EQUAL(err, "BOUND");
+    BOOST_CHECK(!eng.plan_held("over"));
+    BOOST_CHECK(!eng.AdmitPlan("zero", static_cast<int64_t>(0), err));
+    BOOST_CHECK_EQUAL(err, "BOUND");
+    BOOST_REQUIRE(eng.AdmitPlan("held", static_cast<int64_t>(5), err));
+    BOOST_CHECK(eng.plan_held("held"));
+    BOOST_CHECK(!eng.AdmitPlan("rest", static_cast<int64_t>(4), err));
+    BOOST_CHECK_EQUAL(err, "BOUND");
+    BOOST_CHECK(!eng.plan_held("rest"));
+    BOOST_CHECK_EQUAL(eng.committed_plan_cost(), static_cast<int64_t>(5));
+    BOOST_REQUIRE(eng.SetBackpressure(true, err));
+    BOOST_CHECK(eng.saturated());
+    BOOST_CHECK(!eng.AdmitPlan("late", static_cast<int64_t>(1), err));
+    BOOST_CHECK_EQUAL(err, "BACKPRESSURE");
+    BOOST_CHECK(!eng.plan_held("late"));
+    BOOST_CHECK(eng.plan_held("held"));
+    BOOST_CHECK_EQUAL(eng.committed_plan_cost(), static_cast<int64_t>(5));
+    BOOST_CHECK(!eng.AdmitPlan("held", static_cast<int64_t>(1), err));
+    BOOST_CHECK_EQUAL(err, modelnet::NIFDT_REPLAY);
+    BOOST_CHECK_EQUAL(eng.committed_plan_cost(), static_cast<int64_t>(5));
+
+    // DS-PLAN-006: a local procedure survives loss of quorum and runtime.
+    BOOST_REQUIRE(eng.KeepProcedure("run", "steps-v1", err));
+    BOOST_CHECK(eng.quorum_present());
+    BOOST_CHECK(eng.runtime_present());
+    BOOST_REQUIRE(eng.ReplaceProcedure("run", "steps-v2", err));
+    BOOST_CHECK_EQUAL(eng.procedure_of("run"), "steps-v2");
+    BOOST_REQUIRE(eng.LoseQuorum(err));
+    BOOST_CHECK(!eng.quorum_present());
+    BOOST_CHECK(!eng.ReplaceProcedure("run", "steps-v3", err));
+    BOOST_CHECK_EQUAL(err, "KEPT");
+    BOOST_CHECK_EQUAL(eng.procedure_of("run"), "steps-v2");
+    BOOST_REQUIRE(eng.LoseRuntime(err));
+    BOOST_CHECK(!eng.runtime_present());
+    BOOST_CHECK(!eng.ReplaceProcedure("run", "steps-v4", err));
+    BOOST_CHECK_EQUAL(err, "KEPT");
+    BOOST_CHECK_EQUAL(eng.procedure_of("run"), "steps-v2");
     BOOST_CHECK_EQUAL(eng.hosts(), static_cast<int64_t>(1));
-    BOOST_CHECK_EQUAL(eng.bytes_moved(), static_cast<int64_t>(0));
-    Idle(eng);
-}
 
-BOOST_AUTO_TEST_CASE(engines_private_and_exact_refusals)
-{
-    modelnet::Acc06 eng;
-    std::string err = "stale";
-    const char* const remote[] = {
-        "vllm",
-        "sglang",
-        "lmcache",
-        "nixl",
-        "mooncake",
-        "rdma",
-        "deepinfer",
-        "dualpipe",
-    };
+    // DS-ACT-001: the typed broker accepts D0-D3 and refuses D4 and an unknown level.
+    BOOST_CHECK(eng.ProposeEffect("case", "act-d0", modelnet::kSwarmDefWorkD0, "asset-0", static_cast<int64_t>(1), err));
+    BOOST_CHECK(eng.proposed("act-d0"));
+    BOOST_CHECK_EQUAL(eng.asset_of("act-d0"), "asset-0");
+    BOOST_CHECK(eng.ProposeEffect("case", "act-d1", modelnet::kSwarmDefWorkD1, "asset-1", static_cast<int64_t>(1), err));
+    BOOST_CHECK(eng.ProposeEffect("case", "act-d2", modelnet::kSwarmDefWorkD2, "asset-2", static_cast<int64_t>(1), err));
+    BOOST_CHECK(!eng.ProposeEffect("case", "act-d3", modelnet::kSwarmDefWorkD3, "asset-3", static_cast<int64_t>(2), err));
+    BOOST_CHECK_EQUAL(err, modelnet::kSwarmDefWorkNeedApproval);
+    BOOST_CHECK(eng.proposed("act-d3"));
+    BOOST_CHECK(!eng.approved("act-d3"));
+    BOOST_CHECK(!eng.ProposeEffect("case", "act-d4", modelnet::kSwarmDefWorkD4, "asset-4", static_cast<int64_t>(1), err));
+    BOOST_CHECK_EQUAL(err, modelnet::kSwarmDefWorkRefused);
+    BOOST_CHECK(!eng.proposed("act-d4"));
+    BOOST_CHECK(!eng.ProposeEffect("case", "act-x", "OTHER", "asset-x", static_cast<int64_t>(1), err));
+    BOOST_CHECK_EQUAL(err, modelnet::kSwarmDefWorkLevel);
+    BOOST_CHECK(!eng.proposed("act-x"));
 
-    BOOST_CHECK(modelnet::NifDtEngineLinked("fp8"));
-    BOOST_CHECK(!eng.Apply("BUILD-001", "fp8", static_cast<int64_t>(1), true, err));
-    BOOST_CHECK_EQUAL(err, modelnet::NIFDT_ENGINE_ABSENT);
-    BOOST_CHECK_EQUAL(err, "ENGINE_ABSENT");
-    BOOST_CHECK(!eng.stored("BUILD-001"));
-    BOOST_CHECK(!eng.gpu());
-    BOOST_CHECK(!eng.gpu_passed());
+    // DS-ACT-002: D3 executes only after a present human approves it.
+    BOOST_CHECK(!eng.ApprovePresent("case", "act-d3", false, err));
+    BOOST_CHECK_EQUAL(err, modelnet::kSwarmDefWorkNeedApproval);
+    BOOST_CHECK(!eng.approved("act-d3"));
+    BOOST_CHECK(!eng.ExecuteExact("case", "act-d3", "asset-3", static_cast<int64_t>(2), err));
+    BOOST_CHECK_EQUAL(err, modelnet::kSwarmDefWorkNeedApproval);
+    BOOST_CHECK(!eng.has_receipt("act-d3"));
+    BOOST_REQUIRE(eng.ApprovePresent("case", "act-d3", true, err));
+    BOOST_CHECK(eng.approved("act-d3"));
+    BOOST_REQUIRE(eng.ExecuteExact("case", "act-d3", "asset-3", static_cast<int64_t>(2), err));
+    BOOST_CHECK(eng.has_receipt("act-d3"));
 
-    BOOST_CHECK(modelnet::NifDtEngineLinked("fp4"));
-    BOOST_CHECK(!eng.Apply("BUILD-001", "fp4", static_cast<int64_t>(1), true, err));
-    BOOST_CHECK_EQUAL(err, modelnet::NIFDT_ENGINE_ABSENT);
-    BOOST_CHECK(!eng.stored("BUILD-001"));
-    BOOST_CHECK(!eng.gpu_passed());
+    // DS-ACT-003: asset and blast must match the proposal, and a negative blast is not stored.
+    BOOST_CHECK(!eng.ProposeEffect("case", "act-neg", modelnet::kSwarmDefWorkD0, "asset-n", static_cast<int64_t>(-1), err));
+    BOOST_CHECK_EQUAL(err, modelnet::kSwarmDefWorkBlast);
+    BOOST_CHECK(!eng.proposed("act-neg"));
+    BOOST_CHECK(!eng.ExecuteExact("case", "act-d0", "other-asset", static_cast<int64_t>(1), err));
+    BOOST_CHECK_EQUAL(err, modelnet::kSwarmDefWorkPrecondition);
+    BOOST_CHECK(!eng.has_receipt("act-d0"));
+    BOOST_CHECK_EQUAL(eng.asset_of("act-d0"), "asset-0");
+    BOOST_CHECK(!eng.ExecuteExact("case", "act-d0", "asset-0", static_cast<int64_t>(9), err));
+    BOOST_CHECK_EQUAL(err, modelnet::kSwarmDefWorkPrecondition);
+    BOOST_CHECK_EQUAL(eng.blast_of("act-d0"), static_cast<int64_t>(1));
+    BOOST_CHECK(!eng.has_receipt("act-d0"));
+    BOOST_REQUIRE(eng.ExecuteExact("case", "act-d0", "asset-0", static_cast<int64_t>(1), err));
+    BOOST_CHECK(eng.has_receipt("act-d0"));
+    BOOST_CHECK_EQUAL(eng.blast_of("act-d0"), static_cast<int64_t>(1));
 
-    BOOST_CHECK(!modelnet::NifDtEngineLinked("dualpipe"));
-    BOOST_CHECK(!eng.Apply("BUILD-001", "dualpipe", static_cast<int64_t>(1), true, err));
-    BOOST_CHECK_EQUAL(err, modelnet::NIFDT_ENGINE_ABSENT);
-    BOOST_CHECK(!eng.stored("BUILD-001"));
+    // DS-ACT-004: a second execute does not add a receipt, and an unknown effect is not retried.
+    const int64_t receipts = eng.receipt_count();
+    BOOST_CHECK(!eng.ExecuteExact("case", "act-d0", "asset-0", static_cast<int64_t>(1), err));
+    BOOST_CHECK_EQUAL(err, modelnet::kSwarmDefWorkReplay);
+    BOOST_CHECK_EQUAL(eng.receipt_count(), receipts);
+    BOOST_CHECK(eng.has_receipt("act-d0"));
+    BOOST_REQUIRE(eng.ProposeEffect("case", "act-unk", modelnet::kSwarmDefWorkD1, "asset-u", static_cast<int64_t>(1), err));
+    BOOST_CHECK(!eng.ReconcileUnknown("act-unk", err));
+    BOOST_CHECK_EQUAL(err, modelnet::kSwarmDefWorkAmbiguous);
+    BOOST_CHECK(eng.ambiguous("act-unk"));
+    BOOST_CHECK(!eng.ExecuteExact("case", "act-unk", "asset-u", static_cast<int64_t>(1), err));
+    BOOST_CHECK_EQUAL(err, modelnet::kSwarmDefWorkAmbiguous);
+    BOOST_CHECK(!eng.has_receipt("act-unk"));
+    BOOST_CHECK(eng.ambiguous("act-unk"));
 
-    for (const char* name : remote) {
-        BOOST_CHECK(!modelnet::NifDtEngineLinked(name));
-        BOOST_CHECK(!eng.Apply("BUILD-001", name, static_cast<int64_t>(1), true, err));
-        BOOST_CHECK_EQUAL(err, modelnet::NIFDT_ENGINE_ABSENT);
-        BOOST_CHECK(!eng.stored("BUILD-001"));
-        BOOST_CHECK_EQUAL(eng.bytes_moved(), static_cast<int64_t>(0));
-    }
+    // DS-ACT-005: a failed canary rolls back without dropping the asset or the receipt.
+    BOOST_CHECK_EQUAL(eng.asset_of("act-d0"), "asset-0");
+    BOOST_CHECK(!eng.CheckCanary("act-d0", false, err));
+    BOOST_CHECK_EQUAL(err, modelnet::kSwarmDefWorkRollback);
+    BOOST_CHECK(eng.rolled_back("act-d0"));
+    BOOST_CHECK(eng.has_receipt("act-d0"));
+    BOOST_CHECK_EQUAL(eng.asset_of("act-d0"), "asset-0");
+    BOOST_CHECK_EQUAL(eng.blast_of("act-d0"), static_cast<int64_t>(1));
+    BOOST_REQUIRE(eng.ProposeEffect("case", "act-ok", modelnet::kSwarmDefWorkD0, "asset-ok", static_cast<int64_t>(3), err));
+    BOOST_CHECK(eng.CheckCanary("act-ok", true, err));
+    BOOST_CHECK(err.empty());
+    BOOST_CHECK(!eng.rolled_back("act-ok"));
+    BOOST_CHECK_EQUAL(eng.asset_of("act-ok"), "asset-ok");
+    BOOST_CHECK_EQUAL(eng.blast_of("act-ok"), static_cast<int64_t>(3));
 
-    BOOST_CHECK(!eng.Apply("MIG-001", "private trajectory", static_cast<int64_t>(1), true, err));
-    BOOST_CHECK_EQUAL(err, modelnet::NIFDT_PRIVATE_DATA);
-    BOOST_CHECK_EQUAL(err, "PRIVATE_DATA");
-    BOOST_CHECK(!eng.stored("MIG-001"));
-
-    BOOST_CHECK(!eng.Apply("MIG-001", "private wallet", static_cast<int64_t>(1), true, err));
-    BOOST_CHECK_EQUAL(err, modelnet::NIFDT_PRIVATE_DATA);
-    BOOST_CHECK(!eng.stored("MIG-001"));
-
-    BOOST_CHECK(!eng.Apply("MIG-001", "wallet", static_cast<int64_t>(1), true, err));
-    BOOST_CHECK_EQUAL(err, "UNTOUCHED");
-    BOOST_CHECK(!eng.stored("MIG-001"));
-
-    BOOST_CHECK(!eng.Apply("MIG-002", "fabricate", static_cast<int64_t>(1), true, err));
-    BOOST_CHECK_EQUAL(err, "LEGACY");
-    BOOST_CHECK(!eng.stored("MIG-002"));
-
-    BOOST_CHECK(!eng.Apply("MIG-003", "downgrade", static_cast<int64_t>(1), true, err));
-    BOOST_CHECK_EQUAL(err, "PROTOCOL");
-    BOOST_CHECK(!eng.stored("MIG-003"));
-
-    BOOST_CHECK(!eng.Apply("BUILD-002", "windows", static_cast<int64_t>(1), true, err));
-    BOOST_CHECK_EQUAL(err, modelnet::NIFDT_UNQUALIFIED);
-    BOOST_CHECK_EQUAL(err, "UNQUALIFIED");
-    BOOST_CHECK(!eng.stored("BUILD-002"));
-    BOOST_CHECK(!eng.windows_passed());
-    BOOST_CHECK(!eng.gpu_passed());
-    BOOST_CHECK(!eng.gpu());
-    BOOST_CHECK(!eng.qualified());
+    // DS-ACT-006: retaliation stores nothing and leaves the receipt in place.
+    const int64_t receipts_before_retaliation = eng.receipt_count();
+    BOOST_CHECK(!eng.RefuseRetaliation("act-d0", err));
+    BOOST_CHECK_EQUAL(err, modelnet::kSwarmDefWorkOutOfScope);
+    BOOST_CHECK(eng.has_receipt("act-d0"));
+    BOOST_CHECK_EQUAL(eng.receipt_count(), receipts_before_retaliation);
+    BOOST_CHECK_EQUAL(eng.asset_of("act-d0"), "asset-0");
     BOOST_CHECK(!eng.broadcast());
+
+    // DS-SHARE-001: exact recipient, purpose, and a TLP 2.0 marking.
+    const std::vector<std::string> allowed{"alice"};
+    BOOST_REQUIRE(eng.AuthorizeShare("origin", "alice", "notify", "RED", allowed, "notify", "org-a", "org-a", false, err));
+    BOOST_CHECK(eng.share_authorized("origin", "alice", "notify", "RED"));
+    BOOST_CHECK_EQUAL(eng.share_count(), static_cast<int64_t>(1));
+    BOOST_CHECK(!eng.AuthorizeShare("origin", "bob", "notify", "RED", allowed, "notify", "org-a", "org-a", false, err));
+    BOOST_CHECK_EQUAL(err, "RECIPIENT");
+    BOOST_CHECK(!eng.share_authorized("origin", "bob", "notify", "RED"));
+    BOOST_CHECK_EQUAL(eng.share_count(), static_cast<int64_t>(1));
+    BOOST_CHECK(!eng.AuthorizeShare("origin", "alice", "other", "RED", allowed, "notify", "org-a", "org-a", false, err));
+    BOOST_CHECK_EQUAL(err, "PURPOSE");
+    BOOST_CHECK(!eng.AuthorizeShare("origin", "alice", "notify", "RED", allowed, "notify", "org-a", "org-b", false, err));
+    BOOST_CHECK_EQUAL(err, "TLP");
+    BOOST_CHECK(!eng.AuthorizeShare("origin", "alice", "notify", "AMBER+STRICT", allowed, "notify", "org-a", "org-b", false, err));
+    BOOST_CHECK_EQUAL(err, "TLP");
+    BOOST_CHECK(!eng.AuthorizeShare("origin", "alice", "notify", "GREEN", allowed, "notify", "org-a", "org-a", true, err));
+    BOOST_CHECK_EQUAL(err, "TLP");
+    BOOST_CHECK(!eng.AuthorizeShare("origin", "alice", "notify", "PRIVATE", allowed, "notify", "org-a", "org-a", false, err));
+    BOOST_CHECK_EQUAL(err, "TLP");
+    BOOST_REQUIRE(eng.AuthorizeShare("origin", "alice", "notify", "CLEAR", allowed, "notify", "org-a", "org-a", true, err));
+    BOOST_CHECK(eng.share_authorized("origin", "alice", "notify", "CLEAR"));
+    BOOST_CHECK(!eng.AuthorizeShare("origin", "alice", "notify", "RED", allowed, "notify", "org-a", "org-a", false, err));
+    BOOST_CHECK_EQUAL(err, modelnet::NIFDT_REPLAY);
+    BOOST_CHECK_EQUAL(eng.share_count(), static_cast<int64_t>(2));
+
+    // DS-SHARE-002 and DS-SHARE-003: embargo expiry alone does not publish; both protections do.
+    BOOST_REQUIRE(eng.OpenCase("customer", "case-a", "asset-a", "pol-1", static_cast<int64_t>(100), static_cast<int64_t>(1), err));
+    BOOST_CHECK(!eng.PublishShare("case-a", "art-embargo", true, false, false, err));
+    BOOST_CHECK_EQUAL(err, modelnet::kSwarmDefenseNotPublished);
+    BOOST_CHECK(!eng.published("art-embargo"));
+    BOOST_CHECK(!eng.PublishShare("case-a", "art-half", true, true, false, err));
+    BOOST_CHECK_EQUAL(err, modelnet::kSwarmDefenseNotPublished);
+    BOOST_CHECK(!eng.published("art-half"));
+    BOOST_CHECK(!eng.PublishShare("case-a", "art-open", false, false, true, err));
+    BOOST_CHECK(!eng.published("art-open"));
+    BOOST_REQUIRE(eng.PublishShare("case-a", "art-ok", false, true, true, err));
+    BOOST_CHECK(eng.published("art-ok"));
+    BOOST_REQUIRE(eng.PublishShare("case-a", "art-late", true, true, true, err));
+    BOOST_CHECK(eng.published("art-late"));
+
+    // DS-SHARE-006: sharing does not grant training consent.
+    BOOST_CHECK(!eng.training_allowed("case-a"));
+    BOOST_REQUIRE(eng.GrantTraining("case-a", err));
+    BOOST_CHECK(eng.training_allowed("case-a"));
+    BOOST_REQUIRE(eng.OpenCase("customer", "case-b", "asset-b", "pol-1", static_cast<int64_t>(100), static_cast<int64_t>(1), err));
+    BOOST_REQUIRE(eng.PublishShare("case-b", "art-b", false, true, true, err));
+    BOOST_CHECK(eng.published("art-b"));
+    BOOST_CHECK(!eng.training_allowed("case-b"));
+    BOOST_CHECK(eng.training_allowed("case-a"));
+
+    // DS-SHARE-004: another case and a missing id return the same not-visible result.
+    const std::vector<unsigned char> bytes{1, 2, 3};
+    BOOST_REQUIRE(eng.KeepEvidence("case-a", "ev-a", bytes, err));
+    BOOST_CHECK_EQUAL(eng.evidence_body("ev-a").size(), static_cast<std::size_t>(3));
+    BOOST_CHECK(!eng.SearchEvidence("case-b", "ev-a", err));
+    BOOST_CHECK_EQUAL(err, modelnet::kSwarmDefenseNotVisible);
+    std::string missing_err;
+    BOOST_CHECK(!eng.SearchEvidence("case-a", "missing", missing_err));
+    BOOST_CHECK_EQUAL(missing_err, err);
+    BOOST_CHECK_EQUAL(missing_err, modelnet::kSwarmDefenseNotVisible);
+    BOOST_CHECK(eng.SearchEvidence("case-a", "ev-a", err));
+    BOOST_CHECK(err.empty());
     BOOST_CHECK_EQUAL(eng.bytes_moved(), static_cast<int64_t>(0));
 
-    BOOST_CHECK(!eng.Apply("BUILD-002", "macos", static_cast<int64_t>(1), true, err));
-    BOOST_CHECK_EQUAL(err, modelnet::NIFDT_UNQUALIFIED);
-    BOOST_CHECK(!eng.stored("BUILD-002"));
-    BOOST_CHECK(!eng.windows_passed());
-
-    BOOST_CHECK(!eng.Apply("BUILD-003", "skip", static_cast<int64_t>(1), true, err));
-    BOOST_CHECK_EQUAL(err, "MEASURE");
-    BOOST_CHECK(!eng.stored("BUILD-003"));
-
-    BOOST_CHECK(!eng.Apply("INC-001", "blocklist", static_cast<int64_t>(1), true, err));
-    BOOST_CHECK_EQUAL(err, "SCOPE");
-    BOOST_CHECK(!eng.stored("INC-001"));
-
-    BOOST_CHECK(!eng.Apply("INC-002", "self", static_cast<int64_t>(1), true, err));
-    BOOST_CHECK_EQUAL(err, "RUNBOOK");
-    BOOST_CHECK(!eng.stored("INC-002"));
-
-    BOOST_CHECK(!eng.Apply("DEV-002", "grep", static_cast<int64_t>(1), true, err));
-    BOOST_CHECK_EQUAL(err, "EVIDENCE");
-    BOOST_CHECK(!eng.stored("DEV-002"));
-
-    BOOST_CHECK(!eng.Apply("DEV-003", "doc", static_cast<int64_t>(1), true, err));
-    BOOST_CHECK_EQUAL(err, "JOURNEY");
-    BOOST_CHECK(!eng.stored("DEV-003"));
-
-    BOOST_CHECK(!eng.Apply("E2E-001", "assign", static_cast<int64_t>(1), true, err));
-    BOOST_CHECK_EQUAL(err, "AUTHORITY");
-    BOOST_CHECK(!eng.stored("E2E-001"));
-
-    BOOST_CHECK(!eng.Apply("E2E-002", "altered", static_cast<int64_t>(1), true, err));
-    BOOST_CHECK_EQUAL(err, "MISMATCH");
-    BOOST_CHECK(!eng.stored("E2E-002"));
-
-    BOOST_CHECK(!eng.Apply("E2E-003", "hook", static_cast<int64_t>(1), true, err));
-    BOOST_CHECK_EQUAL(err, "SAFE");
-    BOOST_CHECK(!eng.stored("E2E-003"));
-
-    BOOST_CHECK(!eng.Apply("E2E-004", "one-attestor", static_cast<int64_t>(1), true, err));
-    BOOST_CHECK_EQUAL(err, "QUORUM");
-    BOOST_CHECK(!eng.stored("E2E-004"));
-
-    BOOST_CHECK(!eng.Apply("E2E-005", "shrink", static_cast<int64_t>(1), true, err));
-    BOOST_CHECK_EQUAL(err, "THRESHOLD");
-    BOOST_CHECK(!eng.stored("E2E-005"));
-
-    BOOST_CHECK(!eng.Spend(err));
-    BOOST_CHECK_EQUAL(err, modelnet::NIFDT_AUTOMATIC_SPEND);
-    BOOST_CHECK_EQUAL(err, "0");
+    // DS-SHARE-005: a versioned retraction does not change another artifact.
+    BOOST_REQUIRE(eng.PutArtifact("art-1", "body-a", err));
+    BOOST_REQUIRE(eng.PutArtifact("art-2", "body-b", err));
+    BOOST_CHECK(!eng.DisseminateRetraction("art-1", static_cast<int64_t>(1), "withdrawn", err));
+    BOOST_CHECK_EQUAL(err, "VERSION");
+    BOOST_CHECK(!eng.artifact_retracted("art-1"));
+    BOOST_REQUIRE(eng.DisseminateRetraction("art-1", static_cast<int64_t>(2), "withdrawn", err));
+    BOOST_CHECK(eng.artifact_retracted("art-1"));
+    BOOST_CHECK_EQUAL(eng.artifact_body("art-1"), "body-a");
+    BOOST_CHECK_EQUAL(eng.artifact_version("art-1"), static_cast<int64_t>(2));
+    BOOST_CHECK_EQUAL(eng.retraction_notices(), static_cast<int64_t>(1));
+    BOOST_CHECK(!eng.DisseminateRetraction("art-1", static_cast<int64_t>(2), "withdrawn", err));
+    BOOST_CHECK_EQUAL(err, "VERSION");
+    BOOST_CHECK_EQUAL(eng.retraction_notices(), static_cast<int64_t>(1));
+    BOOST_CHECK(!eng.artifact_retracted("art-2"));
+    BOOST_CHECK_EQUAL(eng.artifact_body("art-2"), "body-b");
+    BOOST_CHECK_EQUAL(eng.artifact_version("art-2"), static_cast<int64_t>(1));
     BOOST_CHECK(!eng.broadcast());
-    BOOST_CHECK_EQUAL(eng.bytes_moved(), static_cast<int64_t>(0));
-    BOOST_CHECK(!eng.windows_passed());
-    Idle(eng);
-}
 
-BOOST_AUTO_TEST_CASE(every_known_id_release_stays_unqualified)
-{
-    modelnet::Acc06 eng;
-    std::string err = "stale";
+    // DS-STD-001: STIX versions 2.0 and 2.1, and one external id maps to one object.
+    BOOST_REQUIRE(eng.MapExternalId("indicator--1", "2.1", "cve", "2024-1", err));
+    BOOST_CHECK_EQUAL(eng.object_for_external("cve", "2024-1"), "indicator--1");
+    BOOST_CHECK_EQUAL(eng.stix_version("indicator--1"), "2.1");
+    BOOST_CHECK(!eng.MapExternalId("indicator--2", "2.2", "cve", "2024-2", err));
+    BOOST_CHECK_EQUAL(err, "VERSION");
+    BOOST_CHECK(eng.object_for_external("cve", "2024-2").empty());
+    BOOST_CHECK(!eng.MapExternalId("indicator--9", "2.0", "cve", "2024-1", err));
+    BOOST_CHECK_EQUAL(err, "MAPPING");
+    BOOST_CHECK_EQUAL(eng.object_for_external("cve", "2024-1"), "indicator--1");
+    BOOST_CHECK_EQUAL(eng.stix_version("indicator--1"), "2.1");
+    BOOST_REQUIRE(eng.MapExternalId("indicator--2", "2.0", "cve", "2024-2", err));
+    BOOST_CHECK_EQUAL(eng.stix_version("indicator--2"), "2.0");
+    BOOST_CHECK(!eng.MapExternalId("indicator--1", "2.1", "cve", "2024-1", err));
+    BOOST_CHECK_EQUAL(err, modelnet::NIFDT_REPLAY);
+    BOOST_CHECK_EQUAL(eng.object_for_external("cve", "2024-1"), "indicator--1");
 
-    for (const KnownRow& row : kKnown) {
-        if (row.refusal != nullptr) {
-            BOOST_CHECK(!eng.Apply(row.id, row.refusal, static_cast<int64_t>(1), true, err));
-            if (std::string(row.id) == "BUILD-002") {
-                BOOST_CHECK_EQUAL(err, modelnet::NIFDT_UNQUALIFIED);
-                BOOST_CHECK(!eng.windows_passed());
-            }
-            BOOST_CHECK_EQUAL(err, row.code);
-            BOOST_CHECK(!eng.stored(row.id));
-        }
-        if (std::string(row.id) == "BUILD-002") {
-            BOOST_CHECK(!eng.Apply(row.id, "macos", static_cast<int64_t>(1), true, err));
-            BOOST_CHECK_EQUAL(err, modelnet::NIFDT_UNQUALIFIED);
-            BOOST_CHECK_EQUAL(err, "UNQUALIFIED");
-            BOOST_CHECK(!eng.stored(row.id));
-            BOOST_CHECK(!eng.windows_passed());
-        }
-        BOOST_CHECK(eng.Apply(row.id, "s1", static_cast<int64_t>(1), true, err));
-        BOOST_CHECK(err.empty());
-        BOOST_CHECK(eng.stored(row.id));
-        BOOST_CHECK_EQUAL(eng.text(row.id), "s1");
-        BOOST_CHECK_EQUAL(eng.classification(), "SIMULATION_NOT_HARDWARE_MEASUREMENT");
-        BOOST_CHECK(!eng.Apply(row.id, "s1", static_cast<int64_t>(1), true, err));
-        BOOST_CHECK_EQUAL(err, modelnet::NIFDT_REPLAY);
-        BOOST_CHECK_EQUAL(err, "REPLAY");
-        BOOST_CHECK_EQUAL(eng.text(row.id), "s1");
-        BOOST_CHECK(!eng.Apply(row.id, "s2", static_cast<int64_t>(1), true, err));
-        BOOST_CHECK_EQUAL(err, "UNCHANGED");
-        BOOST_CHECK_EQUAL(eng.text(row.id), "s1");
-    }
+    // DS-STD-002: write permission, read permission, and a page bound.
+    BOOST_REQUIRE(eng.OpenCollection("col", true, true, err));
+    BOOST_REQUIRE(eng.AddToCollection("col", "o1", err));
+    BOOST_REQUIRE(eng.AddToCollection("col", "o2", err));
+    BOOST_REQUIRE(eng.AddToCollection("col", "o3", err));
+    std::vector<std::string> page;
+    bool more = true;
+    BOOST_CHECK(!eng.SyncCollection("col", static_cast<int64_t>(0), page, more, err));
+    BOOST_CHECK_EQUAL(err, "BOUND");
+    BOOST_CHECK(page.empty());
+    BOOST_REQUIRE(eng.SyncCollection("col", static_cast<int64_t>(2), page, more, err));
+    BOOST_REQUIRE_EQUAL(page.size(), static_cast<std::size_t>(2));
+    BOOST_CHECK_EQUAL(page[0], "o1");
+    BOOST_CHECK_EQUAL(page[1], "o2");
+    BOOST_CHECK(more);
+    BOOST_REQUIRE(eng.SyncCollection("col", static_cast<int64_t>(2), page, more, err));
+    BOOST_REQUIRE_EQUAL(page.size(), static_cast<std::size_t>(1));
+    BOOST_CHECK_EQUAL(page[0], "o3");
+    BOOST_CHECK(!more);
+    BOOST_REQUIRE(eng.OpenCollection("ro", true, false, err));
+    BOOST_CHECK(!eng.AddToCollection("ro", "blocked", err));
+    BOOST_CHECK_EQUAL(err, "TAXII");
+    BOOST_CHECK_EQUAL(eng.collection_size("ro"), static_cast<int64_t>(0));
+    BOOST_REQUIRE(eng.OpenCollection("wo", false, true, err));
+    BOOST_REQUIRE(eng.AddToCollection("wo", "hidden", err));
+    BOOST_CHECK(!eng.SyncCollection("wo", static_cast<int64_t>(1), page, more, err));
+    BOOST_CHECK_EQUAL(err, "TAXII");
+    BOOST_CHECK(page.empty());
+    BOOST_CHECK_EQUAL(eng.collection_size("wo"), static_cast<int64_t>(1));
 
-    BOOST_CHECK(!eng.Apply("BUILD-002", "windows", static_cast<int64_t>(1), true, err));
+    // DS-STD-003: mapping versions accumulate and the raw event stays.
+    BOOST_REQUIRE(eng.PreserveOcsf("evt-1", "1.1.0", "raw-1", err));
+    BOOST_CHECK_EQUAL(eng.ocsf_raw("evt-1"), "raw-1");
+    BOOST_CHECK(eng.ocsf_has_version("evt-1", "1.1.0"));
+    BOOST_REQUIRE(eng.PreserveOcsf("evt-1", "1.2.0", "raw-1", err));
+    BOOST_CHECK(eng.ocsf_has_version("evt-1", "1.1.0"));
+    BOOST_CHECK(eng.ocsf_has_version("evt-1", "1.2.0"));
+    BOOST_CHECK_EQUAL(eng.ocsf_raw("evt-1"), "raw-1");
+    BOOST_CHECK(!eng.PreserveOcsf("evt-1", "1.3.0", "raw-2", err));
+    BOOST_CHECK_EQUAL(err, "LINEAGE");
+    BOOST_CHECK_EQUAL(eng.ocsf_raw("evt-1"), "raw-1");
+    BOOST_CHECK(!eng.ocsf_has_version("evt-1", "1.3.0"));
+    BOOST_CHECK(eng.ocsf_has_version("evt-1", "1.1.0"));
+
+    // DS-STD-004: every advertised backend must accept the rule.
+    BOOST_CHECK_EQUAL(eng.advertised_backends(), static_cast<int64_t>(2));
+    BOOST_CHECK(!eng.AdvertiseBackend("windows", err));
     BOOST_CHECK_EQUAL(err, modelnet::NIFDT_UNQUALIFIED);
-    BOOST_CHECK_EQUAL(eng.text("BUILD-002"), "s1");
-    BOOST_CHECK(eng.stored("BUILD-002"));
+    BOOST_CHECK(!eng.windows_passed());
+    BOOST_CHECK(!eng.AdvertiseBackend("macos", err));
+    BOOST_CHECK_EQUAL(err, modelnet::NIFDT_UNQUALIFIED);
+    BOOST_CHECK(!eng.AdvertiseBackend("other", err));
+    BOOST_CHECK_EQUAL(err, "BACKEND");
+    BOOST_CHECK_EQUAL(eng.advertised_backends(), static_cast<int64_t>(2));
+    BOOST_CHECK(!eng.ValidateRule("rule-one", "condition:selection", err));
+    BOOST_CHECK_EQUAL(err, "BACKEND");
+    BOOST_CHECK(!eng.rule_validated("rule-one"));
+    BOOST_REQUIRE(eng.ValidateRule("rule-one", "selection:proc condition:selection", err));
+    BOOST_CHECK(eng.rule_validated("rule-one"));
+    BOOST_CHECK(!eng.ValidateRule("rule-one", "selection:proc condition:selection", err));
+    BOOST_CHECK_EQUAL(err, modelnet::NIFDT_REPLAY);
+    BOOST_CHECK(eng.rule_validated("rule-one"));
     BOOST_CHECK(!eng.windows_passed());
     BOOST_CHECK(!eng.gpu_passed());
 
-    BOOST_CHECK(!eng.Apply("MIG-001", "wallet", static_cast<int64_t>(1), true, err));
-    BOOST_CHECK_EQUAL(err, "UNTOUCHED");
-    BOOST_CHECK_EQUAL(eng.text("MIG-001"), "s1");
+    // DS-STD-005: malformed and oversized events are refused; a small event is kept.
+    const std::string well = "{\"event_type\":\"alert\"}";
+    BOOST_CHECK(!eng.ParseEve("bad", "{\"timestamp\":1}", err));
+    BOOST_CHECK_EQUAL(err, "MALFORMED");
+    BOOST_CHECK(eng.eve_body("bad").empty());
+    std::string oversized(modelnet::Acc06::kEveMax + static_cast<std::size_t>(1), 'x');
+    oversized.front() = '{';
+    oversized.back() = '}';
+    BOOST_CHECK(!eng.ParseEve("big", oversized, err));
+    BOOST_CHECK_EQUAL(err, "OVERSIZE");
+    BOOST_CHECK(eng.eve_body("big").empty());
+    BOOST_REQUIRE(eng.ParseEve("good", well, err));
+    BOOST_CHECK_EQUAL(eng.eve_body("good"), well);
+    BOOST_CHECK(!eng.ParseEve("good", "{\"event_type\":\"other\"}", err));
+    BOOST_CHECK_EQUAL(err, modelnet::NIFDT_REPLAY);
+    BOOST_CHECK_EQUAL(eng.eve_body("good"), well);
+    BOOST_CHECK(!eng.release_qualified());
 
-    BOOST_CHECK(!eng.Apply("DEV-001", "fp8", static_cast<int64_t>(1), true, err));
-    BOOST_CHECK_EQUAL(err, modelnet::NIFDT_ENGINE_ABSENT);
-    BOOST_CHECK_EQUAL(eng.text("DEV-001"), "s1");
+    // DS-STD-006: only the approved typed subset is imported, and nothing launches.
+    BOOST_CHECK(!eng.ImportTyped("exec", err));
+    BOOST_CHECK_EQUAL(err, "CACAO");
+    BOOST_CHECK(!eng.cacao_imported("exec"));
+    BOOST_CHECK(!eng.launched());
+    BOOST_REQUIRE(eng.ImportTyped("log", err));
+    BOOST_CHECK(eng.cacao_imported("log"));
+    BOOST_REQUIRE(eng.ImportTyped("contain", err));
+    BOOST_REQUIRE(eng.ImportTyped("allow", err));
+    BOOST_REQUIRE(eng.ImportTyped("deny", err));
+    BOOST_CHECK(!eng.ImportTyped("log", err));
+    BOOST_CHECK_EQUAL(err, modelnet::NIFDT_REPLAY);
+    BOOST_CHECK(eng.cacao_imported("log"));
+    BOOST_CHECK(!eng.ImportTyped("contain-extra", err));
+    BOOST_CHECK_EQUAL(err, "CACAO");
+    BOOST_CHECK(!eng.cacao_imported("contain-extra"));
+    BOOST_CHECK(!eng.launched());
 
-    BOOST_CHECK(!eng.Apply("DEV-001", "private trajectory", static_cast<int64_t>(1), true, err));
-    BOOST_CHECK_EQUAL(err, modelnet::NIFDT_PRIVATE_DATA);
-    BOOST_CHECK_EQUAL(eng.text("DEV-001"), "s1");
-
-    BOOST_CHECK(!eng.Release(err));
-    BOOST_CHECK_EQUAL(err, modelnet::NIFDT_UNQUALIFIED);
-    BOOST_CHECK_EQUAL(err, "UNQUALIFIED");
+    ExpectQuiet(eng);
+    BOOST_CHECK(eng.hypothesis_persisted("hyp"));
+    BOOST_CHECK(eng.evidence_retracted("neg"));
+    BOOST_CHECK_EQUAL(eng.procedure_of("run"), "steps-v2");
+    BOOST_CHECK(eng.has_receipt("act-d0"));
+    BOOST_CHECK(eng.published("art-ok"));
+    BOOST_CHECK(!eng.training_allowed("case-b"));
+    BOOST_CHECK_EQUAL(eng.artifact_body("art-2"), "body-b");
+    BOOST_CHECK(eng.rule_validated("rule-one"));
+    BOOST_CHECK_EQUAL(eng.hosts(), static_cast<int64_t>(1));
+    BOOST_CHECK(!eng.gpu_passed());
+    BOOST_CHECK(!eng.windows_passed());
     BOOST_CHECK(!eng.release_qualified());
     BOOST_CHECK(!eng.hardware_qualified());
-    BOOST_CHECK(!eng.qualified());
-    BOOST_CHECK(!eng.advertised());
-    BOOST_CHECK(!eng.launched());
-    BOOST_CHECK(!eng.gpu());
-    BOOST_CHECK(!eng.gpu_passed());
-    BOOST_CHECK(!eng.windows_passed());
-    BOOST_CHECK(!eng.broadcast());
-    BOOST_CHECK_EQUAL(eng.hosts(), static_cast<int64_t>(1));
-    BOOST_CHECK_EQUAL(eng.physical_hosts(), static_cast<int64_t>(1));
-    BOOST_CHECK_EQUAL(eng.bytes_moved(), static_cast<int64_t>(0));
-    BOOST_CHECK(eng.stored("MIG-001"));
-    BOOST_CHECK_EQUAL(eng.text("E2E-005"), "s1");
-    BOOST_CHECK(eng.stored("BUILD-001"));
-    BOOST_CHECK(eng.stored("DEV-001"));
-    BOOST_CHECK(!eng.stored("MIG-004"));
-    BOOST_CHECK(!eng.stored("E2E-006"));
-    BOOST_CHECK(!eng.Spend(err));
-    BOOST_CHECK_EQUAL(err, modelnet::NIFDT_AUTOMATIC_SPEND);
-    Idle(eng);
-}
-
-BOOST_AUTO_TEST_CASE(hosts_stay_one)
-{
-    modelnet::Acc06 eng;
-    std::string err = "stale";
-    BOOST_CHECK(!eng.Hosts(static_cast<int64_t>(2), err));
-    BOOST_CHECK_EQUAL(err, "HOSTS");
-    BOOST_CHECK_EQUAL(eng.hosts(), static_cast<int64_t>(1));
-    BOOST_CHECK_EQUAL(eng.physical_hosts(), static_cast<int64_t>(1));
-    BOOST_CHECK(!eng.Hosts(static_cast<int64_t>(0), err));
-    BOOST_CHECK_EQUAL(err, "HOSTS");
-    BOOST_CHECK(eng.Hosts(static_cast<int64_t>(1), err));
-    BOOST_CHECK(err.empty());
-    BOOST_CHECK_EQUAL(eng.hosts(), static_cast<int64_t>(1));
-    BOOST_CHECK_EQUAL(eng.bytes_moved(), static_cast<int64_t>(0));
-    BOOST_CHECK(!eng.broadcast());
-    BOOST_CHECK(!eng.windows_passed());
-    BOOST_CHECK(!eng.gpu_passed());
-    Idle(eng);
+    BOOST_CHECK(!eng.passed());
 }
 
 BOOST_AUTO_TEST_SUITE_END()
