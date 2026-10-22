@@ -729,7 +729,8 @@ bool AtomicWrite(const fs::path& dir, const std::string& bytes, std::string& err
     const bool committed = n == bytes.size() && FileCommit(file);
     const int closed = fclose(file);
     if (!committed || closed != 0 || !RenameOver(tmp, dest)) {
-        fs::remove(tmp);
+        std::error_code ec;
+        fs::remove(tmp, ec);
         return Fail(err, "BTX035_RECOVERY_REQUIRED");
     }
     DirectoryCommit(dir);

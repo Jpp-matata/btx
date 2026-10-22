@@ -213,6 +213,70 @@ BOOST_AUTO_TEST_CASE(missing_store_initializes)
     modelnet::ResetLabApi();
 }
 
+BOOST_AUTO_TEST_CASE(failed_write_is_rolled_back_and_does_not_block_later_writes)
+{
+    BOOST_REQUIRE(!m_path_root.empty());
+    TempTree root{m_path_root / "lab-lifecycle-write-fault"};
+    LabDirEnv env(root.path);
+    PrepareDir(root.path);
+    const fs::path image = root.path / "lab.json";
+    UniValue ignored;
+    std::string err;
+    BOOST_REQUIRE(Call("lab.identity_create", Identity("first", "lifecycle-fault-first"), ignored, err));
+
+    // The temp file cannot be opened, so the write fails before the rename and lab.json is untouched.
+    const std::string before = ReadFile(image);
+    const fs::path tmp = root.path / "lab.json.tmp";
+    fs::create_directories(tmp);
+    BOOST_CHECK(!Call("lab.identity_create", Identity("blocked", "lifecycle-fault-blocked"), ignored, err));
+    BOOST_CHECK_EQUAL(err, "BTX035_RECOVERY_REQUIRED");
+    BOOST_CHECK_EQUAL(ReadFile(image), before);
+    fs::remove(tmp);
+    BOOST_REQUIRE(Call("lab.info", UniValue(UniValue::VOBJ), ignored, err));
+    BOOST_CHECK(!ignored.exists("recovery_required"));
+    BOOST_REQUIRE(Call("lab.identity_create", Identity("blocked", "lifecycle-fault-blocked"), ignored, err));
+
+    // With a model stored, every write also saves pieces. A pieces path that is not a directory throws after
+    // lab.json was replaced: the call fails with a code, lab.json is put back, and the key is not remembered.
+    const std::string intent(96, '1');
+    UniValue prepare(UniValue::VOBJ);
+    prepare.pushKV("intent_id", intent);
+    prepare.pushKV("idempotency_key", "lifecycle-fault-prepare");
+    prepare.pushKV("expected_state", UniValue());
+    BOOST_REQUIRE(Call("lab.action_prepare", prepare, ignored, err));
+    UniValue exec(UniValue::VOBJ);
+    exec.pushKV("input_capsule_id", std::string(96, '2'));
+    exec.pushKV("recipe_id", "INTEGER_MODEL");
+    exec.pushKV("runtime_binding_id", std::string(96, '3'));
+    exec.pushKV("research_grant_id", std::string(96, '4'));
+    exec.pushKV("local_capability_grant_id", intent);
+    exec.pushKV("idempotency_key", "lifecycle-fault-execute");
+    exec.pushKV("expected_state", UniValue());
+    BOOST_REQUIRE(Call("lab.research_execute", exec, ignored, err));
+    const fs::path pieces = root.path / "pieces";
+    const fs::path kept = root.path / "pieces.kept";
+    BOOST_REQUIRE(fs::is_directory(pieces));
+    fs::rename(pieces, kept);
+    WriteFile(pieces, "not a directory");
+    UniValue disk;
+    BOOST_REQUIRE(disk.read(ReadFile(image)));
+    const size_t identities = disk["identity_pk"].size();
+    BOOST_CHECK(!Call("lab.identity_create", Identity("thrown", "lifecycle-fault-thrown"), ignored, err));
+    BOOST_CHECK_EQUAL(err, "BTX035_RECOVERY_REQUIRED");
+    BOOST_REQUIRE(disk.read(ReadFile(image)));
+    BOOST_CHECK_EQUAL(disk["identity_pk"].size(), identities);
+    BOOST_CHECK(ReadFile(image).find("lifecycle-fault-thrown") == std::string::npos);
+    BOOST_CHECK(!Call("lab.identity_create", Identity("thrown", "lifecycle-fault-thrown"), ignored, err));
+    BOOST_CHECK_EQUAL(err, "BTX035_RECOVERY_REQUIRED");
+    fs::remove(pieces);
+    fs::rename(kept, pieces);
+    BOOST_REQUIRE(Call("lab.identity_create", Identity("thrown", "lifecycle-fault-thrown"), ignored, err));
+    BOOST_REQUIRE(disk.read(ReadFile(image)));
+    BOOST_CHECK_EQUAL(disk["identity_pk"].size(), identities + 1);
+
+    modelnet::ResetLabApi();
+}
+
 BOOST_AUTO_TEST_CASE(idempotency_replays_one_result_and_conflicts_on_a_different_body)
 {
     BOOST_REQUIRE(!m_path_root.empty());

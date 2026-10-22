@@ -2090,11 +2090,13 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
                     std::string remote_json;
                     std::string call_err;
                     const uint64_t generation = store.commit_generation;
+                    const std::string subject = store.token_subject;
                     bool called = false;
                     {
                         REVERSE_LOCK(api_lock);
                         called = LabCallLoopback(peer.host, peer.port, peer.user, peer.password, "lab.research_query", inner.write(), remote_json, call_err);
                     }
+                    store.token_subject = subject;
                     if (!GenerationHeld(store, generation, err)) return false;
                     if (!called) {
                         if (call_err != "BTX035_TRANSPORT") return Fail(err, call_err.c_str());
@@ -2340,6 +2342,7 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
                     bool saw_piece = false;
                     bool piece_bad = false;
                     const uint64_t piece_generation = store.commit_generation;
+                    const std::string piece_subject = store.token_subject;
                     {
                         REVERSE_LOCK(api_lock);
                         for (uint64_t index = 0; index < MODEL_MAX_PIECES; ++index) {
@@ -2374,6 +2377,7 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
                             if (raw.size() != 32) break;
                         }
                     }
+                    store.token_subject = piece_subject;
                     if (!GenerationHeld(store, piece_generation, err)) return false;
                     if (piece_bad) return Fail(err, piece_err.c_str());
                     if (saw_piece) {
@@ -2397,11 +2401,13 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
                     std::string manifest;
                     std::string call_err;
                     const uint64_t pull_generation = store.commit_generation;
+                    const std::string pull_subject = store.token_subject;
                     bool pulled_manifest = false;
                     {
                         REVERSE_LOCK(api_lock);
                         pulled_manifest = PullExchangeLoopback(peer.host, peer.port, peer.user, peer.password, resource["repository_id"].get_str(), manifest, call_err);
                     }
+                    store.token_subject = pull_subject;
                     if (!GenerationHeld(store, pull_generation, err)) return false;
                     if (!pulled_manifest) {
                         if (call_err != "BTX035_TRANSPORT") return Fail(err, call_err.c_str());
@@ -3446,12 +3452,14 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
         if (port_num <= 0 || port_num > 65535) return Fail(err, "BTX035_SCHEMA");
         std::string manifest;
         const uint64_t generation = store.commit_generation;
+        const std::string subject = store.token_subject;
         bool pulled = false;
         {
             REVERSE_LOCK(api_lock);
             pulled = PullExchangeLoopback(RequireStr(req, "host"), static_cast<uint16_t>(port_num), RequireStr(req, "rpc_user"),
                                           RequireStr(req, "rpc_password"), RequireStr(req, "repository_id"), manifest, err);
         }
+        store.token_subject = subject;
         if (!GenerationHeld(store, generation, err)) return false;
         if (!pulled) return false;
         std::vector<ExchangeObject> objects;
@@ -3654,8 +3662,20 @@ bool DispatchLabApi(const std::string& method, const std::string& request_json, 
     }
     Remember(req, digest, response_json);
     if (!DurableRead(method)) {
-        if (!PersistDurable(err)) {
-            const bool recovery = prior_recovery || err == "BTX035_RECOVERY_REQUIRED";
+        bool persisted = false;
+        try {
+            persisted = PersistDurable(err);
+        } catch (const std::filesystem::filesystem_error&) {
+            err = "BTX035_RECOVERY_REQUIRED";
+        }
+        if (!persisted) {
+            bool recovery = prior_recovery;
+            if (!recovery && err == "BTX035_RECOVERY_REQUIRED") {
+                // A failed write leaves lab.json untouched, or it is put back below. Block writes only when it cannot be read.
+                LabDiskImage on_disk;
+                std::string read_err;
+                recovery = !LoadLabDisk(on_disk, read_err);
+            }
             if (!recovery) {
                 std::string rollback_err;
                 (void)SaveLabDisk(prior_image, rollback_err);
@@ -3664,7 +3684,13 @@ bool DispatchLabApi(const std::string& method, const std::string& request_json, 
             response_json.clear();
             return false;
         }
-        if (!PublishAdmission(method, req, err)) {
+        bool published = false;
+        try {
+            published = PublishAdmission(method, req, err);
+        } catch (const std::filesystem::filesystem_error&) {
+            err = "BTX035_RECOVERY_REQUIRED";
+        }
+        if (!published) {
             std::string rollback_err;
             const bool rolled_back = SaveLabDisk(prior_image, rollback_err);
             RevertStore(std::move(prior_image), std::move(prior_secrets.keys), !rolled_back, prior_generation);
