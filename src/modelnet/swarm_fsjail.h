@@ -26,6 +26,15 @@ namespace modelnet {
  * path outside root can no longer be opened. Otherwise it exits 126
  * without exec. The parent reports that 126, a signal, or a fork failure
  * as JAIL_ABSENT. Only an exec after that proof is JAILED.
+ *
+ * macOS has no mount namespace. There the child applies a kernel sandbox
+ * (Seatbelt, see swarm_sandbox_macos.h) that limits reads, writes and exec
+ * to the canonical root, leaves only the read-only system runtime readable
+ * outside it, and denies network, Mach service lookups, IOKit and other
+ * processes. The child execs only after a directory outside root that
+ * opened before the sandbox no longer opens and a loopback bind is refused;
+ * otherwise it exits 126. The helper runs by its path below the canonical
+ * root. Other platforms exit 126: no jail, no exec.
  */
 struct SwarmFilesystemJailRequest {
     fs::path helper;

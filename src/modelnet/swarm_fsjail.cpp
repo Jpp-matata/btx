@@ -9,10 +9,14 @@
 #include <modelnet/swarm_fsjail.h>
 
 #include <fcntl.h>
+#if defined(__linux__)
 #include <sched.h>
 #include <sys/mount.h>
-#include <sys/stat.h>
 #include <sys/syscall.h>
+#elif defined(__APPLE__)
+#include <modelnet/swarm_sandbox_macos.h>
+#endif
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -22,9 +26,11 @@
 namespace modelnet {
 namespace {
 
+#if defined(__linux__)
 constexpr char PUT_OLD_NAME[] = ".btx-fsjail-old";
 constexpr char PUT_OLD_IN_JAIL[] = "/.btx-fsjail-old";
 constexpr size_t MAP_TEXT_MAX = 64;
+#endif
 
 bool PathContainsDotDot(const fs::path& path)
 {
@@ -71,6 +77,7 @@ SwarmFilesystemJailResult Refuse(const char* code, std::string& err)
     return result;
 }
 
+#if defined(__linux__)
 bool WriteAll(const char* path, const char* data, size_t length)
 {
     const int fd = open(path, O_WRONLY | O_CLOEXEC);
@@ -106,6 +113,8 @@ bool MapUser(const char* uid_map, int uid_len, const char* gid_map, int gid_len)
     }
     return WriteAll("/proc/self/gid_map", gid_map, static_cast<size_t>(gid_len));
 }
+
+#endif
 
 bool DirectoryOpenable(const char* path)
 {
@@ -146,6 +155,7 @@ fs::path SelectWitness(const fs::path& root)
     return {};
 }
 
+#if defined(__linux__)
 int PivotRoot(const char* new_root, const char* put_old)
 {
     return syscall(SYS_pivot_root, new_root, put_old);
@@ -205,6 +215,14 @@ bool ConfinedToRoot(const fs::path& root, const fs::path& put_old, const fs::pat
     }
     return true;
 }
+#endif
+
+void CloseInheritedDescriptors()
+{
+    for (int fd = STDERR_FILENO + 1; fd < 1024; ++fd) {
+        close(fd);
+    }
+}
 
 } // namespace
 
@@ -223,22 +241,42 @@ SwarmFilesystemJailResult SwarmRunFilesystemJail(const SwarmFilesystemJailReques
         return Refuse("PATH", err);
     }
 
+    const fs::path relative{request.helper.lexically_relative(request.root)};
+#if defined(__linux__)
     const fs::path root = request.root;
     const fs::path put_old = root / PUT_OLD_NAME;
     const fs::path witness = SelectWitness(root);
-    const fs::path relative{request.helper.lexically_relative(root)};
     const fs::path jailed_helper = fs::path("/") / relative;
     const bool helper_in_jail = !jailed_helper.empty() && jailed_helper != fs::path("/");
     char uid_map[MAP_TEXT_MAX];
     char gid_map[MAP_TEXT_MAX];
     const int uid_len = snprintf(uid_map, sizeof(uid_map), "0 %lu 1\n", static_cast<unsigned long>(geteuid()));
     const int gid_len = snprintf(gid_map, sizeof(gid_map), "0 %lu 1\n", static_cast<unsigned long>(getegid()));
+#elif defined(__APPLE__)
+    // macOS has no mount namespace. The kernel sandbox limits the
+    // filesystem to root instead (see SwarmSandboxJailProfile). Seatbelt
+    // matches resolved paths, so root is canonicalized first; the helper is
+    // exec'd by its path below the canonical root, and a symlink that leaves
+    // root is refused at exec. The witness (a directory outside root that
+    // opens now) must stop opening once the sandbox is applied.
+    std::error_code canonical_error;
+    const fs::path root = fs::canonical(request.root, canonical_error);
+    if (canonical_error || root.empty()) {
+        return Refuse("JAIL_ABSENT", err);
+    }
+    const fs::path witness = SelectWitness(root);
+    const fs::path jailed_helper = root / relative;
+    const std::string profile = SwarmSandboxJailProfile(root);
+#else
+    const fs::path jailed_helper = request.helper;
+#endif
 
     const pid_t pid = fork();
     if (pid < 0) {
         return Refuse("JAIL_ABSENT", err);
     }
     if (pid == 0) {
+#if defined(__linux__)
         // User namespace, then mount namespace. Either failure exits
         // before exec. A successful pair still does not prove that root
         // is a private mount.
@@ -252,9 +290,16 @@ SwarmFilesystemJailResult SwarmRunFilesystemJail(const SwarmFilesystemJailReques
             !ConfinedToRoot(root, put_old, witness)) {
             _exit(126);
         }
-        for (int fd = STDERR_FILENO + 1; fd < 1024; ++fd) {
-            close(fd);
+#elif defined(__APPLE__)
+        if (witness.empty() || !DirectoryOpenable(witness.c_str()) || !SwarmSandboxApply(profile) ||
+            DirectoryOpenable(witness.c_str()) || !SwarmSandboxNetworkProvenDenied()) {
+            _exit(126);
         }
+#else
+        // No filesystem jail on this platform: never exec unjailed.
+        _exit(126);
+#endif
+        CloseInheritedDescriptors();
         char* argv[] = {const_cast<char*>(jailed_helper.c_str()), nullptr};
         execv(jailed_helper.c_str(), argv);
         _exit(126);

@@ -27,6 +27,15 @@ namespace modelnet {
  * a user namespace and a network namespace, and execs the helper with no
  * extra arguments. Fork failure, or a child exit of 126, is
  * CONFINEMENT_ABSENT. An executed child is CONFINED.
+ *
+ * macOS has no network namespace and does not enforce RLIMIT_AS. There the
+ * child sets RLIMIT_CPU and RLIMIT_NOFILE (verified with getrlimit),
+ * applies a kernel sandbox that denies every network operation and every
+ * Mach service lookup (swarm_sandbox_macos.h), and execs only after a
+ * loopback bind is refused. The parent enforces max_address_bytes on the
+ * child's physical footprint: sampled every 10 ms, SIGKILL above the
+ * limit (child_status then reports that signal). Other platforms exit 126:
+ * no confinement, no exec.
  */
 struct SwarmConfineRequest {
     fs::path helper;

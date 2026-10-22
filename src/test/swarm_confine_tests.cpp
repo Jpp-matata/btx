@@ -11,7 +11,10 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
 
+#include <csignal>
+
 #include <fstream>
+#include <iterator>
 #include <string>
 
 namespace {
@@ -142,5 +145,83 @@ BOOST_AUTO_TEST_CASE(confined_helper_or_namespace_absent)
         BOOST_CHECK_EQUAL(WEXITSTATUS(result.child_status), 0);
     }
 }
+
+#if defined(__APPLE__) && defined(BTX_SWARM_JAIL_PROBE)
+namespace {
+
+fs::path CopyProbe(const fs::path& root, const char* marker)
+{
+    fs::remove_all(root);
+    fs::create_directories(root);
+    const fs::path helper = root / "probe";
+    fs::copy_file(fs::path{BTX_SWARM_JAIL_PROBE}, helper, fs::copy_options::overwrite_existing);
+    BOOST_REQUIRE(chmod(helper.c_str(), S_IRUSR | S_IWUSR | S_IXUSR) == 0);
+    if (marker != nullptr) {
+        WriteRegularFile(root / marker);
+    }
+    return helper;
+}
+
+std::string ProbeOutput(const fs::path& root)
+{
+    std::ifstream in{root / "probe.out"};
+    return std::string{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+}
+
+} // namespace
+
+// macOS: kernel sandbox instead of a network namespace. The helper runs,
+// cannot bind a loopback socket, and sees the CPU and descriptor limits.
+BOOST_AUTO_TEST_CASE(macos_helper_runs_confined)
+{
+    const fs::path root = fs::temp_directory_path() / "btx-swarm-confine-macos";
+    const fs::path helper = CopyProbe(root, nullptr);
+    modelnet::SwarmConfineRequest request = BaseRequest(helper, root);
+    request.max_address_bytes = 1LL << 30;
+    std::string err = "stale";
+    const modelnet::SwarmConfineResult result = modelnet::SwarmRunConfined(request, err);
+    const std::string out = ProbeOutput(root);
+    fs::remove_all(root);
+    BOOST_CHECK_EQUAL(result.code, "CONFINED");
+    BOOST_CHECK(result.launched && result.limits_applied && err.empty());
+    BOOST_CHECK(WIFEXITED(result.child_status));
+    BOOST_CHECK_EQUAL(WEXITSTATUS(result.child_status), 0);
+    BOOST_CHECK(out.find("loopback_bind=0\n") != std::string::npos);
+    BOOST_CHECK(out.find("nofile=64\n") != std::string::npos);
+    BOOST_CHECK(out.find("cpu=30\n") != std::string::npos);
+}
+
+// macOS ignores RLIMIT_AS; the parent kills a child whose footprint passes
+// max_address_bytes.
+BOOST_AUTO_TEST_CASE(macos_address_limit_enforced)
+{
+    const fs::path root = fs::temp_directory_path() / "btx-swarm-confine-macos-alloc";
+    const fs::path helper = CopyProbe(root, "alloc.mode");
+    modelnet::SwarmConfineRequest request = BaseRequest(helper, root);
+    request.max_address_bytes = 256LL << 20;
+    std::string err;
+    const modelnet::SwarmConfineResult result = modelnet::SwarmRunConfined(request, err);
+    fs::remove_all(root);
+    BOOST_CHECK_EQUAL(result.code, "CONFINED");
+    BOOST_CHECK(WIFSIGNALED(result.child_status));
+    BOOST_CHECK_EQUAL(WTERMSIG(result.child_status), SIGKILL);
+}
+
+// RLIMIT_CPU is enforced by the kernel: SIGXCPU at the limit (SIGKILL if
+// the hard limit is passed first).
+BOOST_AUTO_TEST_CASE(macos_cpu_limit_enforced)
+{
+    const fs::path root = fs::temp_directory_path() / "btx-swarm-confine-macos-spin";
+    const fs::path helper = CopyProbe(root, "spin.mode");
+    modelnet::SwarmConfineRequest request = BaseRequest(helper, root);
+    request.max_cpu_seconds = 1;
+    std::string err;
+    const modelnet::SwarmConfineResult result = modelnet::SwarmRunConfined(request, err);
+    fs::remove_all(root);
+    BOOST_CHECK_EQUAL(result.code, "CONFINED");
+    BOOST_CHECK(WIFSIGNALED(result.child_status));
+    BOOST_CHECK(WTERMSIG(result.child_status) == SIGXCPU || WTERMSIG(result.child_status) == SIGKILL);
+}
+#endif
 
 BOOST_AUTO_TEST_SUITE_END()

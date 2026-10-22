@@ -2543,6 +2543,10 @@ add_library(bitcoin_modelnet STATIC
     hcp_crl12.cpp
     hcp_engine.cpp
 )
+if(APPLE)
+  # macOS confinement for swarm_confine and swarm_fsjail (kernel sandbox; Linux uses namespaces).
+  target_sources(bitcoin_modelnet PRIVATE swarm_sandbox_macos.cpp)
+endif()
 target_link_libraries(bitcoin_modelnet
   PUBLIC
     core_interface
