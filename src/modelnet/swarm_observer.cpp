@@ -257,6 +257,10 @@ bool SwarmReadCatalog(const fs::path& modeldir, SwarmCatalog& entries, std::stri
             }
         }
     }
+    // Index the mapping keys once; map_root.exists() and map_root[] are linear
+    // scans, which made the loop below O(catalog rows x mapping keys).
+    std::map<std::string_view, size_t> mapped;
+    for (size_t i = 0; i < map_root.getKeys().size(); ++i) mapped.emplace(map_root.getKeys()[i], i);
     std::map<std::string, Row> fresh;
     for (const UniValue& item : root["models"].getValues()) {
         if (!item.isObject()) {
@@ -277,8 +281,8 @@ bool SwarmReadCatalog(const fs::path& modeldir, SwarmCatalog& entries, std::stri
             err = "ID";
             return false;
         }
-        if (map_root.exists(row.artifact_id)) {
-            const UniValue& mapping = map_root[row.artifact_id];
+        if (const auto hit = mapped.find(row.artifact_id); hit != mapped.end()) {
+            const UniValue& mapping = map_root.getValues()[hit->second];
             if (!mapping.isObject() || !mapping.exists("lineage_id") || !mapping["lineage_id"].isStr()) {
                 err = "MAPPING_SCHEMA";
                 return false;
