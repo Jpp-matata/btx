@@ -138,6 +138,57 @@ BOOST_AUTO_TEST_CASE(second_form_keeps_the_first_membership)
     BOOST_CHECK_EQUAL(ReadFile(file), raw);
 }
 
+BOOST_AUTO_TEST_CASE(torn_membership_is_set_aside_and_formed_again)
+{
+    FormTree tree(m_path_root / "swarm-form-membership-torn");
+    const fs::path model = tree.path / "model";
+    fs::create_directories(model);
+
+    std::string err = "stale";
+    BOOST_REQUIRE(modelnet::SwarmFormPlane(model, err));
+    const fs::path file = model / "swarm" / modelnet::kMembershipFile;
+    const fs::path aside = fs::u8path(file.utf8string() + ".bad");
+    const std::string good = ReadFile(file);
+    BOOST_REQUIRE(!good.empty());
+
+    for (const std::string& torn : {std::string{}, good.substr(0, good.size() / 2), std::string("\0\xff", 2)}) {
+        WriteFile(file, torn);
+        err = "stale";
+        BOOST_REQUIRE(modelnet::SwarmFormPlane(model, err));
+        BOOST_CHECK(err.empty());
+        BOOST_CHECK_EQUAL(ReadFile(file), good);
+        BOOST_CHECK_EQUAL(ReadFile(aside), torn);
+
+        err = "stale";
+        BOOST_REQUIRE(modelnet::SwarmFormPlane(model, err));
+        BOOST_CHECK(err.empty());
+        BOOST_CHECK_EQUAL(ReadFile(file), good);
+    }
+}
+
+BOOST_AUTO_TEST_CASE(membership_with_spend_is_not_replaced)
+{
+    FormTree tree(m_path_root / "swarm-form-membership-spend");
+    const fs::path model = tree.path / "model";
+    fs::create_directories(model);
+
+    std::string err = "stale";
+    BOOST_REQUIRE(modelnet::SwarmFormPlane(model, err));
+    const fs::path file = model / "swarm" / modelnet::kMembershipFile;
+    std::string raw = ReadFile(file);
+    const std::string zero = "\"automatic_spend\":\"0\"";
+    const size_t at = raw.find(zero);
+    BOOST_REQUIRE(at != std::string::npos);
+    raw.replace(at, zero.size(), "\"automatic_spend\":\"1\"");
+    WriteFile(file, raw);
+
+    err = "stale";
+    BOOST_CHECK(!modelnet::SwarmFormPlane(model, err));
+    BOOST_CHECK_EQUAL(err, "SPEND");
+    BOOST_CHECK_EQUAL(ReadFile(file), raw);
+    BOOST_CHECK(!fs::exists(fs::u8path(file.utf8string() + ".bad")));
+}
+
 BOOST_AUTO_TEST_CASE(membership_symlink_is_not_written_through)
 {
     FormTree tree(m_path_root / "swarm-form-membership-symlink");

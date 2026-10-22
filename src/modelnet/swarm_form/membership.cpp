@@ -47,7 +47,16 @@ bool SwarmFormMembership::Form(const fs::path& swarm_dir, std::string& err)
         return false;
     }
     if (fs::exists(file)) {
-        return Load(swarm_dir, err);
+        if (Load(swarm_dir, err)) return true;
+        // A crash can leave an empty or torn file. Set a SCHEMA failure aside
+        // once and form again, instead of failing on every observer pass.
+        // Other refusals (READ, SPEND) stay refusals.
+        if (err != "SCHEMA") return false;
+        fs::rename(file, fs::u8path(file.utf8string() + ".bad"), ec);
+        if (ec) {
+            err = "RENAME";
+            return false;
+        }
     }
     m_member = LocalFormationMember();
     m_formed = true;
