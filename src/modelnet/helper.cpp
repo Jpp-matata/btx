@@ -10483,7 +10483,8 @@ static void TryPreserveRareTick(ModelCatalog& cat, Pq1Context& pq, const fs::pat
         if (!body.read(resp.body) || !body.isObject()) continue;
         const UniValue models = (body.exists("local") && body["local"].exists("models")) ? body["local"]["models"] : UniValue(UniValue::VARR);
         for (const auto& m : models.getValues()) {
-            if (!m.exists("model_id") || !m.exists("seeded") || !m["seeded"].get_bool()) continue;
+            if (!m.isObject() || !m.exists("model_id") || !m["model_id"].isStr() ||
+                !m.exists("seeded") || !m["seeded"].isBool() || !m["seeded"].get_bool()) continue;
             Digest48 id;
             std::string e;
             if (!Digest48::FromHex(m["model_id"].get_str(), id, e)) continue;
@@ -10497,7 +10498,13 @@ static void TryPreserveRareTick(ModelCatalog& cat, Pq1Context& pq, const fs::pat
             }
             PreserveCandidate c;
             c.model_id = id;
-            c.bytes = m.exists("bytes") ? m["bytes"].getInt<uint64_t>() : 0;
+            c.bytes = 0;
+            if (m.exists("bytes") && m["bytes"].isNum()) {
+                try {
+                    c.bytes = m["bytes"].getInt<uint64_t>();
+                } catch (const std::exception&) {
+                }
+            }
             c.observed_sources = 1;
             c.peer = endpoint;
             c.admission = AdmissionLevel::BYTES_VERIFIED;
@@ -10705,7 +10712,14 @@ int RunModelDaemon(HelperConfig cfg, std::atomic<bool>* stop)
             if (stop->load()) break;
             if (cat.Policy().preserve_rare ||
                 (cat.Policy().follow_configured_peers && cat.Policy().seed_mode == SeedMode::AUTO)) {
-                TryPreserveRareTick(cat, pq, pinfile, stop);
+                // The tick parses other peers' replies and nothing above this
+                // thread catches. A malformed reply must not terminate
+                // btx-modeld; skip the tick, as the inbound worker does.
+                try {
+                    TryPreserveRareTick(cat, pq, pinfile, stop);
+                } catch (const std::exception&) {
+                } catch (...) {
+                }
             }
         }
     });
