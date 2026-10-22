@@ -32,7 +32,11 @@
 #include <sys/syscall.h>
 #endif
 #ifdef __APPLE__
+#include <arpa/inet.h>
 #include <dlfcn.h>
+#include <libproc.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
 #endif
 #endif
 
@@ -148,6 +152,53 @@ inline bool NullStandardDescriptors()
     return ok;
 }
 
+#ifdef __APPLE__
+inline bool DirectoryOpenable(const char* path)
+{
+    const int fd = open(path, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    if (fd < 0) return false;
+    close(fd);
+    return true;
+}
+
+/** A directory outside root that the Seatbelt profile does not allow to be read. */
+inline fs::path SeatbeltWitness(const fs::path& root)
+{
+    for (const fs::path& candidate : {root.parent_path(), fs::path{"/private/etc"}}) {
+        if (candidate.empty() || candidate == candidate.root_path()) continue;
+        if (!DirectoryOpenable(candidate.c_str())) continue;
+        bool readable = false;
+        for (const char* allowed : {"/System/Library", "/usr/lib"}) {
+            const fs::path relative{candidate.lexically_relative(allowed)};
+            if (!relative.empty() && *relative.begin() != "..") readable = true;
+        }
+        if (!readable) return candidate;
+    }
+    return {};
+}
+
+/** Only a refused loopback UDP bind proves that the profile denies the network. */
+inline bool NetworkProvenDenied()
+{
+    const int fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (fd < 0) return errno == EPERM || errno == EACCES;
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    const bool bound = bind(fd, reinterpret_cast<const sockaddr*>(&address), sizeof(address)) == 0;
+    const int error = errno;
+    close(fd);
+    return !bound && (error == EPERM || error == EACCES);
+}
+
+inline bool FootprintAbove(pid_t pid, uint64_t limit)
+{
+    rusage_info_v4 usage{};
+    if (proc_pid_rusage(pid, RUSAGE_INFO_V4, reinterpret_cast<rusage_info_t*>(&usage)) != 0) return false;
+    return usage.ri_phys_footprint > limit;
+}
+#endif
+
 struct WaitResult {
     bool executed{false};
     bool timed_out{false};
@@ -155,7 +206,13 @@ struct WaitResult {
     int setup_errno{0};
 };
 
-inline WaitResult Wait(pid_t child, int error_fd, int wall_seconds)
+/**
+ * max_footprint_bytes (macOS only, 0 = off): macOS refuses RLIMIT_AS, so the
+ * address limit is enforced here on the child's physical footprint. It is
+ * sampled every 10 ms; a child can overshoot by what it touches within one
+ * interval. The SIGKILL reads as a signal, i.e. not executed.
+ */
+inline WaitResult Wait(pid_t child, int error_fd, int wall_seconds, uint64_t max_footprint_bytes = 0)
 {
     WaitResult result;
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(wall_seconds);
@@ -171,6 +228,14 @@ inline WaitResult Wait(pid_t child, int error_fd, int wall_seconds)
             while (waitpid(child, &result.status, 0) < 0 && errno == EINTR) {}
             break;
         }
+#ifdef __APPLE__
+        if (max_footprint_bytes != 0 && FootprintAbove(child, max_footprint_bytes)) {
+            kill(-child, SIGKILL);
+            kill(child, SIGKILL);
+        }
+#else
+        (void)max_footprint_bytes;
+#endif
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
     int messages[2]{-1, -1};
@@ -219,7 +284,9 @@ public:
             "(version 1)\n(deny default)\n"
             "(deny network*)\n"
             "(allow process-exec (literal (param \"HELPER\")))\n"
-            "(allow file-read* (subpath (param \"ROOT\"))"
+            // dyld reads "/" itself when it starts a binary. Without it every
+            // helper aborts (SIGABRT) before main. Only the directory, not below.
+            "(allow file-read* (literal \"/\") (subpath (param \"ROOT\"))"
             " (subpath \"/System/Library\") (subpath \"/usr/lib\")"
             " (literal \"/dev/null\") (literal \"/dev/urandom\") (literal \"/dev/random\"))\n"
             "(allow file-write* (subpath (param \"ROOT\")) (literal \"/dev/null\"))\n"

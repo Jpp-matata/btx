@@ -28,6 +28,13 @@ SwarmConfineResult SwarmRunConfined(const SwarmConfineRequest& request, std::str
 #ifdef __APPLE__
     const process_guard::Seatbelt seatbelt;
     if (!seatbelt.Available()) return Refuse("CONFINEMENT_ABSENT", err);
+    // Opens before the profile and must not open after it (checked in the child).
+    const fs::path witness = process_guard::SeatbeltWitness(request.root);
+    if (witness.empty()) return Refuse("CONFINEMENT_ABSENT", err);
+    // macOS refuses RLIMIT_AS; process_guard::Wait enforces the footprint.
+    const uint64_t max_footprint_bytes = static_cast<uint64_t>(request.max_address_bytes);
+#else
+    const uint64_t max_footprint_bytes = 0;
 #endif
     int pipefd[2];
     if (!process_guard::ErrorPipe(pipefd)) return Refuse("CONFINEMENT_ABSENT", err);
@@ -43,7 +50,10 @@ SwarmConfineResult SwarmRunConfined(const SwarmConfineRequest& request, std::str
         if (setpgid(0, 0) != 0 || !process_guard::NullStandardDescriptors() ||
             !process_guard::CloseDescriptors(pipefd[1], fd_max)) process_guard::ChildFailure(pipefd[1]);
         constexpr int error_fd = 3;
-        if (!process_guard::Limit(RLIMIT_AS, static_cast<rlim_t>(request.max_address_bytes)) ||
+        if (
+#ifndef __APPLE__
+            !process_guard::Limit(RLIMIT_AS, static_cast<rlim_t>(request.max_address_bytes)) ||
+#endif
             !process_guard::Limit(RLIMIT_CPU, static_cast<rlim_t>(request.max_cpu_seconds)) ||
             !process_guard::Limit(RLIMIT_NOFILE, static_cast<rlim_t>(request.max_nofile)) ||
             chdir(request.root.c_str()) != 0) process_guard::ChildFailure(error_fd);
@@ -51,14 +61,19 @@ SwarmConfineResult SwarmRunConfined(const SwarmConfineRequest& request, std::str
         if (unshare(CLONE_NEWUSER | CLONE_NEWNET) != 0 ||
             prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0) process_guard::ChildFailure(error_fd);
 #else
-        if (!seatbelt.Apply(request.root.c_str(), request.helper.c_str())) process_guard::ChildFailure(error_fd);
+        // Exec only after the child proves the profile: the witness stops
+        // opening and a loopback bind is refused.
+        if (!process_guard::DirectoryOpenable(witness.c_str()) ||
+            !seatbelt.Apply(request.root.c_str(), request.helper.c_str()) ||
+            process_guard::DirectoryOpenable(witness.c_str()) ||
+            !process_guard::NetworkProvenDenied()) process_guard::ChildFailure(error_fd);
 #endif
         if (!process_guard::ChildReady(error_fd)) process_guard::ChildFailure(error_fd);
         execve(request.helper.c_str(), argv, env);
         process_guard::ChildFailure(error_fd);
     }
     close(pipefd[1]);
-    const auto waited = process_guard::Wait(pid, pipefd[0], request.max_wall_seconds);
+    const auto waited = process_guard::Wait(pid, pipefd[0], request.max_wall_seconds, max_footprint_bytes);
     if (!waited.executed) return Refuse(waited.timed_out ? "CONFINEMENT_TIMEOUT" : "CONFINEMENT_ABSENT", err);
     SwarmConfineResult result;
     result.launched = true; result.limits_applied = true;
