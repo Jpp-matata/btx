@@ -5306,7 +5306,8 @@ bool CWallet::BackupWallet(const std::string& strDest) const
     // tree.  Without this, a raw database backup may contain stale
     // shielded state if PersistState was deferred or only held in memory.
     if (m_shielded_wallet) {
-        LOCK(m_shielded_wallet->cs_shielded);
+        // PersistState() takes cs_wallet to encrypt; keep cs_wallet first.
+        LOCK2(cs_wallet, m_shielded_wallet->cs_shielded);
         if (!m_shielded_wallet->PersistState()) {
             LogPrintf("CWallet::BackupWallet: warning — failed to flush shielded state before backup\n");
         }
