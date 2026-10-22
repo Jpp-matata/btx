@@ -4,6 +4,9 @@
 
 #include <modelnet/swarm_form/atomic.h>
 
+#include <util/fs_helpers.h>
+
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -57,19 +60,16 @@ bool SwarmFormWrite(const fs::path& path, const std::string& body, std::string& 
         err = "SYMLINK";
         return false;
     }
-    {
-        std::ofstream out(tmp, std::ios::trunc | std::ios::binary);
-        if (!out) {
-            err = "WRITE";
-            return false;
-        }
-        out << body;
-        out.close();
-        if (!out) {
-            err = "WRITE";
-            std::filesystem::remove(tmp, ec);
-            return false;
-        }
+    FILE* file = fsbridge::fopen(tmp, "wb");
+    if (!file) {
+        err = "WRITE";
+        return false;
+    }
+    const bool written = fwrite(body.data(), 1, body.size(), file) == body.size() && FileCommit(file);
+    if (fclose(file) != 0 || !written) {
+        err = "WRITE";
+        std::filesystem::remove(tmp, ec);
+        return false;
     }
     fs::rename(tmp, path, ec);
     if (ec) {
@@ -78,6 +78,7 @@ bool SwarmFormWrite(const fs::path& path, const std::string& body, std::string& 
         std::filesystem::remove(tmp, ignore);
         return false;
     }
+    DirectoryCommit(path.parent_path());
     err.clear();
     return true;
 }

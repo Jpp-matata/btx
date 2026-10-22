@@ -15,7 +15,12 @@
 
 #include <boost/test/unit_test.hpp>
 
+#ifndef WIN32
+#include <sys/resource.h>
+#endif
+
 #include <chrono>
+#include <csignal>
 #include <fstream>
 #include <functional>
 #include <future>
@@ -88,6 +93,100 @@ BOOST_AUTO_TEST_CASE(verified_catalog_subscribes_an_observer_and_does_not_spend)
     BOOST_CHECK_EQUAL(row["lineage_id"].get_str(), modelnet::SwarmProvisionalLineage(kModel));
     BOOST_CHECK(modelnet::SwarmObserveCatalog(dir, err));
 }
+
+BOOST_AUTO_TEST_CASE(planted_temp_symlinks_are_not_written_through)
+{
+    const fs::path dir = m_path_root / "catalog_tmp_link";
+    const fs::path swarm = dir / "swarm";
+    const fs::path outside = m_path_root / "catalog_tmp_link_outside";
+    fs::create_directories(swarm);
+    fs::create_directories(outside);
+    WriteFile(dir / "catalog.json",
+              "{\"models\":[{\"artifact_id\":\"" + kArtifact + "\",\"model_id\":\"" + kModel +
+                  "\",\"bytes_verified\":true,\"incomplete\":false}]}");
+    std::string err;
+    BOOST_REQUIRE(modelnet::SwarmObserveCatalog(dir, err));
+    BOOST_REQUIRE(modelnet::SwarmIntegrateCatalog(dir, err));
+    BOOST_REQUIRE(modelnet::SwarmRefreshLocalMesh(dir, err));
+    BOOST_REQUIRE(modelnet::SwarmPublishLive(dir, err));
+    const auto plant = [&](const std::string& name) {
+        fs::remove(swarm / fs::u8path(name + ".json"));
+        WriteFile(outside / fs::u8path(name), "outside");
+        fs::create_symlink(outside / fs::u8path(name), swarm / fs::u8path(name + ".json.tmp"));
+    };
+    for (const std::string name : {"mesh-state", "networks"}) plant(name);
+    BOOST_CHECK(!modelnet::SwarmRefreshLocalMesh(dir, err));
+    BOOST_CHECK(!modelnet::SwarmPublishLive(dir, err));
+    plant("contribution");
+    BOOST_CHECK(!modelnet::SwarmIntegrateCatalog(dir, err));
+    BOOST_CHECK_EQUAL(err, "SYMLINK");
+    for (const std::string name : {"mesh-state", "networks", "contribution"}) {
+        std::ifstream in(outside / fs::u8path(name));
+        BOOST_CHECK_EQUAL(std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>()), "outside");
+        BOOST_CHECK(!fs::exists(fs::symlink_status(swarm / fs::u8path(name + ".json"))));
+    }
+}
+
+#ifndef WIN32
+BOOST_AUTO_TEST_CASE(failed_writes_leave_the_swarm_files_unchanged)
+{
+    const fs::path dir = m_path_root / "catalog_short_write";
+    const fs::path swarm = dir / "swarm";
+    fs::create_directories(swarm);
+    WriteFile(dir / "catalog.json",
+              "{\"models\":[{\"artifact_id\":\"" + kArtifact + "\",\"model_id\":\"" + kModel +
+                  "\",\"bytes_verified\":true,\"incomplete\":false}]}");
+    std::string err;
+    BOOST_REQUIRE(modelnet::SwarmObserveCatalog(dir, err));
+    BOOST_REQUIRE(modelnet::SwarmIntegrateCatalog(dir, err));
+    BOOST_REQUIRE(modelnet::SwarmRefreshLocalMesh(dir, err));
+    BOOST_REQUIRE(modelnet::SwarmPublishLive(dir, err));
+    // Make every derived file differ from what the pass would write, then let
+    // no write grow a file past 8 bytes, as on a full disk. Each file stays a
+    // valid document, and contribution.json stays readable so that the live
+    // step gets as far as networks.json.
+    const std::vector<std::string> names{"observers", "mesh-state", "networks"};
+    const std::string other = "{\"automatic_spend_atoms\":\"0\",\"payment_authority\":false,\"subscriptions\":[]}";
+    for (const std::string& name : names) WriteFile(swarm / fs::u8path(name + ".json"), other);
+    const fs::path contribution = swarm / "contribution.json";
+    const std::string contribution_bytes = [&] {
+        std::ifstream in(contribution);
+        return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    }();
+    WriteFile(swarm / "lineage-mappings.json",
+              "{\"" + kArtifact + "\":{\"lineage_id\":\"" + kFamily + "\",\"visibility\":\"public\"}}");
+    rlimit before{};
+    BOOST_REQUIRE_EQUAL(getrlimit(RLIMIT_FSIZE, &before), 0);
+    rlimit tight = before;
+    tight.rlim_cur = 8;
+    const auto previous = std::signal(SIGXFSZ, SIG_IGN);
+    BOOST_REQUIRE_EQUAL(setrlimit(RLIMIT_FSIZE, &tight), 0);
+    std::vector<bool> wrote;
+    std::string observe_err, join_err, mesh_err, live_err;
+    wrote.push_back(modelnet::SwarmObserveCatalog(dir, observe_err));
+    wrote.push_back(modelnet::SwarmIntegrateCatalog(dir, join_err));
+    wrote.push_back(modelnet::SwarmRefreshLocalMesh(dir, mesh_err));
+    wrote.push_back(modelnet::SwarmPublishLive(dir, live_err));
+    BOOST_REQUIRE_EQUAL(setrlimit(RLIMIT_FSIZE, &before), 0);
+    std::signal(SIGXFSZ, previous);
+    BOOST_CHECK(!wrote[0]);
+    BOOST_CHECK_EQUAL(observe_err, "OBSERVER_WRITE");
+    BOOST_CHECK(!wrote[1]);
+    BOOST_CHECK_EQUAL(join_err, "WRITE");
+    BOOST_CHECK(!wrote[2]);
+    BOOST_CHECK_EQUAL(mesh_err, "MESH_WRITE");
+    BOOST_CHECK(!wrote[3]);
+    BOOST_CHECK_EQUAL(live_err, "NETWORKS_WRITE");
+    std::ifstream kept(contribution);
+    BOOST_CHECK_EQUAL(std::string((std::istreambuf_iterator<char>(kept)), std::istreambuf_iterator<char>()), contribution_bytes);
+    BOOST_CHECK(!fs::exists(fs::symlink_status(swarm / "contribution.json.tmp")));
+    for (const std::string& name : names) {
+        std::ifstream in(swarm / fs::u8path(name + ".json"));
+        BOOST_CHECK_EQUAL(std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>()), other);
+        BOOST_CHECK(!fs::exists(fs::symlink_status(swarm / fs::u8path(name + ".json.tmp"))));
+    }
+}
+#endif
 
 BOOST_AUTO_TEST_CASE(incomplete_or_unverified_models_do_not_subscribe)
 {

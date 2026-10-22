@@ -7,6 +7,7 @@
 #include <modelnet/swarm_close.h>
 #include <modelnet/swarm_lifecycle.h>
 #include <modelnet/swarm_codec.h>
+#include <modelnet/swarm_form/atomic.h>
 #include <modelnet/swarm_observer.h>
 #include <crypto/sha256.h>
 #include <psbt.h>
@@ -39,27 +40,7 @@ bool EnsureDir(const fs::path& modeldir, fs::path& swarm_dir, std::string& err)
 
 bool WriteAtomic(const fs::path& final_path, const std::string& body, std::string& err)
 {
-    const fs::path tmp = fs::u8path(final_path.utf8string() + ".tmp");
-    {
-        std::ofstream file(tmp, std::ios::trunc);
-        if (!file) {
-            err = "WRITE";
-            return false;
-        }
-        file << body;
-        if (!file) {
-            err = "WRITE";
-            return false;
-        }
-    }
-    std::error_code ec;
-    fs::rename(tmp, final_path, ec);
-    if (ec) {
-        err = "RENAME";
-        return false;
-    }
-    err.clear();
-    return true;
+    return SwarmFormWrite(final_path, body, err);
 }
 
 bool ReadRaw(const fs::path& path, std::string& raw)

@@ -4,6 +4,7 @@
 
 #include <modelnet/swarm_live.h>
 
+#include <modelnet/swarm_form/atomic.h>
 #include <modelnet/swarm_records.h>
 #include <univalue.h>
 
@@ -46,27 +47,10 @@ bool EnsureDir(const fs::path& modeldir, fs::path& swarm_dir, std::string& err, 
 bool WriteAtomic(const fs::path& final_path, const std::string& body, std::string& err, const char* write_code,
                  const char* rename_code)
 {
-    const fs::path tmp = fs::u8path(final_path.utf8string() + ".tmp");
-    {
-        std::ofstream file(tmp, std::ios::trunc);
-        if (!file) {
-            err = write_code;
-            return false;
-        }
-        file << body;
-        if (!file) {
-            err = write_code;
-            return false;
-        }
-    }
-    std::error_code ec;
-    fs::rename(tmp, final_path, ec);
-    if (ec) {
-        err = rename_code;
-        return false;
-    }
-    err.clear();
-    return true;
+    if (SwarmFormWrite(final_path, body, err)) return true;
+    if (err == "WRITE") err = write_code;
+    if (err == "RENAME") err = rename_code;
+    return false;
 }
 
 bool FourBit(const std::string& quantization)

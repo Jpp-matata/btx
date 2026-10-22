@@ -135,7 +135,6 @@ bool WriteStored(const fs::path& dir, const std::map<std::string, Row>& rows, st
         err = "OBSERVER_DIR";
         return false;
     }
-    std::error_code ec;
     UniValue subs(UniValue::VARR);
     for (const auto& [id, row] : rows) {
         (void)id;
@@ -148,22 +147,8 @@ bool WriteStored(const fs::path& dir, const std::map<std::string, Row>& rows, st
     const fs::path final_path = dir / "observers.json";
     const fs::path tmp = dir / "observers.json.tmp";
     if (!RejectSymlink(final_path, err) || !RejectSymlink(tmp, err)) return false;
-    {
-        std::ofstream out(tmp, std::ios::trunc);
-        if (!out) {
-            err = "OBSERVER_WRITE";
-            return false;
-        }
-        out << root.write(0, 0) << "\n";
-        out.close();
-        if (!out) {
-            err = "OBSERVER_WRITE";
-            return false;
-        }
-    }
-    fs::rename(tmp, final_path, ec);
-    if (ec) {
-        err = "OBSERVER_RENAME";
+    if (!SwarmFormWrite(final_path, root.write(0, 0) + "\n", err)) {
+        err = err == "RENAME" ? "OBSERVER_RENAME" : "OBSERVER_WRITE";
         return false;
     }
     return true;

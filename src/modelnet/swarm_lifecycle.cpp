@@ -5,6 +5,7 @@
 #include <modelnet/swarm_lifecycle.h>
 
 #include <modelnet/swarm_codec.h>
+#include <modelnet/swarm_form/atomic.h>
 #include <modelnet/swarm_observer.h>
 
 #include <univalue.h>
@@ -378,22 +379,11 @@ bool SwarmRefreshLocalMesh(const fs::path& modeldir, std::string& err)
         err.clear();
         return true;
     }
-    const fs::path tmp = swarm_dir / "mesh-state.json.tmp";
-    {
-        std::ofstream file(tmp, std::ios::trunc);
-        if (!file) {
-            err = "MESH_WRITE";
-            return false;
-        }
-        file << body;
-    }
-    std::error_code ec;
-    fs::rename(tmp, final_path, ec);
-    if (ec) {
-        err = "MESH_RENAME";
+    if (!SwarmFormWrite(final_path, body, err)) {
+        if (err == "WRITE") err = "MESH_WRITE";
+        if (err == "RENAME") err = "MESH_RENAME";
         return false;
     }
-    err.clear();
     return true;
 }
 
