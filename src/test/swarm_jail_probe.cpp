@@ -167,6 +167,8 @@ int main(int argc, char** argv)
         waitpid(child, &status, 0);
     }
     std::fprintf(out, "fork=%d\n", child > 0 ? 1 : 0);
+    // Signal 0 only checks permission: the parent is the test process.
+    std::fprintf(out, "signal_parent=%d\n", kill(getppid(), 0) == 0 ? 1 : 0);
     std::fprintf(out, "inherited_fds=%d\n", inherited);
     std::fprintf(out, "hardware_uuid=%d\n", HardwareUuidReadable() ? 1 : 0);
     std::fprintf(out, "mach_lookup=%d\n", MachLookupAllowed() ? 1 : 0);

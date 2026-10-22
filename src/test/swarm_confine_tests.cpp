@@ -226,6 +226,8 @@ BOOST_AUTO_TEST_CASE(macos_helper_runs_confined)
     // No fork: the parent enforces the limits on the one process it watches.
     BOOST_CHECK(out.find("fork=0\n") != std::string::npos);
     BOOST_CHECK(out.find("inherited_fds=0\n") != std::string::npos);
+    // No signal to btxd or any other process of the same user.
+    BOOST_CHECK(out.find("signal_parent=0\n") != std::string::npos);
 }
 
 // macOS ignores RLIMIT_AS; the parent kills a child whose footprint passes

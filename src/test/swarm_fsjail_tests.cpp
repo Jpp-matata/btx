@@ -198,6 +198,7 @@ BOOST_AUTO_TEST_CASE(macos_helper_runs_jailed)
     BOOST_CHECK(out.find("hardware_uuid=0\n") != std::string::npos);
     // No fork: the jail sets no rlimits, so this is its only process-count bound.
     BOOST_CHECK(out.find("fork=0\n") != std::string::npos);
+    BOOST_CHECK(out.find("signal_parent=0\n") != std::string::npos);
     BOOST_CHECK(out.find("cwd_root=1\n") != std::string::npos);
     BOOST_CHECK(out.find("posix_shm=0\n") != std::string::npos);
     BOOST_CHECK(out.find("sysv_attach=0\n") != std::string::npos);
