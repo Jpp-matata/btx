@@ -11,8 +11,11 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 from .codec import digest,encode,decode,byte_id,fields,integer
-from .errors import require
+from .errors import MeshError,require
 from . import tensors
+
+# Caller-supplied ceilings replace this. A missing ceiling is 2 GiB.
+DEFAULT_HOST_BYTES=2*1024**3
 
 
 @dataclass(frozen=True)
@@ -26,8 +29,66 @@ class DecoderConfig:
         integer(self.vocab,2,65536);integer(self.width,8,4096);integer(self.layers,1,96)
         integer(self.heads,1,128);integer(self.context,8,32768)
         require(self.width%self.heads==0,"HEAD_DIMENSION")
-        require(self.layers*self.width*self.width*12+self.vocab*self.width<100_000_000,"REFERENCE_MODEL_LIMIT")
+        require(parameter_elements(self)<100_000_000,"REFERENCE_MODEL_LIMIT")
         return self
+
+
+def parameter_elements(cfg):
+    """Reference weights, including the positional table and the output head.
+
+    The square term is qkv, out, up, and down. Token rows, position rows, and
+    the untied head are each width times their vocabulary or context.
+    """
+    return cfg.layers*cfg.width*cfg.width*12+cfg.vocab*cfg.width+cfg.context*cfg.width+cfg.vocab*cfg.width
+
+
+def attention_bytes(batch,heads,sequence):
+    # One float32 score matrix. The product is arithmetic; it does not allocate.
+    return batch*heads*sequence*sequence*4
+
+
+def host_byte_budget(cfg,batch,sequence):
+    """Parameters, gradients, SGD momentum, and one attention workspace."""
+    parameters=parameter_elements(cfg)*4
+    return parameters+parameters+parameters+attention_bytes(batch,cfg.heads,sequence)
+
+
+def configured_host_ceiling(policy=None):
+    if not isinstance(policy,dict) or "host_bytes" not in policy:return DEFAULT_HOST_BYTES
+    return integer(policy["host_bytes"],1,2**62,"HOST_BUDGET")
+
+
+def admit_workload(cfg,batch,sequence,ceiling=None):
+    """Reject a legal shape whose bytes cannot fit before any tensor exists."""
+    ceiling=DEFAULT_HOST_BYTES if ceiling is None else integer(ceiling,1,2**62,"HOST_BUDGET")
+    integer(batch,1,256);integer(sequence,1,32768)
+    attention=attention_bytes(batch,cfg.heads,sequence)
+    budget=host_byte_budget(cfg,batch,sequence)
+    require(attention<=ceiling,"HOST_BUDGET")
+    require(budget<=ceiling,"HOST_BUDGET")
+    return budget
+
+
+def workload_shape(op,payload,suite=None):
+    if op=="torch.train":return payload.get("batch",4),payload.get("sequence",16)
+    if op in ("torch.rollout","inference"):
+        tokens=payload.get("tokens") or []
+        return payload.get("batch",1),payload["sequence"] if "sequence" in payload else len(tokens)
+    if op=="torch.evaluate":
+        longest=1
+        if suite is not None:
+            cases=suite.get("cases") or []
+            if cases:longest=max(len(case["prompt"]) for case in cases)
+        if "sequence" in payload:return payload.get("batch",1),max(payload["sequence"],longest)
+        return payload.get("batch",1),longest
+    raise MeshError("EXECUTOR_UNAVAILABLE",op)
+
+
+def checkpoint_config(raw:bytes):
+    header=tensors.inspect(raw,max_bytes=1024*1024*1024)
+    meta=header.get("__metadata__",{})
+    require(meta.get("format")=="BTX-TORCH-DECODER/1","CHECKPOINT_FORMAT")
+    return DecoderConfig(**decode(meta["config"].encode())).validate()
 
 
 class AttentionBlock(nn.Module):
@@ -38,12 +99,15 @@ class AttentionBlock(nn.Module):
         self.ln2=nn.LayerNorm(cfg.width);self.up=nn.Linear(cfg.width,4*cfg.width)
         self.down=nn.Linear(4*cfg.width,cfg.width)
     def forward(self,x,past=None):
-        b,t,w=x.shape;d=w//self.cfg.heads
+        b,t,w=x.shape;d=w//self.cfg.heads;k_len=t
+        if past is not None:
+            require(past[0].shape[:2]==(b,self.cfg.heads) and past[0].shape==past[1].shape,"PAST_SHAPE")
+            k_len=past[0].shape[2]+t
+        require(b*self.cfg.heads*t*k_len*4<=getattr(self,"host_ceiling",DEFAULT_HOST_BYTES),"HOST_BUDGET")
         q,k,v=self.qkv(self.ln1(x)).chunk(3,dim=-1)
         q,k,v=[a.view(b,t,self.cfg.heads,d).transpose(1,2) for a in (q,k,v)]
         offset=0
         if past is not None:
-            require(past[0].shape[:2]==(b,self.cfg.heads) and past[0].shape==past[1].shape,"PAST_SHAPE")
             offset=past[0].shape[2];k=torch.cat((past[0].to(x.device),k),dim=2);v=torch.cat((past[1].to(x.device),v),dim=2)
         mask=torch.arange(k.shape[2],device=x.device)[None,:] <= (offset+torch.arange(t,device=x.device))[:,None]
         score=(q@k.transpose(-1,-2))/math.sqrt(d)
@@ -65,9 +129,14 @@ class Decoder(nn.Module):
         if past is not None:require(len(past)==self.cfg.layers,"PAST_LAYERS")
         offset=past[0][0].shape[2] if past else 0
         require(offset+ids.shape[1]<=self.cfg.context,"CONTEXT_LIMIT")
+        # Stop before the embedding activation or the score matrix is built.
+        attention=int(ids.shape[0])*self.cfg.heads*int(ids.shape[1])*(offset+int(ids.shape[1]))*4
+        ceiling=getattr(self,"host_ceiling",DEFAULT_HOST_BYTES)
+        require(attention<=ceiling,"HOST_BUDGET")
         x=self.token(ids)+self.position(torch.arange(offset,offset+ids.shape[1],device=ids.device))[None,:,:]
         present=[]
         for i,block in enumerate(self.blocks):
+            block.host_ceiling=ceiling
             x,kv=block(x,past[i] if past else None);present.append(kv)
         return self.head(self.norm(x)),present
     def checkpoint(self):
@@ -109,10 +178,7 @@ def generate(model:Decoder,tokens:list[int],max_new_tokens:int=16,seed:int=0,tem
 
 
 def checkpoint_kv_config(raw:bytes):
-    header=tensors.inspect(raw,max_bytes=1024*1024*1024)
-    meta=header.get("__metadata__",{})
-    require(meta.get("format")=="BTX-TORCH-DECODER/1","CHECKPOINT_FORMAT")
-    cfg=DecoderConfig(**decode(meta["config"].encode())).validate()
+    cfg=checkpoint_config(raw)
     return {"checkpoint":byte_id(raw),"architecture":digest("BTX/ReferenceArchitecture/1",asdict(cfg)),
             "tokenizer":digest("BTX/ByteTokenizer/1",{"vocab":cfg.vocab}),"adapter_ids":[],"adapter_order":[],"dtype":"F32","layout":"BHTD",
             "runtime_build":digest("BTX/TorchRuntime/1",{"torch":torch.__version__.split("+")[0],"implementation":"BTX-TORCH-DECODER/1"}),

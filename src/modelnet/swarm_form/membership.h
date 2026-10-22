@@ -16,7 +16,7 @@ namespace modelnet {
 /**
  * Local membership file for one swarm directory.
  * The first Form writes the local seeder/evaluator record and admits "local".
- * A second Form of the same directory is REOPEN and does not rewrite the file.
+ * A later Form of an existing valid membership returns success and does not rewrite the file.
  */
 class SwarmFormMembership {
 public:

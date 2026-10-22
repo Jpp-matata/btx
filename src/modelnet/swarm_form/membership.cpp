@@ -47,9 +47,7 @@ bool SwarmFormMembership::Form(const fs::path& swarm_dir, std::string& err)
         return false;
     }
     if (fs::exists(file)) {
-        if (!Load(swarm_dir, err)) return false;
-        err = "REOPEN";
-        return false;
+        return Load(swarm_dir, err);
     }
     m_member = LocalFormationMember();
     m_formed = true;

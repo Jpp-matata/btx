@@ -5,6 +5,7 @@
 #include <modelnet/swarm_node.h>
 
 #include <modelnet/swarm_close.h>
+#include <modelnet/swarm_lifecycle.h>
 #include <modelnet/swarm_codec.h>
 #include <modelnet/swarm_observer.h>
 #include <crypto/sha256.h>
@@ -13,9 +14,10 @@
 #include <univalue.h>
 #include <util/strencodings.h>
 
+#include <algorithm>
 #include <fstream>
+#include <map>
 #include <set>
-#include <thread>
 
 namespace modelnet {
 namespace {
@@ -68,23 +70,144 @@ bool ReadRaw(const fs::path& path, std::string& raw)
     return true;
 }
 
+UniValue SortedJson(const UniValue& value)
+{
+    if (value.isObject()) {
+        std::vector<std::string> keys = value.getKeys();
+        std::sort(keys.begin(), keys.end());
+        UniValue out(UniValue::VOBJ);
+        for (const std::string& key : keys) out.pushKV(key, SortedJson(value[key]));
+        return out;
+    }
+    if (value.isArray()) {
+        UniValue out(UniValue::VARR);
+        for (const UniValue& item : value.getValues()) out.push_back(SortedJson(item));
+        return out;
+    }
+    return value;
+}
+
+bool SameDocument(const std::string& existing, const std::string& body)
+{
+    UniValue left;
+    UniValue right;
+    if (!left.read(existing) || !right.read(body)) return false;
+    return SortedJson(left).write(0, 0) == SortedJson(right).write(0, 0);
+}
+
+bool WriteIfChanged(const fs::path& final_path, const std::string& body, std::string& err)
+{
+    std::string existing;
+    if (ReadRaw(final_path, existing) && SameDocument(existing, body)) {
+        err.clear();
+        return true;
+    }
+    return WriteAtomic(final_path, body, err);
+}
+
+SwarmBuiltinOffer OfferFrom(const SwarmGovernSnapshot& snap)
+{
+    SwarmBuiltinOffer offer;
+    offer.seed_public = snap.roles.seeder;
+    offer.cpu_evaluate = snap.roles.evaluator;
+    offer.gpu_train = snap.roles.trainer;
+    offer.private_prompts = snap.roles.private_prompts;
+    offer.startup_flag = false;
+    offer.cpu_threads = snap.budget.cpu_threads;
+    offer.hardware_threads = snap.hardware_threads;
+    offer.vram_bytes = snap.budget.vram_bytes;
+    offer.automatic_spend_atoms = "0";
+    return offer;
+}
+
+struct KvIdentity {
+    std::string weights;
+    std::string tokenizer;
+    std::string adapter_order;
+    std::string runtime;
+    std::string layout;
+    std::string dtype;
+    std::string positional_encoding;
+    std::string mask;
+
+    bool complete() const
+    {
+        return !weights.empty() && !tokenizer.empty() && !adapter_order.empty() && !runtime.empty() && !layout.empty() &&
+               !dtype.empty() && !positional_encoding.empty() && !mask.empty();
+    }
+
+    bool operator==(const KvIdentity& other) const
+    {
+        return weights == other.weights && tokenizer == other.tokenizer && adapter_order == other.adapter_order &&
+               runtime == other.runtime && layout == other.layout && dtype == other.dtype &&
+               positional_encoding == other.positional_encoding && mask == other.mask;
+    }
+};
+
+std::string TextField(const UniValue& item, const char* key)
+{
+    if (!item.exists(key) || !item[key].isStr()) return {};
+    return item[key].get_str();
+}
+
+std::string AdapterOrder(const UniValue& item)
+{
+    if (!item.exists("adapter_order")) return {};
+    const UniValue& value = item["adapter_order"];
+    if (value.isStr()) return value.get_str();
+    if (!value.isArray()) return {};
+    std::string joined;
+    for (const UniValue& part : value.getValues()) {
+        if (!part.isStr() || part.get_str().empty()) return {};
+        if (!joined.empty()) joined.push_back(',');
+        joined += part.get_str();
+    }
+    return joined;
+}
+
+void LoadIdentities(const fs::path& modeldir, std::map<std::string, KvIdentity>& out)
+{
+    std::string raw;
+    UniValue root;
+    if (!ReadRaw(modeldir / "catalog.json", raw) || !root.read(raw) || !root.isObject() || !root.exists("models") ||
+        !root["models"].isArray()) {
+        return;
+    }
+    for (const UniValue& item : root["models"].getValues()) {
+        if (!item.isObject() || !item.exists("artifact_id") || !item["artifact_id"].isStr()) continue;
+        KvIdentity identity;
+        identity.weights = TextField(item, "weights");
+        identity.tokenizer = TextField(item, "tokenizer");
+        identity.adapter_order = AdapterOrder(item);
+        identity.runtime = TextField(item, "runtime");
+        identity.layout = TextField(item, "layout");
+        identity.dtype = TextField(item, "dtype");
+        identity.positional_encoding = TextField(item, "positional_encoding");
+        identity.mask = TextField(item, "mask");
+        out.insert_or_assign(item["artifact_id"].get_str(), std::move(identity));
+    }
+}
+
+struct CohortKey {
+    std::string lineage;
+    std::string checkpoint;
+    std::string recipe;
+    bool operator<(const CohortKey& other) const
+    {
+        if (lineage != other.lineage) return lineage < other.lineage;
+        if (checkpoint != other.checkpoint) return checkpoint < other.checkpoint;
+        return recipe < other.recipe;
+    }
+};
+
 } // namespace
 
 SwarmBuiltinOffer SwarmDefaultOffer()
 {
-    SwarmBuiltinOffer offer;
-    unsigned threads = std::thread::hardware_concurrency();
-    if (threads == 0) threads = 1;
-    if (threads > 64) threads = 64;
-    offer.cpu_threads = static_cast<int>(threads);
-    offer.cpu_evaluate = offer.cpu_threads > 0;
-    offer.seed_public = true;
-    offer.gpu_train = false;
-    offer.private_prompts = false;
-    offer.startup_flag = false;
-    offer.vram_bytes = 0;
-    offer.automatic_spend_atoms = "0";
-    return offer;
+    SwarmGovernSnapshot snap;
+    std::string err;
+    if (!SwarmLoadGoverned({}, snap, err)) return SwarmBuiltinOffer{};
+    return OfferFrom(snap);
 }
 
 SwarmCohortDecision SwarmAssignCohort(const std::string& quantization, const std::string& checkpoint,
@@ -96,7 +219,7 @@ SwarmCohortDecision SwarmAssignCohort(const std::string& quantization, const std
     decision.family = true;
     const bool same = !checkpoint.empty() && checkpoint == family_checkpoint && !recipe.empty() && recipe == family_recipe;
     decision.cohort = same && quantization == "full";
-    decision.kv_share = decision.cohort;
+    decision.kv_share = false;
     return decision;
 }
 
@@ -104,61 +227,84 @@ bool SwarmIntegrateCatalog(const fs::path& modeldir, std::string& err)
 {
     fs::path swarm_dir;
     if (!EnsureDir(modeldir, swarm_dir, err)) return false;
-    const fs::path catalog_path = modeldir / "catalog.json";
-    UniValue models(UniValue::VARR);
-    if (fs::exists(catalog_path)) {
-        std::string raw;
-        if (!ReadRaw(catalog_path, raw)) {
-            err = "CATALOG_READ";
-            return false;
-        }
-        UniValue root;
-        if (!root.read(raw) || !root.isObject() || !root.exists("models") || !root["models"].isArray()) {
-            err = "CATALOG_JSON";
-            return false;
-        }
-        for (const UniValue& item : root["models"].getValues()) {
-            if (!item.isObject()) continue;
-            const bool verified = item.exists("bytes_verified") && item["bytes_verified"].isTrue();
-            const bool incomplete = item.exists("incomplete") && item["incomplete"].isTrue();
-            if (!verified || incomplete) continue;
-            if (!item.exists("artifact_id") || !item.exists("model_id")) continue;
-            const std::string artifact = item["artifact_id"].get_str();
-            const std::string model_id = item["model_id"].get_str();
-            if (!SwarmFixedId(artifact) || !SwarmFixedId(model_id)) continue;
-            const std::string lineage = SwarmProvisionalLineage(artifact);
-            const std::string economy = SwarmEconomyIdentity(lineage);
-            const std::string quantization = item.exists("quantization") ? item["quantization"].get_str() : "unspecified";
-            const std::string checkpoint = item.exists("checkpoint_id") ? item["checkpoint_id"].get_str() : "";
-            const std::string recipe = item.exists("recipe") ? item["recipe"].get_str() : "";
-            const bool is_public = item.exists("visibility") && item["visibility"].get_str() == "public";
-            const SwarmCohortDecision cohort = SwarmAssignCohort(quantization, checkpoint, recipe, checkpoint, recipe);
-            UniValue row(UniValue::VOBJ);
-            row.pushKV("acquire", "joined");
-            row.pushKV("artifact_id", artifact);
-            row.pushKV("cohort", cohort.cohort);
-            row.pushKV("economy_id", economy);
-            row.pushKV("family", cohort.family);
-            row.pushKV("kv_share", cohort.kv_share);
-            row.pushKV("lineage_id", lineage);
-            row.pushKV("private_acquire", !is_public);
-            row.pushKV("quantization", quantization);
-            row.pushKV("seed", is_public);
-            models.push_back(std::move(row));
+    SwarmCatalog catalog;
+    if (!SwarmReadCatalog(modeldir, catalog, err)) return false;
+    SwarmGovernSnapshot governed;
+    if (!SwarmLoadGoverned(modeldir, governed, err)) return false;
+    const SwarmBuiltinOffer offer = OfferFrom(governed);
+    std::map<std::string, KvIdentity> identities;
+    LoadIdentities(modeldir, identities);
+    struct Joined {
+        std::string artifact;
+        SwarmCatalogEntry entry;
+        KvIdentity identity;
+    };
+    std::vector<Joined> joined;
+    joined.reserve(catalog.size());
+    for (const auto& [artifact, entry] : catalog) {
+        Joined row;
+        row.artifact = artifact;
+        row.entry = entry;
+        const auto found = identities.find(artifact);
+        if (found != identities.end()) row.identity = found->second;
+        joined.push_back(std::move(row));
+    }
+    std::map<CohortKey, std::vector<size_t>> groups;
+    for (size_t i = 0; i < joined.size(); ++i) {
+        const SwarmCatalogEntry& entry = joined[i].entry;
+        if (entry.quantization == "full" && !entry.checkpoint.empty() && !entry.recipe.empty()) {
+            groups[{entry.lineage_id, entry.checkpoint, entry.recipe}].push_back(i);
         }
     }
-    const SwarmBuiltinOffer offer = SwarmDefaultOffer();
+    std::vector<bool> share(joined.size(), false);
+    for (const auto& [key, members] : groups) {
+        (void)key;
+        if (members.empty() || !joined[members[0]].identity.complete()) continue;
+        const KvIdentity& first = joined[members[0]].identity;
+        bool equal = true;
+        for (size_t index : members) {
+            if (!(joined[index].identity == first)) {
+                equal = false;
+                break;
+            }
+        }
+        if (!equal) continue;
+        for (size_t index : members) share[index] = true;
+    }
+    UniValue models(UniValue::VARR);
+    for (size_t i = 0; i < joined.size(); ++i) {
+        const SwarmCatalogEntry& entry = joined[i].entry;
+        const bool is_public = entry.visibility == "public";
+        const bool cohort = entry.quantization == "full" && !entry.checkpoint.empty() && !entry.recipe.empty();
+        UniValue row(UniValue::VOBJ);
+        row.pushKV("acquire", "joined");
+        row.pushKV("artifact_id", joined[i].artifact);
+        row.pushKV("checkpoint_id", entry.checkpoint);
+        row.pushKV("cohort", cohort);
+        row.pushKV("economy_id", SwarmEconomyIdentity(entry.lineage_id));
+        row.pushKV("family", true);
+        row.pushKV("kv_share", static_cast<bool>(share[i]));
+        row.pushKV("lineage_assurance", entry.lineage_assurance);
+        row.pushKV("lineage_id", entry.lineage_id);
+        row.pushKV("model_id", entry.model_id);
+        row.pushKV("private_acquire", !is_public);
+        row.pushKV("quantization", entry.quantization);
+        row.pushKV("recipe", entry.recipe);
+        row.pushKV("seed", is_public && offer.seed_public);
+        models.push_back(std::move(row));
+    }
     UniValue out(UniValue::VOBJ);
     out.pushKV("automatic_spend_atoms", offer.automatic_spend_atoms);
     out.pushKV("cpu_evaluate", offer.cpu_evaluate);
     out.pushKV("cpu_threads", offer.cpu_threads);
     out.pushKV("gpu_train", offer.gpu_train);
+    out.pushKV("hardware_threads", offer.hardware_threads);
     out.pushKV("models", models);
     out.pushKV("private_prompts", offer.private_prompts);
     out.pushKV("seed_public", offer.seed_public);
     out.pushKV("startup_flag", offer.startup_flag);
     out.pushKV("vram_bytes", offer.vram_bytes);
-    return WriteAtomic(swarm_dir / "contribution.json", out.write(0, 0) + "\n", err);
+    return WriteIfChanged(swarm_dir / "contribution.json", out.write(0, 0) + "\n", err);
 }
 
 bool SwarmNotePresence(const fs::path& modeldir, const SwarmPresence& presence, int64_t now_ms, std::string& err)

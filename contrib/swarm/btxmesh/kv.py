@@ -87,6 +87,15 @@ class KVCache:
         except MeshError:return None
 
 
+def prefix_should_transfer(locator):
+    """Whether a remote prefix is worth moving, from choose_execution.
+
+    RECOMPUTE_LOCAL does not transfer. The decision does not attach an engine.
+    """
+    decision=choose_execution(prefill_ms=locator.get("prefill_ms",0),remote_queue_ms=locator.get("remote_queue_ms",0),local_queue_ms=locator.get("local_queue_ms",0),bytes_to_move=locator["bytes"],bandwidth_bps=locator.get("bandwidth_bps",1),rtt_ms=locator.get("rtt_ms",0),decode_remote_ms=locator.get("decode_remote_ms",0),decode_local_ms=locator.get("decode_local_ms",0))
+    return decision["choice"]!="RECOMPUTE_LOCAL"
+
+
 def choose_execution(*,prefill_ms:int,remote_queue_ms:int,local_queue_ms:int,bytes_to_move:int,bandwidth_bps:int,rtt_ms:int,decode_remote_ms:int=0,decode_local_ms:int=0):
     for n in (prefill_ms,remote_queue_ms,local_queue_ms,bytes_to_move,rtt_ms,decode_remote_ms,decode_local_ms):integer(n,0,2**63-1)
     integer(bandwidth_bps,1,2**63-1)

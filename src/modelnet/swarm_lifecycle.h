@@ -63,6 +63,21 @@ struct SwarmBudget {
 /** Caps a contribution request. Idle, battery, thermal, or metered drains to zero. */
 SwarmBudget SwarmGovern(const SwarmDevice& device, int requested_workers);
 
+/**
+ * Device file, roles, and budget from one SwarmGovern call.
+ * hardware_threads is the host capability. It is not a grant.
+ * A missing device file allows one idle slot and no CPU, VRAM, or training.
+ * An empty modeldir uses that missing-file snapshot.
+ */
+struct SwarmGovernSnapshot {
+    SwarmDevice device;
+    SwarmRoles roles;
+    SwarmBudget budget;
+    int hardware_threads{0};
+};
+
+bool SwarmLoadGoverned(const fs::path& modeldir, SwarmGovernSnapshot& out, std::string& err);
+
 struct SwarmJoin {
     bool ok{false};
     std::string code;

@@ -12,9 +12,11 @@
 namespace modelnet {
 
 /**
- * Read swarm/contribution.json and publish the family network plus the four
- * timescale records. A missing contribution file does nothing and succeeds.
- * This does not start a thread, take a flag, or spend.
+ * Read swarm/contribution.json and publish one family per resolved lineage
+ * and one cohort per lineage, checkpoint, and recipe. Checkpoint and recipe
+ * stay on the published rows. A missing contribution file does nothing and
+ * succeeds. An unchanged document is not rewritten. This does not start a
+ * thread, take a flag, or spend.
  */
 bool SwarmPublishLive(const fs::path& modeldir, std::string& err);
 

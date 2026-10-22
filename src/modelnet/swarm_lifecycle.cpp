@@ -31,7 +31,100 @@ bool ReadFile(const fs::path& path, std::string& raw)
     return true;
 }
 
+int HardwareThreads()
+{
+    unsigned threads = std::thread::hardware_concurrency();
+    if (threads == 0) threads = 1;
+    if (threads > 64) threads = 64;
+    return static_cast<int>(threads);
+}
+
+UniValue SortedJson(const UniValue& value)
+{
+    if (value.isObject()) {
+        std::vector<std::string> keys = value.getKeys();
+        std::sort(keys.begin(), keys.end());
+        UniValue out(UniValue::VOBJ);
+        for (const std::string& key : keys) out.pushKV(key, SortedJson(value[key]));
+        return out;
+    }
+    if (value.isArray()) {
+        UniValue out(UniValue::VARR);
+        for (const UniValue& item : value.getValues()) out.push_back(SortedJson(item));
+        return out;
+    }
+    return value;
+}
+
+bool SameDocument(const std::string& existing, const std::string& body)
+{
+    UniValue left;
+    UniValue right;
+    if (!left.read(existing) || !right.read(body)) return false;
+    return SortedJson(left).write(0, 0) == SortedJson(right).write(0, 0);
+}
+
+SwarmDevice StockDevice()
+{
+    SwarmDevice device;
+    device.idle_contribution = true;
+    device.slots = 1;
+    device.cpu_threads = 0;
+    device.vram_bytes = 0;
+    device.max_steps = 0;
+    device.license_allows_training = false;
+    return device;
+}
+
+bool ReadDeviceFile(const fs::path& path, SwarmDevice& device, std::string& err)
+{
+    std::string raw;
+    std::ifstream in(path, std::ios::binary);
+    if (!in) {
+        err = "DEVICE_READ";
+        return false;
+    }
+    raw.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    UniValue root;
+    if (!root.read(raw) || !root.isObject()) {
+        err = "DEVICE_JSON";
+        return false;
+    }
+    device = SwarmDevice{};
+    device.idle_contribution = root.exists("idle_contribution") && root["idle_contribution"].isTrue();
+    device.slots = root.exists("slots") ? root["slots"].getInt<int>() : 0;
+    device.cpu_threads = root.exists("cpu_threads") ? root["cpu_threads"].getInt<int>() : 0;
+    device.vram_bytes = root.exists("vram_bytes") ? root["vram_bytes"].getInt<int64_t>() : 0;
+    device.max_steps = root.exists("max_steps") ? root["max_steps"].getInt<int>() : 0;
+    device.battery = root.exists("battery") && root["battery"].isTrue();
+    device.thermal_hot = root.exists("thermal_hot") && root["thermal_hot"].isTrue();
+    device.metered = root.exists("metered") && root["metered"].isTrue();
+    device.license_allows_training =
+        root.exists("license_allows_training") && root["license_allows_training"].isTrue();
+    err.clear();
+    return true;
+}
+
 } // namespace
+
+bool SwarmLoadGoverned(const fs::path& modeldir, SwarmGovernSnapshot& out, std::string& err)
+{
+    out = SwarmGovernSnapshot{};
+    SwarmDevice device = StockDevice();
+    if (!modeldir.empty()) {
+        const fs::path device_path = modeldir / "swarm" / "device.json";
+        if (fs::exists(device_path)) {
+            if (!ReadDeviceFile(device_path, device, err)) return false;
+        }
+    }
+    out.device = device;
+    out.hardware_threads = HardwareThreads();
+    out.roles = SwarmEligibleRoles(device);
+    out.budget = SwarmGovern(device, device.slots);
+    out.roles.automatic_spend_atoms = "0";
+    err.clear();
+    return true;
+}
 
 std::vector<SwarmPeer> SwarmNeighbors(const std::vector<SwarmPeer>& peers, int near, int remote)
 {
@@ -193,41 +286,10 @@ bool SwarmRefreshLocalMesh(const fs::path& modeldir, std::string& err)
             peers.push_back(std::move(peer));
         }
     }
-    SwarmDevice device;
-    const fs::path device_path = swarm_dir / "device.json";
-    if (fs::exists(device_path)) {
-        std::string raw;
-        if (!ReadFile(device_path, raw)) {
-            err = "DEVICE_READ";
-            return false;
-        }
-        UniValue root;
-        if (!root.read(raw) || !root.isObject()) {
-            err = "DEVICE_JSON";
-            return false;
-        }
-        device.idle_contribution = root.exists("idle_contribution") && root["idle_contribution"].isTrue();
-        device.slots = root.exists("slots") ? root["slots"].getInt<int>() : 0;
-        device.cpu_threads = root.exists("cpu_threads") ? root["cpu_threads"].getInt<int>() : 0;
-        device.vram_bytes = root.exists("vram_bytes") ? root["vram_bytes"].getInt<int64_t>() : 0;
-        device.max_steps = root.exists("max_steps") ? root["max_steps"].getInt<int>() : 0;
-        device.battery = root.exists("battery") && root["battery"].isTrue();
-        device.thermal_hot = root.exists("thermal_hot") && root["thermal_hot"].isTrue();
-        device.metered = root.exists("metered") && root["metered"].isTrue();
-        device.license_allows_training = root.exists("license_allows_training") && root["license_allows_training"].isTrue();
-    } else {
-        unsigned threads = std::thread::hardware_concurrency();
-        if (threads == 0) threads = 1;
-        if (threads > 64) threads = 64;
-        device.idle_contribution = true;
-        device.slots = 1;
-        device.cpu_threads = static_cast<int>(threads);
-        device.vram_bytes = 0;
-        device.max_steps = 0;
-        device.license_allows_training = false;
-    }
-    const SwarmRoles roles = SwarmEligibleRoles(device);
-    const SwarmBudget budget = SwarmGovern(device, device.slots);
+    SwarmGovernSnapshot governed;
+    if (!SwarmLoadGoverned(modeldir, governed, err)) return false;
+    const SwarmRoles& roles = governed.roles;
+    const SwarmBudget& budget = governed.budget;
     const std::vector<SwarmPeer> neighborhood = SwarmNeighbors(peers);
     UniValue out(UniValue::VOBJ);
     UniValue ids(UniValue::VARR);
@@ -236,13 +298,20 @@ bool SwarmRefreshLocalMesh(const fs::path& modeldir, std::string& err)
     out.pushKV("drained", budget.drained);
     out.pushKV("evaluator", roles.evaluator);
     out.pushKV("governor", budget.code);
+    out.pushKV("hardware_threads", governed.hardware_threads);
     out.pushKV("neighbors", ids);
-    out.pushKV("observer", true);
+    out.pushKV("observer", roles.observer);
     out.pushKV("private_data_training", roles.private_data);
     out.pushKV("private_prompts", roles.private_prompts);
     out.pushKV("seeder", roles.seeder);
     out.pushKV("trainer", roles.trainer);
+    const std::string body = out.write(0, 0) + "\n";
     const fs::path final_path = swarm_dir / "mesh-state.json";
+    std::string existing;
+    if (ReadFile(final_path, existing) && SameDocument(existing, body)) {
+        err.clear();
+        return true;
+    }
     const fs::path tmp = swarm_dir / "mesh-state.json.tmp";
     {
         std::ofstream file(tmp, std::ios::trunc);
@@ -250,7 +319,7 @@ bool SwarmRefreshLocalMesh(const fs::path& modeldir, std::string& err)
             err = "MESH_WRITE";
             return false;
         }
-        file << out.write(0, 0) << "\n";
+        file << body;
     }
     std::error_code ec;
     fs::rename(tmp, final_path, ec);
@@ -258,6 +327,7 @@ bool SwarmRefreshLocalMesh(const fs::path& modeldir, std::string& err)
         err = "MESH_RENAME";
         return false;
     }
+    err.clear();
     return true;
 }
 

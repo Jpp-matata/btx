@@ -6251,7 +6251,7 @@ static void CheckConsensusBehindCompetingHeaders(
             release_confirmation.release.reset();
             BOOST_REQUIRE(PeermanWaitFor([&] { return !confirmations.Pending(child_hash); }));
         } else if (!ready_frontier) {
-            ASSERT_DEBUG_LOG("MatMul pending verification cap reached");
+            ASSERT_DEBUG_LOG("Holding the RC verification job for a lower unverified ancestor");
             send_ticketed_body(honest_grand);
         } else {
             // A fresh delivery of the selected deep-fork body must not fall
@@ -10998,8 +10998,13 @@ static void CheckReadyAcquisitionFork(node::NodeContext& m_node, bool incoming,
     BOOST_REQUIRE(peerman.RetainMatMulBodyForTest(std::make_shared<const CBlock>(b[1].first)));
     SetMockTime(std::chrono::seconds{GetTime() + 2});
     peerman.RetryMatMulDeferredBodiesForTest();
+    // A retained body without a connected source now runs on the bounded
+    // verification worker. Wait for its verdict before inspecting the index.
+    BOOST_REQUIRE(PeermanWaitFor([&] {
+        LOCK(::cs_main);
+        return (b[1].second->nStatus & BLOCK_EXACT_REPLAY_VERIFIED) != 0;
+    }));
     BOOST_CHECK_GT(replayed.load(), 0);
-    BOOST_CHECK(b[1].second->nStatus & BLOCK_EXACT_REPLAY_VERIFIED);
     BOOST_CHECK(!(b[2].second->nStatus & BLOCK_EXACT_REPLAY_VERIFIED));
 }
 
@@ -11157,10 +11162,19 @@ BOOST_AUTO_TEST_CASE(acquisition_replay_priority_bounds_background_wait)
     BOOST_REQUIRE(chainman.AcquisitionEscapeMayAcquireHeavierFork(deep.back()));
     BOOST_REQUIRE(chainman.AcquisitionEscapeMayAcquireHeavierFork(near.back()));
     const auto all_ready = [](const CBlockIndex*) { return true; };
-    const auto complete = [&](CBlockIndex* index) {
-        // Model a completed replay and stored body, without running a GPU.
+    const auto complete = [&](CBlockIndex* index, const CBlockIndex* child) {
+        // Replay authority and byte availability alone do not make a parent
+        // connectable. Model the transaction-validated body as well, without
+        // running a GPU or writing these synthetic header fixtures to disk.
         index->nStatus |= BLOCK_HAVE_DATA;
         BOOST_REQUIRE(chainman.PersistMatMulExactReplayVerdict(index->GetBlockHash()));
+        BOOST_REQUIRE(child->pprev == index);
+        BOOST_CHECK(!chainman.AcquisitionEscapeParentConnectable(child));
+        BOOST_REQUIRE(index->pprev != nullptr && index->pprev->HaveNumChainTxs());
+        index->nTx = 1;
+        index->m_chain_tx_count = index->pprev->m_chain_tx_count + index->nTx;
+        BOOST_REQUIRE(index->RaiseValidity(BLOCK_VALID_TRANSACTIONS));
+        BOOST_REQUIRE(chainman.AcquisitionEscapeParentConnectable(child));
     };
     for (unsigned i = 0; i < ChainstateManager::ACQUISITION_REPLAY_PREFERRED_BURST; ++i) {
         // Read-only selector calls and repeated announcements spend no turns.
@@ -11168,7 +11182,7 @@ BOOST_AUTO_TEST_CASE(acquisition_replay_priority_bounds_background_wait)
             BOOST_CHECK(chainman.FindAcquisitionEscapeFrontier(all_ready) == near[i]);
             BOOST_REQUIRE(chainman.AcquisitionEscapeMayAcquireHeavierFork(near.back()));
         }
-        complete(near[i]);
+        complete(near[i], near[i + 1]);
         for (int duplicate = 0; duplicate < 12; ++duplicate) {
             BOOST_REQUIRE(chainman.PersistMatMulExactReplayVerdict(near[i]->GetBlockHash()));
         }
@@ -11198,7 +11212,7 @@ BOOST_AUTO_TEST_CASE(acquisition_replay_priority_bounds_background_wait)
     release_confirmation.release.reset();
     BOOST_REQUIRE(PeermanWaitFor([&] { return !confirmations.Pending(deep_hash); }));
     BOOST_CHECK(chainman.FindAcquisitionEscapeFrontier(all_ready) == deep.front());
-    complete(deep.front());
+    complete(deep.front(), deep[1]);
     BOOST_CHECK(chainman.FindAcquisitionEscapeFrontier(all_ready) ==
                 near[ChainstateManager::ACQUISITION_REPLAY_PREFERRED_BURST]);
     // Parent-before-child still applies after switching branches.
@@ -11397,12 +11411,13 @@ BOOST_AUTO_TEST_CASE(persisted_active_tip_child_precedes_ready_acquisition_front
     CheckPersistedChildWithAcquisition(m_node, true);
 }
 
-BOOST_AUTO_TEST_CASE(withdrawn_deep_tower_snaps_last_common_to_tip)
+BOOST_AUTO_TEST_CASE(fresh_tip_fetches_only_connecting_body_of_deep_heavier_fork)
 {
     // Same topology as deep_competing_tower_does_not_seed_or_pin_last_common
-    // but the tip is NOT acquisition-stale, so AdvanceLastCommonPastActiveTip
-    // snaps last_common onto the connected tip and FindNextBlocks does not
-    // GETDATA competing twins of bodies we already have.
+    // but the tip is NOT acquisition-stale. LastCommon still snaps to the
+    // connected tip; the download walk must independently request the first
+    // missing body of the advertised heavier fork, without fetching its
+    // descendants before that body arrives. This fork is not withdrawn.
     LOCK(NetEventsInterface::g_msgproc_mutex);
     node::matmul_trusted::ResetForTest();
     ResetSharedPeermanFixture(m_node);
@@ -11475,13 +11490,19 @@ BOOST_AUTO_TEST_CASE(withdrawn_deep_tower_snaps_last_common_to_tip)
     BOOST_CHECK_EQUAL(learned.nSyncHeight, fork.back()->nHeight);
 
     SetMockTime(std::chrono::seconds{GetTime() + 180});
+    BOOST_REQUIRE(WITH_LOCK(::cs_main, return !chainman.AcquisitionTipIsStale()));
     body_peer.fPauseSend = false;
     BOOST_CHECK(peerman.SendMessages(&body_peer));
     CNodeStateStats after;
     BOOST_REQUIRE(peerman.GetNodeStateStats(body_peer.GetId(), after));
     BOOST_CHECK_GE(after.nCommonHeight, tip->nHeight);
     BOOST_CHECK_EQUAL(
-        CountQueuedGetDataForHash(body_peer, fork.front()->GetBlockHash()), 0U);
+        CountQueuedGetDataForHash(body_peer, fork.front()->GetBlockHash()), 1U);
+    for (size_t i = 1; i < fork.size(); ++i) {
+        BOOST_CHECK_EQUAL(
+            CountQueuedGetDataForHash(body_peer, fork[i]->GetBlockHash()), 0U);
+    }
+    BOOST_CHECK(WITH_LOCK(::cs_main, return chainman.ActiveTip() == tip));
 
     peerman.FinalizeNode(body_peer);
     NeutralizeUnconnectedHeaders(chainman);

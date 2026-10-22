@@ -75,15 +75,15 @@ BOOST_AUTO_TEST_CASE(observer_entry_forms_once_and_keeps_the_plane_local)
     const fs::path membership = model / "swarm" / modelnet::kMembershipFile;
     const std::string first = ReadFile(membership);
     err = "stale";
-    BOOST_CHECK(!modelnet::SwarmFormPlane(model, err));
-    BOOST_CHECK_EQUAL(err, "REOPEN");
+    BOOST_REQUIRE(modelnet::SwarmFormPlane(model, err));
+    BOOST_CHECK(err.empty());
     BOOST_CHECK_EQUAL(ReadFile(membership), first);
 
     modelnet::FormationPlane plane;
     err = "stale";
     BOOST_REQUIRE(plane.Open(model, err));
-    BOOST_CHECK(!plane.Form(err));
-    BOOST_CHECK_EQUAL(err, "REOPEN");
+    BOOST_REQUIRE(plane.Form(err));
+    BOOST_CHECK(err.empty());
     BOOST_CHECK_EQUAL(plane.membership().node_id, "local");
     BOOST_CHECK(plane.membership().seeder);
     BOOST_CHECK(plane.membership().evaluator);

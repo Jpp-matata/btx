@@ -33,11 +33,11 @@ Tests must include worst-case or adversarial inputs, not only cache-friendly wor
 
 The delivered reducer has bounded jobs, pages, scans and a single serialized SQLite writer per committee. Internal scans fail closed instead of silently ignoring excess records. These limits make resource use visible; they do not prove scalability beyond existing systems. Production needs indexes for live allocations, retention/compaction, hierarchical artifact manifests, per-realm control sharding, stable cursors, bounded replication streams and admission backpressure.
 
-## Current executable qualification dimensions
+## Reference-package qualification dimensions
 
-The suite uses real cryptographic operations, encrypted disk objects, real mutual-TLS HTTP connections, separately identified workers, trusted child-process training/inference, two-process Gloo gradient synchronization and actual synthetic model evolution. Some tests use in-memory message routing or direct reducer calls for deterministic fault schedules; those are marked as protocol/state tests, not WAN experiments.
+The optional `contrib/swarm` Python reference suite uses real cryptographic operations, encrypted disk objects, real mutual-TLS HTTP connections, separately identified workers, trusted child-process training/inference, two-process Gloo gradient synchronization and actual synthetic model evolution. Some tests use in-memory message routing or direct reducer calls for deterministic fault schedules; those are marked as protocol/state tests, not WAN experiments.
 
-The native supervisor/launcher test compiles the added C++ source and runs it. The CMake fixture compiles and installs the added targets against a dummy `btx-modeld` target to verify target composition and installation paths. Neither is a build of the complete BTX node. Native patch application to the full checkout is not yet executed in this environment.
+The original reference handoff described a native supervisor/launcher fixture and a CMake fixture with a dummy `btx-modeld` target. Those fixture results did not establish a complete BTX node build. This checkout now integrates the observer directly into `btxd`; see [INTEGRATION.md](INTEGRATION.md). Native verification uses the real CMake build and `test_btx` suites, with functional tests against the resulting daemon. Reference-package results cannot be inherited as native PASS.
 
 ## Required large-system experiments
 
@@ -51,7 +51,7 @@ For evolution demonstrate a real eligible open model with data rights, multiple 
 
 Every result must include requirement ID, source commit/diff hash, executable hashes, platform, runtime versions, hardware/topology, exact command, start/end time, outcome, raw evidence locations and limitations. Valid outcomes include PASS, FAIL, NOT_RUN, NOT_IMPLEMENTED and BLOCKED. Documentation of an acceptance recipe is not PASS.
 
-`evidence/execution.json` and JUnit XML are generated from the actual included tests. `IMPLEMENTATION_STATUS.json` lists scope blockers independently. Passing tests cannot turn an absent GPU backend or absent native payment transaction builder into a release-qualified capability.
+The reference handoff names `evidence/execution.json`, JUnit XML and `IMPLEMENTATION_STATUS.json` as its evidence outputs. Those names are not proof that such artifacts are present or current in this checkout. Each new run must retain its own commands, source and binary hashes, outcomes and raw logs; scope blockers must be recorded independently. Passing tests cannot turn an absent GPU backend or absent native payment transaction builder into a release-qualified capability.
 
 ## What this tree runs
 

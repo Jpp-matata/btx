@@ -18,25 +18,31 @@ class PartiallySignedTransaction;
 
 namespace modelnet {
 
-/** What a stock btxd offers. No startup flag selects this. */
+/** What a stock btxd offers. No startup flag selects this.
+ *  seed_public and cpu_evaluate follow the governor snapshot.
+ *  hardware_threads is a host capability, not a grant.
+ */
 struct SwarmBuiltinOffer {
-    bool seed_public{true};
-    bool cpu_evaluate{true};
+    bool seed_public{false};
+    bool cpu_evaluate{false};
     bool gpu_train{false};
     bool private_prompts{false};
     bool startup_flag{false};
-    int cpu_threads{1};
+    int cpu_threads{0};
+    int hardware_threads{0};
     int64_t vram_bytes{0};
     std::string automatic_spend_atoms{"0"};
 };
 
-/** Host threads, no assumed GPU, no private data, no spend. */
+/** Stock snapshot: one idle slot, no authorized CPU threads, no GPU, no spend. */
 SwarmBuiltinOffer SwarmDefaultOffer();
 
 /**
- * A verified catalog row joins the family. It enters the training cohort and
- * the KV set only when the checkpoint, recipe, and full-precision quantization
- * all match. A 4-bit row stays in the family.
+ * A verified catalog row joins its lineage family. It enters a training cohort
+ * when full-precision quantization, checkpoint, and recipe match that cohort.
+ * kv_share stays false unless weights, tokenizer, adapter order, runtime,
+ * layout, dtype, positional encoding, and mask are present and equal.
+ * A 4-bit row stays in the family. SwarmAssignCohort leaves kv_share false.
  */
 struct SwarmCohortDecision {
     bool family{false};
@@ -51,8 +57,13 @@ SwarmCohortDecision SwarmAssignCohort(const std::string& quantization, const std
 
 /**
  * Write lineage, economy identity, family membership, and acquire state for
- * every byte-verified catalog row. A missing catalog is success. This does
- * not broadcast and does not spend.
+ * every byte-verified, explicitly complete catalog row, using the observer's
+ * lineage and visibility resolver. Checkpoint and recipe stay on the row.
+ * Families group by lineage. A cohort also shares checkpoint and recipe.
+ * Offers and per-model seed follow the same governor snapshot as the mesh.
+ * A missing catalog writes an empty model list. Invalid input fails without
+ * replacing the previous snapshot. An unchanged document is not rewritten.
+ * This does not broadcast and does not spend.
  */
 bool SwarmIntegrateCatalog(const fs::path& modeldir, std::string& err);
 

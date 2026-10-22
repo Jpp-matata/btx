@@ -8,11 +8,15 @@ The swarm is integrated as a thread inside `btxd`.
 
 About every two seconds, while the thread is running:
 
-1. The catalog is written to `modeldir/swarm/observers.json`. The file is observers only. It records no grant, no seed, and no spend. `automatic_spend_atoms` in that file is the string `"0"`, and payment authority is false.
+1. Verified, explicitly complete catalog entries are reconciled into `modeldir/swarm/observers.json`. Removed, unverified or incomplete entries lose their active subscription; an empty or missing catalog clears existing subscriptions. The file is observers only. It records no grant, no seed, and no spend. `automatic_spend_atoms` in that file is the string `"0"`, and payment authority is false.
 2. The local mesh is refreshed.
-3. The catalog is integrated.
+3. The catalog is integrated into `swarm/contribution.json` using the same bounded reader and lineage resolver as the observer.
 4. `SwarmFormPlane` runs. `FormationPlane` does not exec a sidecar, open a socket, add a DNS seed, broadcast, or spend.
 5. `SwarmPublishLive` runs. A missing contribution file succeeds and spends nothing.
+
+Both views use `swarm/lineage-mappings.json` when an artifact has a local mapping; otherwise they derive a private `PROVISIONAL_NOT_AUTHORITATIVE` topic from `model_id`. Contribution economy IDs derive from that resolved lineage. Catalog `visibility: public` alone cannot publish a provisional topic or set its contribution `seed` flag. Removing a mapping restores the private provisional identity. The existing `VERIFIED_MAPPING` label records trust in local operator policy: this reader does not cryptographically authenticate an external mapping file.
+
+`observers.json` is the last successful catalog snapshot, not a durable follow-history list. Malformed catalog or mapping input fails without replacing that snapshot, and the observer skips live publication for that poll. A failed contribution integration also skips formation and live publication. Retained files alone do not prove current eligibility or authorize work. Successful polls refresh the views; separate file replacements are not an atomic transaction across all swarm files.
 
 The same wake then calls `NifObserve::Tick`, then `SwarmBound::Pass` once, then `TickBind::Pass` once. Later wakes see the bound and the tick bind already latched. They do not repeat the pass.
 

@@ -10,6 +10,7 @@
 #include <boost/test/unit_test.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <fstream>
 #include <iterator>
 #include <string>
@@ -108,6 +109,123 @@ BOOST_AUTO_TEST_CASE(publish_keeps_four_bit_in_the_family_only)
     BOOST_CHECK(times["long"][0].isObject());
     BOOST_CHECK_EQUAL(times["long"][0]["lineage_id"].get_str(), lineage);
     BOOST_CHECK(!times["long"][0].exists("prompt"));
+
+    const auto old = fs::file_time_type::clock::now() - std::chrono::hours(3);
+    fs::last_write_time(dir / "swarm" / "networks.json", old);
+    fs::last_write_time(dir / "swarm" / "timescales.json", old);
+    const auto networks_stamp = fs::last_write_time(dir / "swarm" / "networks.json");
+    const auto times_stamp = fs::last_write_time(dir / "swarm" / "timescales.json");
+    BOOST_REQUIRE(modelnet::SwarmPublishLive(dir, err));
+    BOOST_CHECK(fs::last_write_time(dir / "swarm" / "networks.json") == networks_stamp);
+    BOOST_CHECK(fs::last_write_time(dir / "swarm" / "timescales.json") == times_stamp);
+    fs::remove_all(dir);
+}
+
+BOOST_AUTO_TEST_CASE(distinct_lineages_and_checkpoints_stay_apart)
+{
+    const std::string full = Id('a');
+    const std::string other = Id('b');
+    const std::string remote = Id('c');
+    const std::string lineage = Id('d');
+    const std::string other_lineage = Id('e');
+    const fs::path dir = Scratch();
+    Write(dir / "swarm" / "contribution.json",
+          std::string("{\"automatic_spend_atoms\":\"0\",\"models\":[") +
+              "{\"acquire\":\"joined\",\"artifact_id\":\"" + full +
+              "\",\"cohort\":true,\"checkpoint_id\":\"ckpt-a\",\"recipe\":\"recipe\",\"kv_share\":false,\"lineage_id\":\"" +
+              lineage + "\",\"quantization\":\"full\"}," +
+              "{\"acquire\":\"joined\",\"artifact_id\":\"" + other +
+              "\",\"cohort\":true,\"checkpoint_id\":\"ckpt-b\",\"recipe\":\"recipe\",\"kv_share\":false,\"lineage_id\":\"" +
+              lineage + "\",\"quantization\":\"full\"}," +
+              "{\"acquire\":\"joined\",\"artifact_id\":\"" + remote +
+              "\",\"cohort\":true,\"checkpoint_id\":\"ckpt-a\",\"recipe\":\"recipe\",\"kv_share\":true,\"lineage_id\":\"" +
+              other_lineage + "\",\"quantization\":\"full\"}" +
+              "]}");
+    std::string err;
+    BOOST_REQUIRE(modelnet::SwarmPublishLive(dir, err));
+    const std::string raw = ReadRaw(dir / "swarm" / "networks.json");
+    UniValue networks;
+    BOOST_REQUIRE(networks.read(raw));
+    BOOST_CHECK(networks["family"]["member_artifact_ids"].empty());
+    BOOST_CHECK(networks["family"]["lineage_id"].get_str().empty());
+    BOOST_CHECK(networks["cohort"]["member_ids"].empty());
+    BOOST_REQUIRE_EQUAL(networks["families"].size(), 2U);
+    BOOST_REQUIRE_EQUAL(networks["cohorts"].size(), 3U);
+    BOOST_CHECK_EQUAL(networks["automatic_spend_atoms"].get_str(), "0");
+
+    const auto family_has = [&](const std::string& id, const std::string& artifact) {
+        for (const UniValue& family : networks["families"].getValues()) {
+            if (family["lineage_id"].get_str() != id) continue;
+            for (const UniValue& member : family["member_artifact_ids"].getValues()) {
+                if (member.get_str() == artifact) return true;
+            }
+        }
+        return false;
+    };
+    BOOST_CHECK(family_has(lineage, full));
+    BOOST_CHECK(family_has(lineage, other));
+    BOOST_CHECK(!family_has(lineage, remote));
+    BOOST_CHECK(family_has(other_lineage, remote));
+
+    bool saw_recipe = false;
+    for (const UniValue& cohort : networks["cohorts"].getValues()) {
+        BOOST_CHECK_EQUAL(cohort["recipe_id"].get_str(), "recipe");
+        const bool has_full = [&] {
+            for (const UniValue& id : cohort["member_ids"].getValues()) {
+                if (id.get_str() == full) return true;
+            }
+            return false;
+        }();
+        const bool has_other = [&] {
+            for (const UniValue& id : cohort["member_ids"].getValues()) {
+                if (id.get_str() == other) return true;
+            }
+            return false;
+        }();
+        BOOST_CHECK(!(has_full && has_other));
+        if (has_full) {
+            saw_recipe = true;
+            BOOST_CHECK_EQUAL(cohort["checkpoint_id"].get_str(), "ckpt-a");
+            BOOST_CHECK_EQUAL(cohort["lineage_id"].get_str(), lineage);
+        }
+    }
+    BOOST_CHECK(saw_recipe);
+    const UniValue& members = networks["families"][0]["members"];
+    BOOST_CHECK(members[0].exists("checkpoint_id"));
+    BOOST_CHECK(members[0].exists("recipe"));
+
+    UniValue times;
+    BOOST_REQUIRE(times.read(ReadRaw(dir / "swarm" / "timescales.json")));
+    BOOST_REQUIRE_EQUAL(times["long"].size(), 2U);
+    BOOST_CHECK_EQUAL(times["automatic_spend_atoms"].get_str(), "0");
+
+    const auto old = fs::file_time_type::clock::now() - std::chrono::hours(3);
+    fs::last_write_time(dir / "swarm" / "networks.json", old);
+    const auto stamp = fs::last_write_time(dir / "swarm" / "networks.json");
+    BOOST_REQUIRE(modelnet::SwarmPublishLive(dir, err));
+    BOOST_CHECK(fs::last_write_time(dir / "swarm" / "networks.json") == stamp);
+
+    Write(dir / "swarm" / "contribution.json",
+          std::string("{\"automatic_spend_atoms\":\"0\",\"models\":[") +
+              "{\"acquire\":\"joined\",\"artifact_id\":\"" + full +
+              "\",\"cohort\":true,\"checkpoint_id\":\"ckpt-a\",\"recipe\":\"recipe\",\"lineage_id\":\"" + lineage +
+              "\",\"quantization\":\"full\"}," +
+              "{\"acquire\":\"joined\",\"artifact_id\":\"" + other +
+              "\",\"cohort\":true,\"checkpoint_id\":\"ckpt-b\",\"recipe\":\"recipe\",\"lineage_id\":\"" + lineage +
+              "\",\"quantization\":\"full\"}" +
+              "]}");
+    BOOST_REQUIRE(modelnet::SwarmPublishLive(dir, err));
+    UniValue removed;
+    BOOST_REQUIRE(removed.read(ReadRaw(dir / "swarm" / "networks.json")));
+    BOOST_REQUIRE_EQUAL(removed["families"].size(), 1U);
+    BOOST_CHECK_EQUAL(removed["family"]["lineage_id"].get_str(), lineage);
+    BOOST_CHECK_EQUAL(removed["family"]["member_artifact_ids"].size(), 2U);
+    bool still_remote = false;
+    for (const UniValue& family : removed["families"].getValues()) {
+        if (family["lineage_id"].get_str() == other_lineage) still_remote = true;
+    }
+    BOOST_CHECK(!still_remote);
+    BOOST_REQUIRE_EQUAL(removed["cohorts"].size(), 2U);
     fs::remove_all(dir);
 }
 

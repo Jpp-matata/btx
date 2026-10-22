@@ -8,7 +8,7 @@ import hashlib
 import time
 import torch
 from torch.nn import functional as F
-from .runtime import Decoder
+from .runtime import Decoder,admit_workload
 from .codec import byte_id,digest,encode,decode,integer,fields
 from .errors import MeshError,require
 from . import tensors
@@ -24,6 +24,8 @@ class Trainer:
         self.tokens_seen=0;self.dataset_id=None;self.cursor=0
     def train(self,data:torch.Tensor,steps:int,batch_size=4,sequence=16):
         integer(steps,1,4096);integer(batch_size,1,256);integer(sequence,2,self.model.cfg.context)
+        if getattr(self,"host_ceiling",None) is not None:self.model.host_ceiling=self.host_ceiling
+        admit_workload(self.model.cfg,batch_size,sequence,ceiling=getattr(self,"host_ceiling",None))
         require(data.ndim==1 and data.dtype==torch.long and len(data)>sequence,"TRAINING_DATA")
         data_id=byte_id(tensors.dumps({"tokens":data}))
         require(self.dataset_id in (None,data_id),"DATASET_CHANGED")
@@ -145,6 +147,10 @@ def group_policy_step(model:Decoder,optimizer,trajectories:list[dict],checkpoint
     require(len(trajectories)>=2,"RL_GROUP_SMALL")
     require(all(t["checkpoint"]==checkpoint_id for t in trajectories),"OFF_POLICY_ROLLOUT")
     require(len({t["group"] for t in trajectories})==1,"RL_GROUP_MISMATCH")
+    ceiling=getattr(model,"host_ceiling",None)
+    for t in trajectories:
+        require(len(t["prompt"])>0 and len(t["completion"])>0,"RL_TOKENS")
+        admit_workload(model.cfg,1,len(t["prompt"])+len(t["completion"])-1,ceiling=ceiling)
     rewards=torch.tensor([t["reward_micros"]/1000000 for t in trajectories],dtype=torch.float32)
     advantages=rewards-rewards.mean()
     std=advantages.std(unbiased=False)

@@ -125,8 +125,8 @@ BOOST_AUTO_TEST_CASE(stale_epoch_does_not_replace_the_leader)
     modelnet::FormationPlane again;
     std::string err = "stale";
     BOOST_REQUIRE(again.Open(model, err));
-    BOOST_CHECK(!again.Form(err));
-    BOOST_CHECK_EQUAL(err, "REOPEN");
+    BOOST_REQUIRE(again.Form(err));
+    BOOST_CHECK(err.empty());
     BOOST_CHECK_EQUAL(again.leader(), "peer-family");
     BOOST_CHECK_EQUAL(again.epoch(), 2U);
     const std::string stored = ReadFile(again.directory() / modelnet::kElectionFile);

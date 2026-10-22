@@ -50,7 +50,7 @@ private:
  * Create modeldir/swarm when it is missing and form the local membership.
  * An empty modeldir returns false with err MODELDIR and creates nothing.
  * A symlink at modeldir/swarm returns false with err SYMLINK and is not written through.
- * A second call on the same directory returns false with err REOPEN and leaves the first membership.
+ * A second call on the same directory loads the existing valid membership, returns success, and does not rewrite it.
  */
 bool SwarmFormPlane(const std::filesystem::path& modeldir, std::string& err);
 

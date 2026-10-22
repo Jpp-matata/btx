@@ -2566,6 +2566,7 @@ if(WITH_MODELNET)
     modelnet_r8_mandate_tests.cpp
     modelnet_healer_negcache_tests.cpp
     hcp_remaining_gap_tests.cpp
+    lab_lifecycle_tests.cpp
   )
   target_compile_definitions(test_btx PRIVATE
     MODELNET_V11_VECTORS_PATH=\"${PROJECT_SOURCE_DIR}/src/test/data/modelnet_v11_vectors.json\"

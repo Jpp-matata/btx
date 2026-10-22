@@ -13,17 +13,33 @@ from .storage import atomic_write
 
 
 def execute(request:dict,output:Path):
-    import torch
-    from .runtime import Decoder,generate
-    from .training import Trainer
     from . import tensors
-    torch.set_num_threads(request.get("cpu_threads",1))
-    torch.set_num_interop_threads(1)
     root=output.parent.resolve()
     def input_file(name):
         p=(root/name).resolve();require(p.parent==root and p.is_file() and not p.is_symlink(),"EXECUTOR_INPUT");return p
-    model=Decoder.from_checkpoint(input_file("model.safetensors").read_bytes())
     op=request["executor"];p=request["payload"]
+    # Dataset verification is decided here, before any checkpoint is materialized.
+    if op=="dataset.verify":
+        data=input_file("dataset.safetensors").read_bytes();tensors.inspect(data)
+        atomic_write(root/"result.json",encode({"verified_tensor_artifact":byte_id(data),"license_review":"SEPARATE"}))
+        return {"artifact_file":"result.json","report":{"bytes":len(data)}}
+    if op not in ("torch.train","torch.rollout","inference","torch.evaluate"):raise MeshError("EXECUTOR_UNAVAILABLE",op)
+    import torch
+    from .runtime import Decoder,generate,checkpoint_config,admit_workload,workload_shape,configured_host_ceiling
+    from .training import Trainer
+    torch.set_num_threads(request.get("cpu_threads",1))
+    torch.set_num_interop_threads(1)
+    raw=input_file("model.safetensors").read_bytes()
+    cfg=checkpoint_config(raw)
+    suite=None
+    if op=="torch.evaluate":
+        suite=decode(input_file("suite.json").read_bytes())
+        require(isinstance(suite["cases"],list) and 1<=len(suite["cases"])<=10000,"SUITE_CASES")
+    batch,sequence=workload_shape(op,p,suite)
+    ceiling=configured_host_ceiling({"host_bytes":request["host_bytes"]} if "host_bytes" in request else None)
+    admit_workload(cfg,batch,sequence,ceiling=ceiling)
+    model=Decoder.from_checkpoint(raw,device="cpu")
+    model.host_ceiling=ceiling
     if op=="torch.train":
         integer(p.get("steps",8),1,request["max_steps"])
         seed=p.get("seed",1);integer(seed,0,2**31-1)
@@ -32,6 +48,7 @@ def execute(request:dict,output:Path):
         else:
             data=tensors.loads(input_file("dataset.safetensors").read_bytes())["tokens"]
         trainer=Trainer(model,lr_micros=p.get("lr_micros",30000),seed=seed)
+        trainer.host_ceiling=ceiling
         report=trainer.train(data,p.get("steps",8),batch_size=p.get("batch",4),sequence=p.get("sequence",16))
         raw=model.checkpoint();atomic_write(root/"result.safetensors",raw)
         atomic_write(root/"training-state.safetensors",trainer.checkpoint())
@@ -48,8 +65,8 @@ def execute(request:dict,output:Path):
         atomic_write(root/"result.json",raw)
         return {"artifact_file":"result.json","prefix_cache_file":"prefix.safetensors","report":{"generated_tokens":len(completion),"reused_prefix_tokens":offset,"private_input_exported":False}}
     if op=="torch.evaluate":
-        parent=Decoder.from_checkpoint(input_file("parent.safetensors").read_bytes());model.eval();parent.eval()
-        suite=decode(input_file("suite.json").read_bytes());require(isinstance(suite["cases"],list) and 1<=len(suite["cases"])<=10000,"SUITE_CASES")
+        parent=Decoder.from_checkpoint(input_file("parent.safetensors").read_bytes(),device="cpu");model.eval();parent.eval()
+        parent.host_ceiling=ceiling
         counts={"00":0,"01":0,"10":0,"11":0}
         ids=set()
         with torch.no_grad():
@@ -62,10 +79,6 @@ def execute(request:dict,output:Path):
         raw=encode({"counts":counts,"suite_id":byte_id(input_file("suite.json").read_bytes()),"checkpoint":request["checkpoint"],"evaluation":"NEXT_TOKEN_EXACT_TARGET","quality_scope":"THIS_SUITE_ONLY"})
         atomic_write(root/"result.json",raw)
         return {"artifact_file":"result.json","report":{"counts":counts}}
-    if op=="dataset.verify":
-        data=input_file("dataset.safetensors").read_bytes();tensors.inspect(data)
-        atomic_write(root/"result.json",encode({"verified_tensor_artifact":byte_id(data),"license_review":"SEPARATE"}))
-        return {"artifact_file":"result.json","report":{"bytes":len(data)}}
     raise MeshError("EXECUTOR_UNAVAILABLE",op)
 
 

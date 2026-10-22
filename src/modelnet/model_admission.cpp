@@ -4,9 +4,13 @@
 
 #include <modelnet/model_admission.h>
 
+#include <modelnet/admission_routes.h>
+
+#include <algorithm>
 #include <cstddef>
 #include <unordered_map>
 #include <unordered_set>
+#include <vector>
 
 namespace modelnet {
 namespace {
@@ -96,6 +100,29 @@ AdmissionResult Admit(Assurance assurance,
 void Quarantine(const std::string& legacy_id)
 {
     QuarantineSet().insert(legacy_id);
+    RememberQuarantine(legacy_id);
+}
+
+void ReplaceQuarantine(const std::vector<std::string>& legacy_ids)
+{
+    QuarantineSet().clear();
+    for (const std::string& id : legacy_ids) {
+        if (!id.empty()) QuarantineSet().insert(id);
+    }
+}
+
+std::vector<std::string> QuarantineIds()
+{
+    std::vector<std::string> ids;
+    ids.reserve(QuarantineSet().size());
+    for (const std::string& id : QuarantineSet()) ids.push_back(id);
+    std::sort(ids.begin(), ids.end());
+    return ids;
+}
+
+void ClearQuarantineMemory()
+{
+    QuarantineSet().clear();
 }
 
 ServeResult Serve(const std::string& legacy_id, bool byte_hash_matches)

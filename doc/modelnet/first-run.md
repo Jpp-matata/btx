@@ -36,8 +36,9 @@ The swarm control plane is a thread in `btxd`. `src/init.cpp` calls
 Monetary consensus continues if the swarm pass fails. `btxd` does not start
 `btx-swarmd` or `btx-paynetd`.
 
-`SwarmObserveCatalog` merges a usable `catalog.json` into
-`modeldir/swarm/observers.json`. Subscriptions are observers only: no compute
+`SwarmObserveCatalog` reconciles verified, explicitly complete catalog entries
+into `modeldir/swarm/observers.json`, removing entries that become ineligible or
+disappear. A missing catalog clears existing subscriptions. Subscriptions are observers only: no compute
 grant, no seeding, no spend.
 
 `SwarmFormPlane` does not exec a sidecar, open a socket, add a DNS seed,

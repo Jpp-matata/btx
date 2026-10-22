@@ -4,6 +4,7 @@
 
 #include <modelnet/swarm_close.h>
 #include <modelnet/swarm_lifecycle.h>
+#include <modelnet/swarm_live.h>
 #include <modelnet/swarm_node.h>
 #include <modelnet/swarm_paymesh.h>
 #include <pqkey.h>
@@ -51,11 +52,12 @@ BOOST_AUTO_TEST_CASE(default_offer_needs_no_flag_and_no_gpu)
 {
     const modelnet::SwarmBuiltinOffer offer = modelnet::SwarmDefaultOffer();
     BOOST_CHECK(offer.seed_public);
-    BOOST_CHECK(offer.cpu_evaluate);
+    BOOST_CHECK(!offer.cpu_evaluate);
     BOOST_CHECK(!offer.gpu_train);
     BOOST_CHECK(!offer.private_prompts);
     BOOST_CHECK(!offer.startup_flag);
-    BOOST_CHECK(offer.cpu_threads >= 1);
+    BOOST_CHECK_EQUAL(offer.cpu_threads, 0);
+    BOOST_CHECK(offer.hardware_threads >= 1);
     BOOST_CHECK_EQUAL(offer.vram_bytes, 0);
     BOOST_CHECK_EQUAL(offer.automatic_spend_atoms, "0");
 
@@ -66,10 +68,12 @@ BOOST_AUTO_TEST_CASE(default_offer_needs_no_flag_and_no_gpu)
     std::string raw((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
     UniValue root;
     BOOST_REQUIRE(root.read(raw));
+    BOOST_CHECK(root["observer"].get_bool());
     BOOST_CHECK(root["seeder"].get_bool());
-    BOOST_CHECK(root["evaluator"].get_bool());
+    BOOST_CHECK(!root["evaluator"].get_bool());
     BOOST_CHECK(!root["trainer"].get_bool());
     BOOST_CHECK(!root["drained"].get_bool());
+    BOOST_CHECK(root["hardware_threads"].getInt<int>() >= 1);
     BOOST_CHECK_EQUAL(root["automatic_spend_atoms"].get_str(), "0");
     fs::remove_all(dir);
 }
@@ -86,6 +90,10 @@ BOOST_AUTO_TEST_CASE(catalog_join_splits_full_precision_from_four_bit)
               "\",\"bytes_verified\":true,\"incomplete\":false,\"visibility\":\"public\","
               "\"quantization\":\"4bit\",\"checkpoint_id\":\"ckpt\",\"recipe\":\"recipe\"}" +
               "]}");
+    fs::create_directories(dir / "swarm");
+    Write(dir / "swarm" / "lineage-mappings.json",
+          "{\"" + Id('a') + "\":{\"lineage_id\":\"" + Id('c') + "\",\"visibility\":\"public\"}," +
+          "\"" + Id('b') + "\":{\"lineage_id\":\"" + Id('c') + "\",\"visibility\":\"public\"}}");
     std::string err;
     BOOST_REQUIRE(modelnet::SwarmIntegrateCatalog(dir, err));
     std::ifstream in(dir / "swarm" / "contribution.json");
@@ -101,12 +109,16 @@ BOOST_AUTO_TEST_CASE(catalog_join_splits_full_precision_from_four_bit)
     BOOST_CHECK_EQUAL(models[0]["acquire"].get_str(), "joined");
     BOOST_CHECK(models[0]["family"].get_bool());
     BOOST_CHECK(models[0]["cohort"].get_bool());
-    BOOST_CHECK(models[0]["kv_share"].get_bool());
+    BOOST_CHECK(!models[0]["kv_share"].get_bool());
+    BOOST_CHECK_EQUAL(models[0]["checkpoint_id"].get_str(), "ckpt");
+    BOOST_CHECK_EQUAL(models[0]["recipe"].get_str(), "recipe");
     BOOST_CHECK(models[0]["seed"].get_bool());
     BOOST_CHECK(!models[0]["private_acquire"].get_bool());
     BOOST_CHECK(models[1]["family"].get_bool());
     BOOST_CHECK(!models[1]["cohort"].get_bool());
     BOOST_CHECK(!models[1]["kv_share"].get_bool());
+    BOOST_CHECK_EQUAL(models[1]["checkpoint_id"].get_str(), "ckpt");
+    BOOST_CHECK_EQUAL(models[1]["recipe"].get_str(), "recipe");
     const std::string economy = modelnet::SwarmEconomyIdentity(models[0]["lineage_id"].get_str());
     BOOST_CHECK_EQUAL(models[0]["economy_id"].get_str(), economy);
 
@@ -114,6 +126,7 @@ BOOST_AUTO_TEST_CASE(catalog_join_splits_full_precision_from_four_bit)
         modelnet::SwarmAssignCohort("full", "ckpt-a", "recipe", "ckpt-b", "recipe");
     BOOST_CHECK(mismatched.family);
     BOOST_CHECK(!mismatched.cohort);
+    BOOST_CHECK(!mismatched.kv_share);
     fs::remove_all(dir);
 }
 
@@ -291,6 +304,189 @@ BOOST_AUTO_TEST_CASE(records_a_second_process_can_read)
     BOOST_CHECK(!realm);
     BOOST_CHECK(!replay);
     BOOST_CHECK_EQUAL(modelnet::SwarmMassExit(1000000, 8000, 24000000), 334);
+    fs::remove_all(dir);
+}
+
+std::string Identity(const std::string& mask)
+{
+    return "\"weights\":\"w\",\"tokenizer\":\"tok\",\"adapter_order\":[\"a0\",\"a1\"],\"runtime\":\"rt\","
+           "\"layout\":\"lay\",\"dtype\":\"fp32\",\"positional_encoding\":\"rope\",\"mask\":\"" +
+           mask + "\"";
+}
+
+const UniValue* FindModel(const UniValue& models, const std::string& artifact)
+{
+    for (const UniValue& row : models.getValues()) {
+        if (row["artifact_id"].get_str() == artifact) return &row;
+    }
+    return nullptr;
+}
+
+BOOST_AUTO_TEST_CASE(governor_snapshot_authorizes_seed_and_cpu)
+{
+    const fs::path root = Scratch();
+    std::string err;
+    const auto offer_of = [&](const fs::path& dir) {
+        BOOST_REQUIRE(modelnet::SwarmIntegrateCatalog(dir, err));
+        std::ifstream in(dir / "swarm" / "contribution.json");
+        std::string raw((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        UniValue parsed;
+        BOOST_REQUIRE(parsed.read(raw));
+        return parsed;
+    };
+
+    fs::create_directories(root / "off" / "swarm");
+    Write(root / "off" / "swarm" / "device.json",
+          "{\"idle_contribution\":false,\"slots\":4,\"cpu_threads\":4,\"vram_bytes\":8}");
+    Write(root / "off" / "catalog.json",
+          std::string("{\"models\":[{\"model_id\":\"") + Id('1') + "\",\"artifact_id\":\"" + Id('a') +
+              "\",\"bytes_verified\":true,\"incomplete\":false}]}");
+    Write(root / "off" / "swarm" / "lineage-mappings.json",
+          "{\"" + Id('a') + "\":{\"lineage_id\":\"" + Id('c') + "\",\"visibility\":\"public\"}}");
+    const UniValue denied = offer_of(root / "off");
+    BOOST_CHECK(!denied["cpu_evaluate"].get_bool());
+    BOOST_CHECK(!denied["seed_public"].get_bool());
+    BOOST_CHECK_EQUAL(denied["cpu_threads"].getInt<int>(), 0);
+    BOOST_CHECK(denied["hardware_threads"].getInt<int>() >= 1);
+    BOOST_CHECK_EQUAL(denied["automatic_spend_atoms"].get_str(), "0");
+    BOOST_CHECK(!denied["models"][0]["seed"].get_bool());
+    BOOST_REQUIRE(modelnet::SwarmRefreshLocalMesh(root / "off", err));
+    std::ifstream mesh_in(root / "off" / "swarm" / "mesh-state.json");
+    std::string mesh_raw((std::istreambuf_iterator<char>(mesh_in)), std::istreambuf_iterator<char>());
+    UniValue mesh;
+    BOOST_REQUIRE(mesh.read(mesh_raw));
+    BOOST_CHECK(mesh["observer"].get_bool());
+    BOOST_CHECK(!mesh["seeder"].get_bool());
+    BOOST_CHECK(!mesh["evaluator"].get_bool());
+    BOOST_CHECK(mesh["drained"].get_bool());
+
+    fs::create_directories(root / "zero" / "swarm");
+    Write(root / "zero" / "swarm" / "device.json",
+          "{\"idle_contribution\":true,\"slots\":0,\"cpu_threads\":0,\"vram_bytes\":0}");
+    const UniValue zero = offer_of(root / "zero");
+    BOOST_CHECK(!zero["cpu_evaluate"].get_bool());
+    BOOST_CHECK(!zero["seed_public"].get_bool());
+    BOOST_CHECK(zero["models"].empty());
+
+    fs::create_directories(root / "on" / "swarm");
+    Write(root / "on" / "swarm" / "device.json",
+          "{\"idle_contribution\":true,\"slots\":2,\"cpu_threads\":3,\"vram_bytes\":0}");
+    Write(root / "on" / "catalog.json",
+          std::string("{\"models\":[{\"model_id\":\"") + Id('1') + "\",\"artifact_id\":\"" + Id('a') +
+              "\",\"bytes_verified\":true,\"incomplete\":false},"
+              "{\"model_id\":\"" + Id('2') + "\",\"artifact_id\":\"" + Id('b') +
+              "\",\"bytes_verified\":true,\"incomplete\":false}]}");
+    Write(root / "on" / "swarm" / "lineage-mappings.json",
+          "{\"" + Id('a') + "\":{\"lineage_id\":\"" + Id('c') + "\",\"visibility\":\"public\"}}");
+    const UniValue granted = offer_of(root / "on");
+    BOOST_CHECK(granted["cpu_evaluate"].get_bool());
+    BOOST_CHECK(granted["seed_public"].get_bool());
+    BOOST_CHECK_EQUAL(granted["cpu_threads"].getInt<int>(), 3);
+    BOOST_CHECK(granted["hardware_threads"].getInt<int>() >= 1);
+    BOOST_CHECK(!granted["gpu_train"].get_bool());
+    const UniValue* pub = FindModel(granted["models"], Id('a'));
+    const UniValue* priv = FindModel(granted["models"], Id('b'));
+    BOOST_REQUIRE(pub != nullptr);
+    BOOST_REQUIRE(priv != nullptr);
+    BOOST_CHECK(pub->operator[]("seed").get_bool());
+    BOOST_CHECK(!priv->operator[]("seed").get_bool());
+    BOOST_CHECK(priv->operator[]("private_acquire").get_bool());
+    fs::remove_all(root);
+}
+
+BOOST_AUTO_TEST_CASE(distinct_checkpoints_share_a_family_and_not_a_cohort)
+{
+    const fs::path dir = Scratch();
+    const std::string lineage = Id('c');
+    Write(dir / "catalog.json",
+          std::string("{\"models\":[") +
+              "{\"model_id\":\"" + Id('1') + "\",\"artifact_id\":\"" + Id('a') +
+              "\",\"bytes_verified\":true,\"incomplete\":false,\"quantization\":\"full\","
+              "\"checkpoint_id\":\"ckpt-a\",\"recipe\":\"recipe\"," + Identity("mask") + "}," +
+              "{\"model_id\":\"" + Id('2') + "\",\"artifact_id\":\"" + Id('b') +
+              "\",\"bytes_verified\":true,\"incomplete\":false,\"quantization\":\"full\","
+              "\"checkpoint_id\":\"ckpt-b\",\"recipe\":\"recipe\"," + Identity("mask") + "}," +
+              "{\"model_id\":\"" + Id('3') + "\",\"artifact_id\":\"" + Id('d') +
+              "\",\"bytes_verified\":true,\"incomplete\":false,\"quantization\":\"full\","
+              "\"checkpoint_id\":\"ckpt-a\",\"recipe\":\"recipe\"," + Identity("other") + "}," +
+              "{\"model_id\":\"" + Id('4') + "\",\"artifact_id\":\"" + Id('e') +
+              "\",\"bytes_verified\":true,\"incomplete\":false,\"quantization\":\"full\","
+              "\"checkpoint_id\":\"ckpt-same\",\"recipe\":\"recipe\"," + Identity("mask") + "}," +
+              "{\"model_id\":\"" + Id('5') + "\",\"artifact_id\":\"" + Id('f') +
+              "\",\"bytes_verified\":true,\"incomplete\":false,\"quantization\":\"full\","
+              "\"checkpoint_id\":\"ckpt-same\",\"recipe\":\"recipe\"," + Identity("mask") + "}" +
+              "]}");
+    fs::create_directories(dir / "swarm");
+    Write(dir / "swarm" / "lineage-mappings.json",
+          "{\"" + Id('a') + "\":{\"lineage_id\":\"" + lineage + "\",\"visibility\":\"public\"}," +
+              "\"" + Id('b') + "\":{\"lineage_id\":\"" + lineage + "\",\"visibility\":\"public\"}," +
+              "\"" + Id('d') + "\":{\"lineage_id\":\"" + lineage + "\",\"visibility\":\"public\"}," +
+              "\"" + Id('e') + "\":{\"lineage_id\":\"" + lineage + "\",\"visibility\":\"public\"}," +
+              "\"" + Id('f') + "\":{\"lineage_id\":\"" + lineage + "\",\"visibility\":\"public\"}}");
+    std::string err;
+    BOOST_REQUIRE(modelnet::SwarmIntegrateCatalog(dir, err));
+    std::ifstream in(dir / "swarm" / "contribution.json");
+    std::string raw((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    UniValue root;
+    BOOST_REQUIRE(root.read(raw));
+    const UniValue& models = root["models"];
+    const UniValue* ckpt_a = FindModel(models, Id('a'));
+    const UniValue* ckpt_b = FindModel(models, Id('b'));
+    const UniValue* mismatched = FindModel(models, Id('d'));
+    const UniValue* same_left = FindModel(models, Id('e'));
+    const UniValue* same_right = FindModel(models, Id('f'));
+    BOOST_REQUIRE(ckpt_a && ckpt_b && mismatched && same_left && same_right);
+    BOOST_CHECK(ckpt_a->operator[]("family").get_bool());
+    BOOST_CHECK(ckpt_b->operator[]("family").get_bool());
+    BOOST_CHECK(ckpt_a->operator[]("cohort").get_bool());
+    BOOST_CHECK(ckpt_b->operator[]("cohort").get_bool());
+    BOOST_CHECK_EQUAL((*ckpt_a)["checkpoint_id"].get_str(), "ckpt-a");
+    BOOST_CHECK_EQUAL((*ckpt_b)["checkpoint_id"].get_str(), "ckpt-b");
+    BOOST_CHECK_EQUAL((*ckpt_a)["recipe"].get_str(), "recipe");
+    BOOST_CHECK((*ckpt_b)["kv_share"].get_bool());
+    BOOST_CHECK((*mismatched)["cohort"].get_bool());
+    BOOST_CHECK(!(*mismatched)["kv_share"].get_bool());
+    BOOST_CHECK(!(*ckpt_a)["kv_share"].get_bool());
+    BOOST_CHECK((*same_left)["kv_share"].get_bool());
+    BOOST_CHECK((*same_right)["kv_share"].get_bool());
+    BOOST_CHECK_EQUAL(same_left->operator[]("lineage_id").get_str(), lineage);
+    BOOST_CHECK(ckpt_a->operator[]("seed").get_bool());
+
+    BOOST_REQUIRE(modelnet::SwarmPublishLive(dir, err));
+    std::ifstream networks_in(dir / "swarm" / "networks.json");
+    std::string networks_raw((std::istreambuf_iterator<char>(networks_in)), std::istreambuf_iterator<char>());
+    UniValue networks;
+    BOOST_REQUIRE(networks.read(networks_raw));
+    BOOST_CHECK_EQUAL(networks["family"]["lineage_id"].get_str(), lineage);
+    BOOST_CHECK_EQUAL(networks["family"]["member_artifact_ids"].size(), 5U);
+    BOOST_REQUIRE_EQUAL(networks["cohorts"].size(), 3U);
+    BOOST_CHECK(networks["cohort"]["member_ids"].empty());
+    bool paired = false;
+    for (const UniValue& cohort : networks["cohorts"].getValues()) {
+        BOOST_CHECK_EQUAL(cohort["lineage_id"].get_str(), lineage);
+        BOOST_CHECK_EQUAL(cohort["recipe_id"].get_str(), "recipe");
+        const UniValue& members = cohort["member_ids"];
+        const bool has_a = [&] {
+            for (const UniValue& id : members.getValues()) {
+                if (id.get_str() == Id('a')) return true;
+            }
+            return false;
+        }();
+        const bool has_b = [&] {
+            for (const UniValue& id : members.getValues()) {
+                if (id.get_str() == Id('b')) return true;
+            }
+            return false;
+        }();
+        BOOST_CHECK(!(has_a && has_b));
+        if (cohort["checkpoint_id"].get_str() == "ckpt-same") {
+            paired = true;
+            BOOST_CHECK_EQUAL(members.size(), 2U);
+        }
+    }
+    BOOST_CHECK(paired);
+    BOOST_REQUIRE_EQUAL(networks["families"].size(), 1U);
+    BOOST_CHECK_EQUAL(networks["families"][0]["members"][0]["checkpoint_id"].get_str().empty(), false);
     fs::remove_all(dir);
 }
 

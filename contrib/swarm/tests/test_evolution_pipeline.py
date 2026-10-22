@@ -16,7 +16,7 @@ from btxmesh.training import Trainer
 from btxmesh.blobs import BlobStore
 from btxmesh.adoption import Adopter,verify_certificate
 from btxmesh.errors import MeshError
-from conftest import H
+from support import H
 
 
 def test_trained_descendant_signed_evidence_and_reversible_local_activation(tmp_path):

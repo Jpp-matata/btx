@@ -31,13 +31,7 @@ namespace {
 
 constexpr uint64_t kCatalogLimit = 32ull * 1024ull * 1024ull;
 
-struct Row {
-    std::string artifact_id;
-    std::string model_id;
-    std::string lineage_id;
-    std::string lineage_assurance;
-    std::string visibility;
-};
+using Row = SwarmCatalogEntry;
 
 std::atomic<bool> g_stop{false};
 std::thread g_thread;
@@ -170,6 +164,50 @@ bool WriteStored(const fs::path& dir, const std::map<std::string, Row>& rows, st
     return true;
 }
 
+std::string DigestBytes(const std::string& raw)
+{
+    CSHA384 hasher;
+    hasher.Write(reinterpret_cast<const unsigned char*>(raw.data()), raw.size());
+    unsigned char out[CSHA384::OUTPUT_SIZE];
+    hasher.Finalize(out);
+    return HexStr(Span<const unsigned char>(out, CSHA384::OUTPUT_SIZE));
+}
+
+bool Fingerprint(const fs::path& path, std::string& out, std::string& err)
+{
+    out.clear();
+    if (!fs::exists(path)) {
+        out = "missing";
+        return true;
+    }
+    std::error_code ec;
+    const auto sz = fs::file_size(path, ec);
+    if (ec) {
+        err = "CATALOG_READ";
+        return false;
+    }
+    if (sz > kCatalogLimit) {
+        out = "limit";
+        return true;
+    }
+    std::ifstream in(path, std::ios::binary);
+    if (!in) {
+        err = "CATALOG_READ";
+        return false;
+    }
+    std::string raw((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    out = DigestBytes(raw);
+    return true;
+}
+
+struct InputGeneration {
+    bool seen{false};
+    std::string catalog;
+    std::string mappings;
+    std::string device;
+    std::string peers;
+};
+
 } // namespace
 
 std::string SwarmProvisionalLineage(const std::string& model_id)
@@ -186,12 +224,13 @@ std::string SwarmProvisionalLineage(const std::string& model_id)
     return HexStr(Span<const unsigned char>(out, CSHA384::OUTPUT_SIZE));
 }
 
-bool SwarmObserveCatalog(const fs::path& modeldir, std::string& err)
+bool SwarmReadCatalog(const fs::path& modeldir, SwarmCatalog& entries, std::string& err)
 {
+    entries.clear();
+    err.clear();
     const fs::path catalog = modeldir / "catalog.json";
-    const fs::path swarm_dir = modeldir / "swarm";
-    const fs::path mappings = swarm_dir / "lineage-mappings.json";
-    const fs::path stored_path = swarm_dir / "observers.json";
+    const fs::path mappings = modeldir / "swarm" / "lineage-mappings.json";
+    if (!RejectSymlink(catalog, err)) return false;
     if (!fs::exists(catalog)) return true;
     std::string raw;
     if (!ReadBounded(catalog, raw, err)) return false;
@@ -201,6 +240,7 @@ bool SwarmObserveCatalog(const fs::path& modeldir, std::string& err)
         return false;
     }
     UniValue map_root(UniValue::VOBJ);
+    if (!RejectSymlink(mappings, err)) return false;
     if (fs::exists(mappings)) {
         std::string map_raw;
         if (!ReadBounded(mappings, map_raw, err)) return false;
@@ -218,8 +258,8 @@ bool SwarmObserveCatalog(const fs::path& modeldir, std::string& err)
             return false;
         }
         const bool verified = item.exists("bytes_verified") && item["bytes_verified"].isBool() && item["bytes_verified"].get_bool();
-        const bool incomplete = item.exists("incomplete") && item["incomplete"].isBool() && item["incomplete"].get_bool();
-        if (!verified || incomplete) continue;
+        const bool complete = item.exists("incomplete") && item["incomplete"].isBool() && !item["incomplete"].get_bool();
+        if (!verified || !complete) continue;
         if (!item.exists("artifact_id") || !item.exists("model_id") || !item["artifact_id"].isStr() || !item["model_id"].isStr()) {
             err = "ID";
             return false;
@@ -238,6 +278,10 @@ bool SwarmObserveCatalog(const fs::path& modeldir, std::string& err)
                 return false;
             }
             row.lineage_id = mapping["lineage_id"].get_str();
+            if (mapping.exists("visibility") && !mapping["visibility"].isStr()) {
+                err = "VISIBILITY";
+                return false;
+            }
             row.visibility = mapping.exists("visibility") ? mapping["visibility"].get_str() : "private";
             if (!IsSwarmId(row.lineage_id) || (row.visibility != "private" && row.visibility != "public")) {
                 err = "VISIBILITY";
@@ -249,24 +293,45 @@ bool SwarmObserveCatalog(const fs::path& modeldir, std::string& err)
             row.lineage_assurance = "PROVISIONAL_NOT_AUTHORITATIVE";
             row.visibility = "private";
         }
-        fresh.insert_or_assign(row.artifact_id, std::move(row));
+        for (const char* field : {"quantization", "checkpoint_id", "recipe"}) {
+            if (item.exists(field) && !item[field].isStr()) {
+                err = "CATALOG_SCHEMA";
+                return false;
+            }
+        }
+        if (item.exists("quantization")) row.quantization = item["quantization"].get_str();
+        if (item.exists("checkpoint_id")) row.checkpoint = item["checkpoint_id"].get_str();
+        if (item.exists("recipe")) row.recipe = item["recipe"].get_str();
+        if (!fresh.emplace(row.artifact_id, row).second) {
+            err = "CATALOG_DUPLICATE";
+            return false;
+        }
     }
+    entries = std::move(fresh);
+    return true;
+}
+
+bool SwarmObserveCatalog(const fs::path& modeldir, std::string& err)
+{
+    SwarmCatalog fresh;
+    if (!SwarmReadCatalog(modeldir, fresh, err)) return false;
+    const fs::path swarm_dir = modeldir / "swarm";
+    const fs::path stored_path = swarm_dir / "observers.json";
     std::map<std::string, Row> rows;
     if (fs::exists(stored_path)) {
         if (!LoadStored(stored_path, rows, err)) return false;
     }
-    bool changed = false;
+    bool changed = rows.size() != fresh.size();
     for (const auto& [id, row] : fresh) {
         const auto it = rows.find(id);
         if (it == rows.end() || it->second.model_id != row.model_id || it->second.lineage_id != row.lineage_id ||
             it->second.lineage_assurance != row.lineage_assurance || it->second.visibility != row.visibility) {
-            rows.insert_or_assign(id, row);
             changed = true;
         }
     }
     if (!changed && fs::exists(stored_path)) return true;
     if (fresh.empty() && rows.empty()) return true;
-    return WriteStored(swarm_dir, rows, err);
+    return WriteStored(swarm_dir, fresh, err);
 }
 
 void StartSwarmObserver(const fs::path& modeldir)
@@ -279,28 +344,56 @@ void StartSwarmObserver(const fs::path& modeldir)
         SwarmBound swarm_bound;
         TickBind tick_bind;
         int64_t nif_now_ms = 0;
+        InputGeneration generation;
         while (!g_stop.load()) {
             std::string err;
-            bool ok = false;
+            bool ok = true;
             try {
                 std::lock_guard<std::mutex> lock(g_mu);
-                ok = SwarmObserveCatalog(modeldir, err);
-                if (ok) {
-                    std::string mesh_err;
-                    if (!SwarmRefreshLocalMesh(modeldir, mesh_err)) {
-                        LogPrintf("swarm mesh: %s (monetary node continues)\n", mesh_err);
+                InputGeneration now;
+                if (!Fingerprint(modeldir / "catalog.json", now.catalog, err) ||
+                    !Fingerprint(modeldir / "swarm" / "lineage-mappings.json", now.mappings, err) ||
+                    !Fingerprint(modeldir / "swarm" / "device.json", now.device, err) ||
+                    !Fingerprint(modeldir / "swarm" / "peers.json", now.peers, err)) {
+                    ok = false;
+                } else {
+                    const bool catalog_changed = !generation.seen || now.catalog != generation.catalog ||
+                                                 now.mappings != generation.mappings;
+                    const bool mesh_changed = !generation.seen || now.device != generation.device || now.peers != generation.peers;
+                    bool retain = true;
+                    if (catalog_changed) {
+                        ok = SwarmObserveCatalog(modeldir, err);
+                        if (!ok) retain = false;
                     }
-                    std::string join_err;
-                    if (!SwarmIntegrateCatalog(modeldir, join_err)) {
-                        LogPrintf("swarm join: %s (monetary node continues)\n", join_err);
+                    if (ok && (catalog_changed || mesh_changed)) {
+                        std::string mesh_err;
+                        if (!SwarmRefreshLocalMesh(modeldir, mesh_err)) {
+                            LogPrintf("swarm mesh: %s (monetary node continues)\n", mesh_err);
+                            retain = false;
+                        }
+                        std::string join_err;
+                        if (!SwarmIntegrateCatalog(modeldir, join_err)) {
+                            LogPrintf("swarm join: %s (monetary node continues)\n", join_err);
+                            retain = false;
+                        } else {
+                            const fs::path membership = modeldir / "swarm" / kMembershipFile;
+                            if (catalog_changed || !fs::exists(membership)) {
+                                std::string form_err;
+                                if (!SwarmFormPlane(modeldir, form_err)) {
+                                    LogPrintf("swarm form: %s (monetary node continues)\n", form_err);
+                                    retain = false;
+                                }
+                            }
+                            std::string live_err;
+                            if (!SwarmPublishLive(modeldir, live_err)) {
+                                LogPrintf("swarm live: %s (monetary node continues)\n", live_err);
+                                retain = false;
+                            }
+                        }
                     }
-                    std::string form_err;
-                    if (!SwarmFormPlane(modeldir, form_err)) {
-                        LogPrintf("swarm form: %s (monetary node continues)\n", form_err);
-                    }
-                    std::string live_err;
-                    if (!SwarmPublishLive(modeldir, live_err)) {
-                        LogPrintf("swarm live: %s (monetary node continues)\n", live_err);
+                    if (ok && retain) {
+                        now.seen = true;
+                        generation = std::move(now);
                     }
                 }
                 std::string nif_err;

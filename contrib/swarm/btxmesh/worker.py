@@ -108,23 +108,33 @@ class Worker:
     async def execute(self,job):
         work=private_dir(self.workdir/job["lease"]);process=None;finished=False;reserved=False;cache_cfg=None
         from . import tensors
-        from .kv import KVCache,fingerprint
-        from .runtime import checkpoint_kv_config
+        from .kv import KVCache,fingerprint,prefix_should_transfer
         try:
-            self.policy=self.governor.acquire(job["lease"],self.realm,job["vram_bytes"]);reserved=True
-            require(job["executor"] in self.policy["allowed_executors"],"EXECUTOR_POLICY")
-            await self.fetch(job["checkpoint"])
-            self.store.export_file(self.realm,job["checkpoint"],work/"model.safetensors")
-            payload=job["payload"]
+            payload=job["payload"];op=job["executor"];ceiling=self.governor.host_ceiling();host_bytes=0
+            if op!="dataset.verify":
+                from .runtime import checkpoint_config,admit_workload,workload_shape
+                await self.fetch(job["checkpoint"])
+                self.store.export_file(self.realm,job["checkpoint"],work/"model.safetensors")
+                cfg=checkpoint_config((work/"model.safetensors").read_bytes())
+                suite=None
+                if op=="torch.evaluate" and "suite_artifact" in payload:
+                    await self.fetch(payload["suite_artifact"])
+                    self.store.export_file(self.realm,payload["suite_artifact"],work/"suite.json")
+                    suite=decode((work/"suite.json").read_bytes())
+                batch,sequence=workload_shape(op,payload,suite)
+                host_bytes=admit_workload(cfg,batch,sequence,ceiling=ceiling)
+            self.policy=self.governor.acquire(job["lease"],self.realm,job["vram_bytes"],host_bytes=host_bytes);reserved=True
+            require(op in self.policy["allowed_executors"],"EXECUTOR_POLICY")
             for key,name in (("dataset_artifact","dataset.safetensors"),("parent_artifact","parent.safetensors"),("suite_artifact","suite.json")):
                 if key in payload:
                     if key=="dataset_artifact":require(self.grant("data",payload.get("data_grant_id"),payload[key],"TRAIN"),"DATA_GRANT")
                     await self.fetch(payload[key]);self.store.export_file(self.realm,payload[key],work/name)
-            request={"executor":job["executor"],"payload":payload,"checkpoint":job["checkpoint"],"cpu_threads":self.policy["cpu_threads"],"max_steps":self.policy["max_steps_per_job"]}
+            request={"executor":op,"payload":payload,"checkpoint":job["checkpoint"],"cpu_threads":self.policy["cpu_threads"],"max_steps":self.policy["max_steps_per_job"],"host_bytes":ceiling}
             # Exact compatible prefix reuse is automatic for explicitly trusted producers.
             # Public/synthetic jobs may share; private input needs its own grant.
             share=payload.get("data_class")=="PUBLIC_SYNTHETIC" or self.grant("cache",payload.get("cache_grant_id"),job["checkpoint"],"REUSE_CACHE")
-            if job["executor"] in ("torch.rollout","inference") and share:
+            if op in ("torch.rollout","inference") and share:
+                from .runtime import checkpoint_kv_config
                 cache_cfg=checkpoint_kv_config((work/"model.safetensors").read_bytes());fp=fingerprint(cache_cfg)
                 trusted=set(self.config.get("cache_producers",self.config["voters"]))|{self.identity.id}
                 for locator in sorted(await self.query("kv"),key=lambda x:-x["tokens"]):
@@ -132,6 +142,9 @@ class Worker:
                     if locator["peer"] not in trusted or locator["fingerprint"]!=fp or n>len(tokens) or locator["expires_ms"]<=int(time.time()*1000):continue
                     if locator["prefix_key"]!=self.store.prefix_key(self.realm,fp,tokens[:n]):continue
                     try:
+                        # choose_execution's local-recompute result skips the copy.
+                        # The remaining path reads CPU artifacts and does not start an engine.
+                        if not prefix_should_transfer(locator):continue
                         await self.transport.fetch_artifact(locator["holder"],self.store,self.realm,locator["artifact"])
                         manifest=decode(self.store.read_bytes(self.realm,locator["artifact"]))
                         for page in manifest["pages"]:await self.transport.fetch_artifact(locator["holder"],self.store,self.realm,page["artifact"])
@@ -153,7 +166,9 @@ class Worker:
             while process.returncode is None:
                 try:await asyncio.wait_for(process.wait(),timeout=1)
                 except asyncio.TimeoutError:
-                    if self.stop.is_set() or not self.governor.policy()["idle_contribution"]:await self.kill(process);raise MeshError("WORKER_STOPPED")
+                    if self.stop.is_set() or not self.governor.policy()["idle_contribution"]:
+                        with contextlib.suppress(Exception):self.governor.cancel(job["lease"])
+                        await self.kill(process);raise MeshError("WORKER_STOPPED")
                     # Renew returns only after a current-term majority commits it.
                     await self.command("work.renew",{"job":job["id"],"lease":job["lease"]})
             response=decode((work/"response.json").read_bytes())

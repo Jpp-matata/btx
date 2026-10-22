@@ -100,7 +100,7 @@ BOOST_AUTO_TEST_CASE(first_form_writes_local_membership)
     BOOST_CHECK_EQUAL(root["admitted"][0].get_str(), "local");
 }
 
-BOOST_AUTO_TEST_CASE(second_form_is_reopen_and_leaves_the_first_membership)
+BOOST_AUTO_TEST_CASE(second_form_keeps_the_first_membership)
 {
     FormTree tree(m_path_root / "swarm-form-membership-reopen");
     const fs::path model = tree.path / "model";
@@ -118,8 +118,8 @@ BOOST_AUTO_TEST_CASE(second_form_is_reopen_and_leaves_the_first_membership)
     modelnet::FormationPlane again;
     err = "stale";
     BOOST_REQUIRE(again.Open(model, err));
-    BOOST_CHECK(!again.Form(err));
-    BOOST_CHECK_EQUAL(err, "REOPEN");
+    BOOST_REQUIRE(again.Form(err));
+    BOOST_CHECK(err.empty());
     BOOST_CHECK_EQUAL(ReadFile(file), raw);
     BOOST_CHECK_EQUAL(again.membership().node_id, "local");
     BOOST_CHECK(again.membership().seeder);
@@ -133,8 +133,8 @@ BOOST_AUTO_TEST_CASE(second_form_is_reopen_and_leaves_the_first_membership)
     BOOST_CHECK(again.admitted("local"));
 
     err = "stale";
-    BOOST_CHECK(!modelnet::SwarmFormPlane(model, err));
-    BOOST_CHECK_EQUAL(err, "REOPEN");
+    BOOST_REQUIRE(modelnet::SwarmFormPlane(model, err));
+    BOOST_CHECK(err.empty());
     BOOST_CHECK_EQUAL(ReadFile(file), raw);
 }
 

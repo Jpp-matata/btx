@@ -15,8 +15,7 @@ from btxmesh.engines import clean_environment
 from btxmesh.worker import Worker
 from btxmesh.errors import MeshError
 from btxmesh.state import default_policy
-from conftest import H
-from test_network_worker import free_port,wait_leader,call
+from support import H,free_port,wait_leader,call
 
 
 def test_canonical_private_directory_refuses_parent_symlink(tmp_path):

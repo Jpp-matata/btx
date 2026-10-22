@@ -105,8 +105,8 @@ BOOST_AUTO_TEST_CASE(matching_family_is_admitted_without_connecting)
     modelnet::FormationPlane again;
     err = "stale";
     BOOST_REQUIRE(again.Open(model, err));
-    BOOST_CHECK(!again.Form(err));
-    BOOST_CHECK_EQUAL(err, "REOPEN");
+    BOOST_REQUIRE(again.Form(err));
+    BOOST_CHECK(err.empty());
     BOOST_CHECK(again.admitted("peer-family"));
     BOOST_CHECK(again.admitted("peer-quiet"));
     BOOST_CHECK(!again.connects());
