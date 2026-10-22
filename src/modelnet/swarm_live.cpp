@@ -109,10 +109,19 @@ void RememberLineage(std::set<std::string>& lineages, const std::string& lineage
 UniValue SortedJson(const UniValue& value)
 {
     if (value.isObject()) {
-        std::vector<std::string> keys = value.getKeys();
-        std::sort(keys.begin(), keys.end());
+        // Sort positions, not keys: value[key] and pushKV are linear scans, so
+        // the old loop was quadratic in the key count of the file on disk.
+        const std::vector<std::string>& keys = value.getKeys();
+        const std::vector<UniValue>& values = value.getValues();
+        std::vector<size_t> order(keys.size());
+        for (size_t i = 0; i < order.size(); ++i) order[i] = i;
+        std::stable_sort(order.begin(), order.end(), [&](size_t a, size_t b) { return keys[a] < keys[b]; });
         UniValue out(UniValue::VOBJ);
-        for (const std::string& key : keys) out.pushKV(key, SortedJson(value[key]));
+        for (size_t n = 0; n < order.size(); ++n) {
+            // A repeated key keeps its first value, as value[key] did.
+            if (n > 0 && keys[order[n]] == keys[order[n - 1]]) continue;
+            out.pushKVEnd(keys[order[n]], SortedJson(values[order[n]]));
+        }
         return out;
     }
     if (value.isArray()) {

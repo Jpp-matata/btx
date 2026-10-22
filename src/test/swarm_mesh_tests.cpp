@@ -428,6 +428,38 @@ BOOST_AUTO_TEST_CASE(coordinator_exit_keeps_the_checkpoint_and_the_mesh_state)
     fs::remove_all(dst, ec);
 }
 
+BOOST_AUTO_TEST_CASE(mesh_state_compare_keeps_its_meaning)
+{
+    const fs::path dir = m_args.GetDataDirBase() / "swarm_key_order";
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+    fs::create_directories(dir / "swarm");
+    std::string err;
+    BOOST_REQUIRE(modelnet::SwarmRefreshLocalMesh(dir, err));
+    const fs::path mesh = dir / "swarm" / "mesh-state.json";
+    std::ifstream in(mesh);
+    const std::string body((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    in.close();
+    UniValue root;
+    BOOST_REQUIRE(root.read(body));
+    // The same document with its keys reversed and the first key repeated at the
+    // end: still the same document (the first value wins), so it is not rewritten.
+    const std::vector<std::string>& keys = root.getKeys();
+    std::string reordered = "{";
+    for (size_t i = keys.size(); i-- > 0;) reordered += "\"" + keys[i] + "\":" + root.getValues()[i].write() + ",";
+    reordered += "\"" + keys[0] + "\":\"later\"}";
+    WriteFile(mesh, reordered);
+    BOOST_REQUIRE(modelnet::SwarmRefreshLocalMesh(dir, err));
+    std::ifstream again(mesh);
+    BOOST_CHECK_EQUAL(std::string((std::istreambuf_iterator<char>(again)), std::istreambuf_iterator<char>()), reordered);
+    // A different value is a different document.
+    WriteFile(mesh, "{\"automatic_spend_atoms\":\"1\"}");
+    BOOST_REQUIRE(modelnet::SwarmRefreshLocalMesh(dir, err));
+    std::ifstream fresh(mesh);
+    BOOST_CHECK_EQUAL(std::string((std::istreambuf_iterator<char>(fresh)), std::istreambuf_iterator<char>()), body);
+    fs::remove_all(dir, ec);
+}
+
 BOOST_AUTO_TEST_CASE(coding_lineage_survives_the_coordinator)
 {
     const std::string lineage = Id('a');
