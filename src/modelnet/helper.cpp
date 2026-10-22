@@ -6612,6 +6612,17 @@ bool DispatchHelperRpc(ModelCatalog& cat, const UniValue& request, UniValue& res
         result.pushKV("link", link);
         if (params.isArray() && params.size() > 1 && Arg(1).isStr() && !Arg(1).get_str().empty()) {
             const fs::path outp = fs::PathFromString(Arg(1).get_str());
+            // The path is caller text (a UI, an agent, a script). Write a new
+            // file or replace a share file; never follow a symlink, never wait
+            // on a FIFO or a device, never truncate some other file.
+            std::error_code sec;
+            const fs::file_status st = fs::symlink_status(outp, sec);
+            std::string old_text, old_err;
+            if (fs::exists(st) && (!fs::is_regular_file(st) || !LoadShareText(outp, old_text, old_err))) {
+                err_code = "INVALID_PARAMETER";
+                err = "path exists and is not a share file";
+                return false;
+            }
             if (!outp.parent_path().empty()) fs::create_directories(outp.parent_path());
             std::ofstream f(outp, std::ios::trunc);
             if (!f) {
