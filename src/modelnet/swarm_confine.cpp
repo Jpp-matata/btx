@@ -68,9 +68,10 @@ bool SetHardLimit(int resource, rlim_t value)
 }
 
 #if defined(__APPLE__)
-// macOS does not enforce RLIMIT_AS: setrlimit refuses it with EINVAL and
-// the kernel never caps mmap. The parent enforces the address limit on the
-// child's physical footprint instead. It samples proc_pid_rusage every
+// macOS refuses any RLIMIT_AS below the process's current mapped size
+// (about 415 GiB for a small arm64 program on macOS 26) with EINVAL; only
+// above that does it cap mmap. So the parent enforces the address limit on
+// the child's physical footprint instead. It samples proc_pid_rusage every
 // FOOTPRINT_POLL_NS and sends SIGKILL once the footprint is above the
 // limit, so an allocation can overshoot by what the child touches within
 // one interval. The status then reports that signal.

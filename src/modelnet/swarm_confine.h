@@ -28,8 +28,9 @@ namespace modelnet {
  * extra arguments. Fork failure, or a child exit of 126, is
  * CONFINEMENT_ABSENT. An executed child is CONFINED.
  *
- * macOS has no network namespace and does not enforce RLIMIT_AS. There the
- * child sets RLIMIT_CPU and RLIMIT_NOFILE (verified with getrlimit),
+ * macOS has no network namespace, and refuses RLIMIT_AS below the size a
+ * process already maps (about 415 GiB). There the child sets RLIMIT_CPU
+ * and RLIMIT_NOFILE (verified with getrlimit),
  * applies a kernel sandbox that denies every network operation, every
  * Mach service lookup and fork (swarm_sandbox_macos.h), and execs only
  * after a loopback bind is refused and descriptors 3-1023 are closed.
