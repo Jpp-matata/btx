@@ -10,6 +10,7 @@
 #include <init.h>
 #include <node/interface_ui.h>
 #include <pqkey.h>
+#include <test/util/logging.h>
 #include <test/util/setup_common.h>
 #include <tinyformat.h>
 #include <uint256.h>
@@ -662,6 +663,26 @@ BOOST_AUTO_TEST_CASE(pq_ml_dsa_signature_path_launches_and_rejects_tamper)
     BOOST_CHECK(node::MakeAutoUpdateSignatureVerifier("secp256k1") == nullptr);
     BOOST_CHECK(node::MakeAutoUpdateSignatureVerifier("ecdsa") == nullptr);
     BOOST_CHECK(node::MakeAutoUpdateSignatureVerifier("not-a-scheme") == nullptr);
+}
+
+BOOST_AUTO_TEST_CASE(unreadable_floor_is_refused_and_logged)
+{
+    fs::create_directories(m_path_root / "autoupdate");
+    {
+        std::ofstream empty{m_path_root / "autoupdate" / "highest-accepted-version", std::ios::trunc};
+    }
+    Harness h;
+    h.config.datadir = m_path_root;
+    h.AddManifest();
+    h.AddSignature();
+    h.AddScript();
+    {
+        ASSERT_DEBUG_LOG("Auto-update is paused");
+        const auto result = h.Run();
+        BOOST_CHECK(result.status == node::AutoUpdateStatus::BAD_MANIFEST);
+        BOOST_CHECK(result.detail.find("unreadable") != std::string::npos);
+    }
+    BOOST_CHECK_EQUAL(h.runner.calls, 0);
 }
 
 #ifndef WIN32
