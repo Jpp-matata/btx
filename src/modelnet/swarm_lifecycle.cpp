@@ -10,6 +10,7 @@
 #include <univalue.h>
 
 #include <algorithm>
+#include <chrono>
 #include <fstream>
 #include <set>
 #include <thread>
@@ -300,6 +301,57 @@ bool SwarmRefreshLocalMesh(const fs::path& modeldir, std::string& err)
     out.pushKV("governor", budget.code);
     out.pushKV("hardware_threads", governed.hardware_threads);
     out.pushKV("neighbors", ids);
+    // The helper supplies live, authenticated transport observations. These
+    // enable observer participation only; they are not training or data grants.
+    UniValue observed(UniValue::VARR), shared(UniValue::VARR);
+    const fs::path native_path = swarm_dir / "native-participation.json";
+    std::error_code native_ec;
+    if (fs::is_regular_file(fs::symlink_status(native_path, native_ec)) &&
+        fs::file_size(native_path, native_ec) <= 512 * 1024 && !native_ec) {
+        std::string raw;
+        UniValue native;
+        if (ReadFile(native_path, raw) && native.read(raw) && native.isObject() &&
+            native["schema"].isStr() && native["schema"].get_str() == "BTX/NativeParticipation/1" &&
+            native["peer_observations"].isArray() && native["peer_observations"].size() <= 128) {
+            const int64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count();
+            std::set<std::string> fresh;
+            for (const auto& peer : native["peer_observations"].getValues()) {
+                if (!peer.isObject() || !peer["transport_pin"].isStr() ||
+                    !peer["observed_at_ms"].isNum() || !peer["expires_at_ms"].isNum()) continue;
+                const std::string pin = peer["transport_pin"].get_str();
+                if (!SwarmFixedId(pin)) continue;
+                const int64_t seen = peer["observed_at_ms"].getInt<int64_t>();
+                const int64_t expiry = peer["expires_at_ms"].getInt<int64_t>();
+                if (seen < 0 || seen > now || now - seen >= 90000 || expiry <= now || expiry - seen > 90000) continue;
+                if (fresh.insert(pin).second) observed.push_back(pin);
+            }
+            SwarmCatalog local;
+            std::string local_err;
+            std::set<std::string> local_models;
+            if (SwarmReadCatalog(modeldir, local, local_err))
+                for (const auto& [id, entry] : local) local_models.insert(entry.model_id);
+            if (native["shared_model_families"].isArray() && native["shared_model_families"].size() <= 128) {
+                for (const auto& family : native["shared_model_families"].getValues()) {
+                    if (!family.isObject() || !family["model_id"].isStr() || !family["peer_transport_pins"].isArray()) continue;
+                    const std::string model = family["model_id"].get_str();
+                    if (!local_models.count(model)) continue;
+                    UniValue members(UniValue::VARR);
+                    for (const auto& p : family["peer_transport_pins"].getValues())
+                        if (p.isStr() && fresh.count(p.get_str())) members.push_back(p);
+                    if (members.empty()) continue;
+                    UniValue admitted(UniValue::VOBJ);
+                    admitted.pushKV("model_id", model);
+                    admitted.pushKV("peer_transport_pins", members);
+                    admitted.pushKV("role", "observer");
+                    admitted.pushKV("compute_authorized", false);
+                    shared.push_back(admitted);
+                }
+            }
+        }
+    }
+    out.pushKV("observer_neighbors", observed);
+    out.pushKV("shared_model_families", shared);
     out.pushKV("observer", roles.observer);
     out.pushKV("private_data_training", roles.private_data);
     out.pushKV("private_prompts", roles.private_prompts);

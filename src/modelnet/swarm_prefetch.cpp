@@ -7,7 +7,7 @@
 namespace modelnet {
 
 // A KV prefetch request is held and moves no bytes.
-SwarmPrefetchResult SwarmNotePrefetch(const SwarmPrefetch& page, std::string& err)
+SwarmPrefetchResult SwarmNotePrefetch(const SwarmPrefetchRequest& page, std::string& err)
 {
     SwarmPrefetchResult result;
     result.moved = false;

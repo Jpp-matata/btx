@@ -8,35 +8,38 @@
 #include <util/fs.h>
 
 #include <string>
+#include <cstdint>
 
 namespace modelnet {
 
 /**
- * Run a helper inside a filesystem root the child cannot see past.
- * launched and jailed stay false unless this function created that jail
- * and exec'd the helper in it. A refused setup is not a jail.
- *
- * Before any fork: an empty helper or root is JAIL; a helper that is not
- * a regular file is SANDBOX_ABSENT; network_denied false is NETWORK; a
- * helper path containing ".." or not lexically inside root is PATH.
- *
- * The child unshares a user namespace, then a mount namespace. Either
- * failure exits 126 without exec. A private mount of root still has to be
- * proven: the child execs only after pivot_root or chroot succeeds and a
- * path outside root can no longer be opened. Otherwise it exits 126
- * without exec. The parent reports that 126, a signal, or a fork failure
- * as JAIL_ABSENT. Only an exec after that proof is JAILED.
+ * Execute a helper in a filesystem and network sandbox. Linux unshares user,
+ * mount AND network namespaces, installs uid/gid maps, then pivots/chroots.
+ * macOS uses default-deny Seatbelt, allowing the selected root and read-only
+ * system libraries required to launch a native executable. It denies host
+ * user data, arbitrary process creation, IPC and all network access.
+ * Windows uses a private staged AppContainer profile with no network
+ * capabilities and a one-process resource-bounded Job. Owner ACLs remain
+ * unchanged; only fresh output files are copied back after inputs reverify.
+ * OS system resources and the private profile are platform exceptions.
+ * A CLOEXEC error pipe proves setup and exec; child exit 126 is not confused
+ * with failure to install the sandbox. Paths reject symlinks and traversal.
+ * Limits and a wall timeout apply. Neither success nor compile qualifies a
+ * platform release; native escape and workload tests must run on that OS.
  */
 struct SwarmFilesystemJailRequest {
     fs::path helper;
     fs::path root;
     bool network_denied{false};
+    int max_wall_seconds{60};
+    uint64_t max_tree_bytes{1024ULL * 1024 * 1024};
 };
 
 struct SwarmFilesystemJailResult {
     bool launched{false};
     bool jailed{false};
     std::string code;
+    int child_status{-1};
 };
 
 SwarmFilesystemJailResult SwarmRunFilesystemJail(const SwarmFilesystemJailRequest& request, std::string& err);

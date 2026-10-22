@@ -6,7 +6,7 @@
 
 namespace modelnet {
 
-SwarmPresenceResult SwarmAcceptPresenceLocal(const SwarmPresence& presence, std::string& err)
+SwarmPresenceResult SwarmAcceptPresenceLocal(const SwarmLocalPresenceRequest& presence, std::string& err)
 {
     // A local presence can be kept and does not connect or publish an address.
     if (presence.node_id.empty()) {

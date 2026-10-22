@@ -1,5 +1,7 @@
 # HUMANS.md
 
+**Candidate and evidence:** this source tree is **0.35.0rc1** (`CLIENT_VERSION_IS_RELEASE=true`, `CLIENT_VERSION_RC=1`); the last shipping tag recorded here is **v0.34.15**. A release-build flag is not native qualification. See [native participation and release evidence](doc/modelnet/swarm/16_NATIVE_EXECUTION_AND_RELEASE_EVIDENCE.md) for the current defaults, RPC observations, complete helper build, and remaining hardware/deployment gates. Older version-labelled sections below describe their historical surface introduction.
+
 This file is for **people**: researchers, communities, enterprises, independent
 labs, creators, hosts, and anyone who wants to use BTX without becoming a
 protocol engineer.
@@ -180,7 +182,7 @@ hosted plane**, not a fifth product, not a new coin, and not remote inference.
 The original **34** HCP operations stay as they are. A venue’s catalogue does
 not imply reserve, committee, or programme support — those require an explicit
 `GET /extensions/cognitive-reserve` profile. Automatic spend remains **0**.
-This tree is **0.34.9** (`CLIENT_VERSION_IS_RELEASE=true`) and does
+This tree is **0.35.0rc1** (`CLIENT_VERSION_IS_RELEASE=true`) and does
 not replace the production GPU attestor. Operator notes:
 [doc/hosted/HCP_OPERATOR_NOTES.md](doc/hosted/HCP_OPERATOR_NOTES.md). Spec:
 [doc/modelnet/crf/](doc/modelnet/crf/).
@@ -287,7 +289,7 @@ disagreement about evaluation does not change the monetary base.
 | Local generate | After acquire, `generatemodel` runs on this host when GGUF+llama.cpp, allowlisted SafeTensors+`BTX_MODEL_GENERATE`, or EXL3+`BTX_EXL3_CLI` match. CUDA smoke is not generate. BTX does not sell prompts. |
 | Zero default spend | Automatic BTX spend is zero. Paid actions need a fresh, explicit confirmation. |
 | No central account | No BTX-operated login, email gate, or compulsory identity to retrieve public models. |
-| Fresh storage | Payload storage defaults to `-modelstorage=auto` (bounded 10% of the model-store filesystem, 32 GiB–512 GiB, never below the free-space reserve); `-modelstorage=0` stores no payload. FREE catalogs of your `-modelpeer` / `addmodelnode` / PEX contacts are followed into spare quota (`-modelfollowpeers=0` disables). Unsolicited fetch of arbitrary advertised models stays off. |
+| Fresh storage | Fresh headless `auto` storage receives a bounded 1 GiB payload budget; explicit `auto` retains its configured adaptive quota. Explicit `-modelstorage=0`, saved disable, and zero or malformed `BTX_MODEL_STORAGE` keep payload storage off. FREE catalogs from authenticated native LAN peers and configured contacts can fill spare quota (`-modelfollowpeers=0` disables following). Incoming hints grant no trust, payment, inference, or training authority. |
 
 You can use public models without becoming an investor. Monetary demand
 belongs where people **choose** to commit capital: release campaigns, bounty
@@ -314,7 +316,7 @@ search when you do not want the query to leave this node.
 
 ## Current line
 
-- **Release:** shipping tag **v0.34.9**. Registry independence, host/load/generate, assumeutxo persist, on-chain bounty/WRC. Native
+- **Candidate:** **0.35.0rc1**; last shipping tag **v0.34.15**; native release qualification is separate. Registry independence, host/load/generate, assumeutxo persist, on-chain bounty/WRC. Native
   Model Network first-run, HCP, JIT capability, search, release campaigns,
   and creation bounties remain.
 - Host / seed / search / share / watch / doctor / load / generate / bounty:

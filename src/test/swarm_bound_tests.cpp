@@ -16,7 +16,7 @@ BOOST_FIXTURE_TEST_SUITE(swarm_bound_tests, BasicTestingSetup)
 
 BOOST_AUTO_TEST_CASE(one_pass_runs_decode_train_and_two_ranks)
 {
-    modelnet::SwarmBound bound;
+    modelnet::SwarmBoundProbe bound;
     std::string err = "prior";
     BOOST_CHECK(bound.Pass(1, err));
     BOOST_CHECK_EQUAL(err, "");

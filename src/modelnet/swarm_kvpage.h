@@ -11,7 +11,7 @@
 namespace modelnet {
 
 /** KV page ids shared across compatible tensor families. Sharing moves no bytes. */
-class SwarmKvPage {
+class SwarmKvPageRegistry {
 public:
     bool Share(const std::string& page, const std::string& family_a, const std::string& family_b, bool compatible, std::string& err);
     bool shared(const std::string& page) const;

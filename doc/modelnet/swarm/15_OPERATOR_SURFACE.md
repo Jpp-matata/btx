@@ -1,18 +1,34 @@
 # Operator surface
 
-The swarm an operator is running is a thread inside `btxd`. ModelNet defaults on. `-modelnet=0` turns the thread off. There is no swarm startup flag and no second binary.
+The swarm an operator is running is a thread inside `btxd`. ModelNet defaults on. `-modelnet=0` turns the thread off. There is no separate swarm startup command; the node supervises its model helper and guard child.
 
 Modelnet defaults on. `src/init.cpp` starts the supervised helper and then `modelnet::StartSwarmObserver` with the node model directory. That thread is the default swarm membership. `StopSwarmObserver` runs at shutdown and joins the thread. A failure inside the thread is logged. The monetary node continues. `btx-swarmd` and `btx-paynetd` are not used, because participation is this thread rather than another program. The reference Python package is not the running control plane.
 
 ## Current behavior
 
-About every two seconds the thread writes the catalog to `observers.json`, refreshes the local mesh, integrates the catalog, calls `SwarmFormPlane`, and calls `SwarmPublishLive`. `observers.json` is observers only: no grant, no seed, and no spend. `FormationPlane` does not exec a sidecar, open a socket, add a DNS seed, broadcast, or spend.
+About every two seconds the thread checks catalog generations, reconciles changed views into `observers.json` and contribution state, refreshes expiring native peer observations, calls `SwarmFormPlane` when needed, and publishes eligible live state. `observers.json` is observers only: no grant, no seed, and no spend. `FormationPlane` does not exec a sidecar, open a socket, add a DNS seed, broadcast, or spend.
 
-The same wake calls `NifObserve::Tick`, then `SwarmBound::Pass` once. That pass uses the fixed prompt `abcdefgh`, an 8-byte memory echo, and vLLM `ENGINE_ABSENT`. It takes one CPU AdamW step on a 4 by 8 dense net, one one-host two-rank loopback exchange, eight integer replay pairs, one snapshot, and one realm seat. A second host is refused.
+The observer owns a real `btx-guardd` child through private inherited pipes.
+Each poll supervises that process and publishes a bounded heartbeat in
+`swarm/guard-process.json`; clean shutdown publishes `STOPPED` and reaps the
+child. A guard permit records authorization consumption, not completed work.
 
-`TickBind::Pass` runs once. It runs the requirement binders, a 12-step node cycle with generation 0 and `passed()` false, the local module stores, and the safe slices. It does not quarantine a live model and does not start a guard process.
+The helper performs bounded private-LAN discovery and strict-PQ1 peer
+observation. Its expiring `native-participation.json` snapshot feeds observer
+membership and locally verified shared-model families. Fresh headless implicit
+`auto` storage uses a bounded 1 GiB cache; explicit zero, saved refusal and
+owner-selected limits take precedence. Eligible first-model acquisition uses
+the existing verified download worker. Acquiring bytes and observing a family
+do not authorize computation, private data access or spending.
 
-`Spend` returns `"0"`. `Release` returns `UNQUALIFIED`. `passed()`, `gpu_passed()`, and `windows_passed()` stay false. The latched pass is not the finished network. One machine and two local ranks are not two hosts.
+Production observer startup no longer calls `NifObserve::Tick`,
+`SwarmBoundProbe::Pass` or `TickBind::Pass` to latch in-process acceptance
+records. Those library probes remain available for explicit tests. Native
+qualification uses finite commands and actual execution evidence described in
+[NATIVE EXECUTION AND RELEASE EVIDENCE](16_NATIVE_EXECUTION_AND_RELEASE_EVIDENCE.md).
+Automatic spend stays zero, unavailable engines remain explicit, and the
+candidate and all unqualified profiles remain unqualified. Local process tests
+do not establish physical multi-host, GPU or independent-organization results.
 
 ## Engine probe
 
@@ -41,22 +57,22 @@ No latency, tokens per second, VRAM, or bandwidth figure belongs on this page. N
 
 ## What this page does not claim
 
-Windows, macOS, a second GPU, a second physical host, and a linked remote execution engine are not operational here. An advertised pool balance is not spendable. The latched pass does not qualify the node.
+Windows, macOS, a second GPU, a second physical host, and a linked remote execution engine are not operational here. An advertised pool balance is not spendable. Local component checks do not qualify the node.
 
 ## Local model and balance recovery
 
-`btxd` is the control plane. A missing catalog does nothing. Automatic spend atoms stay 0. `preparefundmodelrelease` builds an unsigned plan and does not spend.
+`btxd` is the control plane. A missing catalog clears stale observer/contribution entries and grants no work authority. Automatic spend atoms stay 0. `preparefundmodelrelease` builds an unsigned plan and does not spend.
 
 Advertised capability is separate from qualified capability. A local model can run with an empty provider key. A KV page is copied only when fingerprints match. Recovery of a recorded balance does not stop a device and does not spend.
 
-Two physical hosts, three peers, a second GPU, Windows, macOS, offline images, and the release gates remain later work.
+Physical multi-host and GPU qualification, native Windows/macOS execution, disconnected runtime-image tests, and the complete release gates remain outstanding. The implemented Linux image workflow and local native tests do not close those gates.
 
 ## Later releases
 
 Follow-on work toward a fully autonomous network:
 
-- Network peer discovery and admission of a local group.
-- Acquiring a verified model from another participant.
+- Physical multi-host qualification of the implemented peer discovery and observer admission.
+- Physical multi-host qualification of verified acquisition and continued service after peer loss.
 - Submitting a task or prompt and receiving model work.
 - Authorized training checked by a second machine.
 - A private defensive case under an explicit customer grant.

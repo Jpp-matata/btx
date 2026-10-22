@@ -6,7 +6,7 @@
 
 namespace modelnet {
 
-bool SwarmBudget::Open(const std::string& experiment, int64_t slots, std::string& err)
+bool SwarmResearchBudget::Open(const std::string& experiment, int64_t slots, std::string& err)
 {
     if (experiment.empty()) {
         err = "EXPERIMENT";
@@ -25,7 +25,7 @@ bool SwarmBudget::Open(const std::string& experiment, int64_t slots, std::string
     return true;
 }
 
-bool SwarmBudget::Spend(const std::string& experiment, int64_t slots, std::string& err)
+bool SwarmResearchBudget::Spend(const std::string& experiment, int64_t slots, std::string& err)
 {
     const auto it = m_remaining.find(experiment);
     if (it == m_remaining.end()) {
@@ -45,7 +45,7 @@ bool SwarmBudget::Spend(const std::string& experiment, int64_t slots, std::strin
     return true;
 }
 
-int64_t SwarmBudget::Remaining(const std::string& experiment) const
+int64_t SwarmResearchBudget::Remaining(const std::string& experiment) const
 {
     const auto it = m_remaining.find(experiment);
     if (it == m_remaining.end()) return -1;

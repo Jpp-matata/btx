@@ -6,7 +6,7 @@
 
 namespace modelnet {
 
-SwarmReceiptBookResult SwarmNoteReceipt(const SwarmReceiptBook& receipt, std::string& err)
+SwarmReceiptBookResult SwarmNoteReceipt(const SwarmReceiptRequest& receipt, std::string& err)
 {
     // A provisional receipt is not a final booking.
     SwarmReceiptBookResult result;

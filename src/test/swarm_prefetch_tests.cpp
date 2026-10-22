@@ -13,7 +13,7 @@ BOOST_FIXTURE_TEST_SUITE(swarm_prefetch_tests, BasicTestingSetup)
 
 BOOST_AUTO_TEST_CASE(empty_page_id_is_page)
 {
-    modelnet::SwarmPrefetch page;
+    modelnet::SwarmPrefetchRequest page;
     page.page_id.clear();
     page.want_prefetch = true;
     std::string err = "prior";
@@ -26,7 +26,7 @@ BOOST_AUTO_TEST_CASE(empty_page_id_is_page)
 
 BOOST_AUTO_TEST_CASE(want_prefetch_true_is_held)
 {
-    modelnet::SwarmPrefetch page;
+    modelnet::SwarmPrefetchRequest page;
     page.page_id = "page-a";
     page.want_prefetch = true;
     std::string err = "prior";
@@ -39,7 +39,7 @@ BOOST_AUTO_TEST_CASE(want_prefetch_true_is_held)
 
 BOOST_AUTO_TEST_CASE(want_prefetch_false_is_noted)
 {
-    modelnet::SwarmPrefetch page;
+    modelnet::SwarmPrefetchRequest page;
     page.page_id = "page-b";
     page.want_prefetch = false;
     std::string err = "prior";

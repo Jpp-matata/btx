@@ -13,7 +13,7 @@ BOOST_FIXTURE_TEST_SUITE(swarm_receiptbook_tests, BasicTestingSetup)
 
 BOOST_AUTO_TEST_CASE(empty_receipt_id_is_receipt)
 {
-    modelnet::SwarmReceiptBook receipt;
+    modelnet::SwarmReceiptRequest receipt;
     std::string err;
     const modelnet::SwarmReceiptBookResult result = modelnet::SwarmNoteReceipt(receipt, err);
     BOOST_CHECK_EQUAL(result.booked, false);
@@ -24,7 +24,7 @@ BOOST_AUTO_TEST_CASE(empty_receipt_id_is_receipt)
 
 BOOST_AUTO_TEST_CASE(provisional_without_want_book)
 {
-    modelnet::SwarmReceiptBook receipt;
+    modelnet::SwarmReceiptRequest receipt;
     receipt.receipt_id = "rcpt-1";
     receipt.provisional = true;
     receipt.want_book = false;
@@ -38,7 +38,7 @@ BOOST_AUTO_TEST_CASE(provisional_without_want_book)
 
 BOOST_AUTO_TEST_CASE(want_book_without_provisional_is_held)
 {
-    modelnet::SwarmReceiptBook receipt;
+    modelnet::SwarmReceiptRequest receipt;
     receipt.receipt_id = "rcpt-1";
     receipt.provisional = false;
     receipt.want_book = true;
@@ -52,7 +52,7 @@ BOOST_AUTO_TEST_CASE(want_book_without_provisional_is_held)
 
 BOOST_AUTO_TEST_CASE(noted_clears_err)
 {
-    modelnet::SwarmReceiptBook receipt;
+    modelnet::SwarmReceiptRequest receipt;
     receipt.receipt_id = "rcpt-1";
     receipt.provisional = false;
     receipt.want_book = false;

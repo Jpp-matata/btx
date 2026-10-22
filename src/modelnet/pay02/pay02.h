@@ -6,6 +6,7 @@
 #define BITCOIN_MODELNET_PAY02_PAY02_H
 
 #include <modelnet/nifdt_contract/contract.h>
+#include <modelnet/pay02/native_settlement.h>
 #include <modelnet/swarm_payreg/swarm_payreg.h>
 
 #include <cstdint>
@@ -39,6 +40,11 @@ namespace modelnet {
  * NIFDT_UNQUALIFIED. One process is not a cross-host partition.
  * hosts() stays 1.
  *
+ * ObserveNative is a separate active-chain observation path: it checks exact
+ * funding/spending bytes, confirmations, destinations, fees and CLTV. Its
+ * receipt is bound to a chain tip and is reset on failed/reorg observations.
+ * Only this path can report settled() or nonzero atoms_moved().
+ *
  * passed(), release_qualified(), gpu_passed(), windows_passed(), and
  * hardware_qualified() stay false. This class opens no socket and calls no
  * wallet RPC.
@@ -51,10 +57,18 @@ public:
     bool ExerciseFaults(bool partition, bool clock_fault, bool response_failure, bool liquidity_loss, int hosts,
                         std::string& err);
 
+    /** Reobserve real funding/settlement through a trusted local chain backend.
+     * RecordFunding and the legacy boolean-only qualification methods remain
+     * record-only. This method is the native evidence path.
+     */
+    bool ObserveNative(const NativePaymentChainView& chain, const NativePaymentTerms& terms,
+                       const std::optional<Txid>& settlement, std::string& err);
+    const NativePaymentReceipt& native_receipt() const { return m_native; }
+
     std::string objective() const { return m_objective; }
     bool opened() const { return m_opened; }
     bool claim_kept(const std::string& work_id) const { return m_pay.claim_kept(work_id); }
-    bool settled() const { return false; }
+    bool settled() const { return m_native.settled; }
 
     bool passed() const { return false; }
     bool release_qualified() const { return false; }
@@ -62,13 +76,14 @@ public:
     bool windows_passed() const { return false; }
     bool hardware_qualified() const { return false; }
     int64_t hosts() const { return static_cast<int64_t>(1); }
-    int64_t atoms_moved() const { return static_cast<int64_t>(0); }
+    int64_t atoms_moved() const { return m_native.settled ? m_native.paid_atoms : 0; }
     std::string automatic_spend() const { return NIFDT_AUTOMATIC_SPEND; }
 
 private:
     bool Quiet(std::string& err) const;
 
     SwarmPayReg m_pay;
+    NativePaymentReceipt m_native;
     bool m_opened{false};
     std::string m_objective;
 };

@@ -2864,8 +2864,9 @@ bool Apply(const std::string& method, const UniValue& req, UniValue& result, std
             return false;
         }
         if (!store.gate->Consume(GuardCommitment(secret), row.effect, row.generation, now, row.fingerprint, err)) return false;
-        result.pushKV("physical_disposition", "STOPPED_QUIESCENT");
-        return Rec(result, receipt, "EXECUTED");
+        result.pushKV("physical_disposition", "NOT_DISPATCHED");
+        result.pushKV("permit_consumed", true);
+        return Rec(result, receipt, "PERMIT_CONSUMED");
     }
     if (method == "lab.runtime_bind") {
         if (!Expect(store, req, "bind|" + RequireStr(req, "release_id"), err)) return false;

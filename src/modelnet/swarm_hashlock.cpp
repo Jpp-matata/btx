@@ -8,7 +8,7 @@
 
 namespace modelnet {
 
-SwarmHashlockResult SwarmNoteHashlock(const SwarmHashlock& hashlock, std::string& err)
+SwarmHashlockResult SwarmNoteHashlock(const SwarmHashlockRequest& hashlock, std::string& err)
 {
     SwarmHashlockResult result;
     result.qualified = false;

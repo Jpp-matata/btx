@@ -13,7 +13,7 @@ BOOST_FIXTURE_TEST_SUITE(swarm_presence_tests, BasicTestingSetup)
 
 BOOST_AUTO_TEST_CASE(empty_node_id_is_node)
 {
-    modelnet::SwarmPresence presence{"", 12, false, false};
+    modelnet::SwarmLocalPresenceRequest presence{"", 12, false, false};
     std::string err;
     const modelnet::SwarmPresenceResult result = modelnet::SwarmAcceptPresenceLocal(presence, err);
     BOOST_CHECK(!result.connected);
@@ -25,7 +25,7 @@ BOOST_AUTO_TEST_CASE(empty_node_id_is_node)
 
 BOOST_AUTO_TEST_CASE(negative_rtt_is_range)
 {
-    modelnet::SwarmPresence presence{"n1", -1, false, false};
+    modelnet::SwarmLocalPresenceRequest presence{"n1", -1, false, false};
     std::string err;
     const modelnet::SwarmPresenceResult result = modelnet::SwarmAcceptPresenceLocal(presence, err);
     BOOST_CHECK(!result.connected);
@@ -37,7 +37,7 @@ BOOST_AUTO_TEST_CASE(negative_rtt_is_range)
 
 BOOST_AUTO_TEST_CASE(want_connect_is_held)
 {
-    modelnet::SwarmPresence presence{"n1", 12, true, true};
+    modelnet::SwarmLocalPresenceRequest presence{"n1", 12, true, true};
     std::string err;
     const modelnet::SwarmPresenceResult result = modelnet::SwarmAcceptPresenceLocal(presence, err);
     BOOST_CHECK(!result.connected);
@@ -49,7 +49,7 @@ BOOST_AUTO_TEST_CASE(want_connect_is_held)
 
 BOOST_AUTO_TEST_CASE(local_presence_is_noted)
 {
-    modelnet::SwarmPresence presence{"n1", 12, false, false};
+    modelnet::SwarmLocalPresenceRequest presence{"n1", 12, false, false};
     std::string err = "stale";
     const modelnet::SwarmPresenceResult result = modelnet::SwarmAcceptPresenceLocal(presence, err);
     BOOST_CHECK(!result.connected);

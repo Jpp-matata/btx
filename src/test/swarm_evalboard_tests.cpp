@@ -15,7 +15,7 @@ BOOST_FIXTURE_TEST_SUITE(swarm_evalboard_tests, BasicTestingSetup)
 
 BOOST_AUTO_TEST_CASE(empty_report_stores_nothing)
 {
-    modelnet::SwarmEvalBoard board;
+    modelnet::SwarmEvalProbeBoard board;
     std::string err = "prior";
 
     BOOST_CHECK(!board.Submit("", "ann", "vision", 10, true, true, err));
@@ -33,7 +33,7 @@ BOOST_AUTO_TEST_CASE(empty_report_stores_nothing)
 
 BOOST_AUTO_TEST_CASE(self_score_is_not_stored)
 {
-    modelnet::SwarmEvalBoard board;
+    modelnet::SwarmEvalProbeBoard board;
     std::string err = "prior";
 
     BOOST_CHECK(!board.Submit("model", "model", "vision", 10, true, true, err));
@@ -53,7 +53,7 @@ BOOST_AUTO_TEST_CASE(self_score_is_not_stored)
 
 BOOST_AUTO_TEST_CASE(held_and_not_rotating_store_nothing)
 {
-    modelnet::SwarmEvalBoard board;
+    modelnet::SwarmEvalProbeBoard board;
     std::string err = "prior";
 
     BOOST_CHECK(!board.Submit("model", "ann", "vision", 10, false, true, err));
@@ -72,7 +72,7 @@ BOOST_AUTO_TEST_CASE(held_and_not_rotating_store_nothing)
 
 BOOST_AUTO_TEST_CASE(score_outside_range_stores_nothing)
 {
-    modelnet::SwarmEvalBoard board;
+    modelnet::SwarmEvalProbeBoard board;
     std::string err = "prior";
 
     BOOST_CHECK(!board.Submit("model", "ann", "vision", -1, true, true, err));
@@ -99,7 +99,7 @@ BOOST_AUTO_TEST_CASE(score_outside_range_stores_nothing)
 
 BOOST_AUTO_TEST_CASE(same_domain_is_not_accepted)
 {
-    modelnet::SwarmEvalBoard board;
+    modelnet::SwarmEvalProbeBoard board;
     std::string err = "prior";
 
     BOOST_REQUIRE(board.Submit("model", "ann", "vision", 40, true, true, err));
@@ -128,7 +128,7 @@ BOOST_AUTO_TEST_CASE(same_domain_is_not_accepted)
 
 BOOST_AUTO_TEST_CASE(two_domains_within_spread_are_accepted)
 {
-    modelnet::SwarmEvalBoard board;
+    modelnet::SwarmEvalProbeBoard board;
     std::string err = "prior";
 
     BOOST_REQUIRE(board.Submit("model", "ann", "vision", 0, true, true, err));
@@ -169,7 +169,7 @@ BOOST_AUTO_TEST_CASE(two_domains_within_spread_are_accepted)
 
 BOOST_AUTO_TEST_CASE(spread_above_10000_is_not_accepted)
 {
-    modelnet::SwarmEvalBoard board;
+    modelnet::SwarmEvalProbeBoard board;
     std::string err = "prior";
 
     BOOST_REQUIRE(board.Submit("wide", "ann", "vision", 0, true, true, err));
@@ -191,7 +191,7 @@ BOOST_AUTO_TEST_CASE(spread_above_10000_is_not_accepted)
 
 BOOST_AUTO_TEST_CASE(replay_keeps_the_first_score)
 {
-    modelnet::SwarmEvalBoard board;
+    modelnet::SwarmEvalProbeBoard board;
     std::string err = "prior";
 
     BOOST_REQUIRE(board.Submit("model", "ann", "vision", 10, true, true, err));
@@ -213,7 +213,7 @@ BOOST_AUTO_TEST_CASE(replay_keeps_the_first_score)
 
 BOOST_AUTO_TEST_CASE(regression_blocks_attach)
 {
-    modelnet::SwarmEvalBoard board;
+    modelnet::SwarmEvalProbeBoard board;
     std::string err = "prior";
 
     BOOST_REQUIRE(board.Submit("model", "ann", "vision", 100, true, true, err));
@@ -261,7 +261,7 @@ BOOST_AUTO_TEST_CASE(regression_blocks_attach)
 
 BOOST_AUTO_TEST_CASE(graduate_is_refused)
 {
-    modelnet::SwarmEvalBoard board;
+    modelnet::SwarmEvalProbeBoard board;
     std::string err = "prior";
 
     BOOST_REQUIRE(!board.graduated());
@@ -296,7 +296,7 @@ BOOST_AUTO_TEST_CASE(graduate_is_refused)
 
 BOOST_AUTO_TEST_CASE(bytes_moved_stay_zero)
 {
-    modelnet::SwarmEvalBoard board;
+    modelnet::SwarmEvalProbeBoard board;
     std::string err = "prior";
 
     BOOST_REQUIRE(board.bytes_moved() == 0);

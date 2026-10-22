@@ -10,18 +10,18 @@
 
 namespace modelnet {
 
-struct SwarmProfitShare {
+struct SwarmProfitShareRequest {
     std::string share_id;
     bool want_share;
 };
 
-struct SwarmProfitShareResult {
+struct SwarmProfitShareRefusal {
     std::string code;
     bool shared;
     int64_t atoms;
 };
 
-SwarmProfitShareResult SwarmRefuseProfitShare(const SwarmProfitShare& share, std::string& err);
+SwarmProfitShareRefusal SwarmRefuseProfitShare(const SwarmProfitShareRequest& share, std::string& err);
 
 } // namespace modelnet
 

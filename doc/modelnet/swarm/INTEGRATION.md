@@ -22,32 +22,42 @@ Both views use `swarm/lineage-mappings.json` when an artifact has a local mappin
 
 `observers.json` is the last successful catalog snapshot, not a durable follow-history list. Malformed catalog or mapping input fails without replacing that snapshot, and the observer skips live publication for that poll. A failed contribution integration also skips formation and live publication. Retained files alone do not prove current eligibility or authorize work. Successful polls refresh the views; separate file replacements are not an atomic transaction across all swarm files.
 
-The same wake then calls `NifObserve::Tick`, then `SwarmBound::Pass` once, then `TickBind::Pass` once. Later wakes see the bound and the tick bind already latched. They do not repeat the pass.
+The observer owns a real `btx-guardd` child through private inherited pipes.
+Each poll supervises that process and publishes a bounded heartbeat in
+`swarm/guard-process.json`; clean shutdown publishes `STOPPED` and reaps the
+child. A guard permit records authorization consumption, not completed work.
 
-`SwarmBound::Pass` uses the fixed prompt `abcdefgh`, an 8-byte memory echo, and vLLM `ENGINE_ABSENT`. It takes one CPU AdamW step on a 4 by 8 dense net, exchanges two ranks over loopback on one host, checks eight integer replay pairs, publishes one snapshot, and seats one realm role. A second host is refused. The decode path does not launch a process and does not use a GPU.
+The helper performs bounded private-LAN discovery and strict-PQ1 peer
+observation. Its expiring `native-participation.json` snapshot feeds observer
+membership and locally verified shared-model families. Fresh headless implicit
+`auto` storage uses a bounded 1 GiB cache; explicit zero, saved refusal and
+owner-selected limits take precedence. Eligible first-model acquisition uses
+the existing verified download worker. Acquiring bytes and observing a family
+do not authorize computation, private data access or spending.
 
-`TickBind::Pass` runs the requirement binders, a 12-step node cycle with generation 0 and `passed()` false, the local module stores, and the safe slices. It does not quarantine a live model and does not start a guard process.
-
-`Spend` returns `"0"`. `Release` returns `UNQUALIFIED`. `passed()`, `gpu_passed()`, and `windows_passed()` stay false.
-
-`btx-swarmd` and `btx-paynetd` are not launched. The observer thread is the swarm, so a node does not opt in by starting another program. `contrib/swarm` remains the reference Python package. It is not the running control plane.
-
-Libraries elsewhere in `bitcoin_modelnet` can be called by tests. They are not this control plane. The latched pass is not a peer network, a qualified release, or a settlement. One machine and two local ranks are not two hosts. This host can compile and run the Linux unit suites. A Windows, macOS, or GPU result is recorded only when that run happens on that machine.
+Production observer startup no longer calls `NifObserve::Tick`,
+`SwarmBoundProbe::Pass` or `TickBind::Pass` to latch in-process acceptance
+records. Those library probes remain available for explicit tests. Native
+qualification uses finite commands and actual execution evidence described in
+[NATIVE EXECUTION AND RELEASE EVIDENCE](16_NATIVE_EXECUTION_AND_RELEASE_EVIDENCE.md).
+Automatic spend stays zero, unavailable engines remain explicit, and the
+candidate and all unqualified profiles remain unqualified. Local process tests
+do not establish physical multi-host, GPU or independent-organization results.
 
 ## Control plane bounds
 
-`btxd` is the control plane. A missing catalog does nothing. Automatic spend atoms stay 0. `preparefundmodelrelease` builds an unsigned plan and does not spend.
+`btxd` is the control plane. A missing catalog clears stale observer/contribution entries and grants no work authority. Automatic spend atoms stay 0. `preparefundmodelrelease` builds an unsigned plan and does not spend.
 
 Advertised capability is separate from qualified capability. A local model can run with an empty provider key. A KV page is copied only when fingerprints match. Recovery of a recorded balance does not stop a device and does not spend.
 
-Two physical hosts, three peers, a second GPU, Windows, macOS, offline images, and the release gates remain later work.
+Physical multi-host and GPU qualification, native Windows/macOS execution, disconnected runtime-image tests, and the complete release gates remain outstanding. The implemented Linux image workflow and local native tests do not close those gates.
 
 ## Later releases
 
 Follow-on work toward a fully autonomous network:
 
-- Network peer discovery and admission of a local group.
-- Acquiring a verified model from another participant.
+- Physical multi-host qualification of the implemented peer discovery and observer admission.
+- Physical multi-host qualification of verified acquisition and continued service after peer loss.
 - Submitting a task or prompt and receiving model work.
 - Authorized training checked by a second machine.
 - A private defensive case under an explicit customer grant.

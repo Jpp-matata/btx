@@ -22,7 +22,7 @@ namespace modelnet {
  * on every path. Nothing is signed and nothing is broadcast. No
  * hostnames or IPs are used.
  */
-struct SwarmRevenueSplit {
+struct SwarmRevenueSplitRequest {
     std::string pool_id;
     int64_t gross{0};
     int64_t sponsor_ppm{0};
@@ -64,7 +64,7 @@ struct SwarmRevenueSplitResult {
  * cleared. paid stays false. Nothing is signed and nothing is
  * broadcast. No hostnames or IPs are used.
  */
-SwarmRevenueSplitResult SwarmNoteRevenueSplit(const SwarmRevenueSplit& split, std::string& err);
+SwarmRevenueSplitResult SwarmNoteRevenueSplit(const SwarmRevenueSplitRequest& split, std::string& err);
 
 } // namespace modelnet
 

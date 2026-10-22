@@ -10,7 +10,7 @@
 
 namespace modelnet {
 
-struct SwarmPresence {
+struct SwarmLocalPresenceRequest {
     std::string node_id;
     int64_t rtt_ms;
     bool new_domain;
@@ -24,7 +24,7 @@ struct SwarmPresenceResult {
     int64_t kept;
 };
 
-SwarmPresenceResult SwarmAcceptPresenceLocal(const SwarmPresence& presence, std::string& err);
+SwarmPresenceResult SwarmAcceptPresenceLocal(const SwarmLocalPresenceRequest& presence, std::string& err);
 
 } // namespace modelnet
 

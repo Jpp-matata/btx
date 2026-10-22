@@ -7,9 +7,9 @@
 namespace modelnet {
 
 // A profit share is refused.
-SwarmProfitShareResult SwarmRefuseProfitShare(const SwarmProfitShare& share, std::string& err)
+SwarmProfitShareRefusal SwarmRefuseProfitShare(const SwarmProfitShareRequest& share, std::string& err)
 {
-    SwarmProfitShareResult out;
+    SwarmProfitShareRefusal out;
     out.shared = false;
     out.atoms = 0;
     if (share.share_id.empty()) {

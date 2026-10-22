@@ -84,7 +84,7 @@ void ExpectUnqualified(const modelnet::Load01& eng)
 
 } // namespace
 
-BOOST_AUTO_TEST_CASE(verified_file_refuses_second_path)
+BOOST_AUTO_TEST_CASE(legacy_integrity_file_accepts_second_path_without_qualification)
 {
     TempFiles files(m_path_root);
     BOOST_REQUIRE(files.dir_created);
@@ -147,10 +147,10 @@ BOOST_AUTO_TEST_CASE(verified_file_refuses_second_path)
     BOOST_CHECK(eng.loaded());
     BOOST_CHECK_EQUAL(eng.bytes_read(), size_a);
 
-    BOOST_CHECK(!eng.Load(path_b, digest_b, err));
-    BOOST_CHECK_EQUAL(err, "SOURCE");
+    BOOST_CHECK(eng.Load(path_b, digest_b, err));
+    BOOST_CHECK(err.empty());
     BOOST_CHECK(eng.loaded());
-    BOOST_CHECK_EQUAL(eng.bytes_read(), size_a);
+    BOOST_CHECK_EQUAL(eng.bytes_read(), static_cast<int64_t>(body_b.size()));
     ExpectUnqualified(eng);
 
     BOOST_CHECK(eng.Load(path_a, digest_a, err));

@@ -12,9 +12,9 @@
 
 BOOST_FIXTURE_TEST_SUITE(swarm_hashlock_tests, BasicTestingSetup)
 
-static modelnet::SwarmHashlock NotedHashlock()
+static modelnet::SwarmHashlockRequest NotedHashlock()
 {
-    modelnet::SwarmHashlock hashlock;
+    modelnet::SwarmHashlockRequest hashlock;
     hashlock.invoice_id = "invoice-hashlock";
     hashlock.hash_len = 32;
     hashlock.preimage_len = 32;
@@ -29,7 +29,7 @@ static void ExpectUnqualified(const modelnet::SwarmHashlockResult& result)
 
 BOOST_AUTO_TEST_CASE(empty_invoice_id_is_hash)
 {
-    modelnet::SwarmHashlock hashlock = NotedHashlock();
+    modelnet::SwarmHashlockRequest hashlock = NotedHashlock();
     hashlock.invoice_id.clear();
     std::string err = "prior";
     const modelnet::SwarmHashlockResult result = modelnet::SwarmNoteHashlock(hashlock, err);
@@ -40,7 +40,7 @@ BOOST_AUTO_TEST_CASE(empty_invoice_id_is_hash)
 
 BOOST_AUTO_TEST_CASE(negative_hash_len_is_hash)
 {
-    modelnet::SwarmHashlock hashlock = NotedHashlock();
+    modelnet::SwarmHashlockRequest hashlock = NotedHashlock();
     hashlock.hash_len = -1;
     std::string err = "prior";
     const modelnet::SwarmHashlockResult result = modelnet::SwarmNoteHashlock(hashlock, err);
@@ -51,7 +51,7 @@ BOOST_AUTO_TEST_CASE(negative_hash_len_is_hash)
 
 BOOST_AUTO_TEST_CASE(negative_preimage_len_is_hash)
 {
-    modelnet::SwarmHashlock hashlock = NotedHashlock();
+    modelnet::SwarmHashlockRequest hashlock = NotedHashlock();
     hashlock.preimage_len = -1;
     std::string err = "prior";
     const modelnet::SwarmHashlockResult result = modelnet::SwarmNoteHashlock(hashlock, err);
@@ -62,7 +62,7 @@ BOOST_AUTO_TEST_CASE(negative_preimage_len_is_hash)
 
 BOOST_AUTO_TEST_CASE(empty_invoice_id_wins_over_lengths_and_want_qualify)
 {
-    modelnet::SwarmHashlock hashlock = NotedHashlock();
+    modelnet::SwarmHashlockRequest hashlock = NotedHashlock();
     hashlock.invoice_id.clear();
     hashlock.hash_len = 16;
     hashlock.preimage_len = 16;
@@ -76,7 +76,7 @@ BOOST_AUTO_TEST_CASE(empty_invoice_id_wins_over_lengths_and_want_qualify)
 
 BOOST_AUTO_TEST_CASE(negative_hash_len_wins_over_want_qualify)
 {
-    modelnet::SwarmHashlock hashlock = NotedHashlock();
+    modelnet::SwarmHashlockRequest hashlock = NotedHashlock();
     hashlock.hash_len = -1;
     hashlock.want_qualify = true;
     std::string err = "prior";
@@ -88,7 +88,7 @@ BOOST_AUTO_TEST_CASE(negative_hash_len_wins_over_want_qualify)
 
 BOOST_AUTO_TEST_CASE(negative_preimage_len_wins_over_preimage_code)
 {
-    modelnet::SwarmHashlock hashlock = NotedHashlock();
+    modelnet::SwarmHashlockRequest hashlock = NotedHashlock();
     hashlock.preimage_len = -1;
     hashlock.want_qualify = true;
     std::string err = "prior";
@@ -100,7 +100,7 @@ BOOST_AUTO_TEST_CASE(negative_preimage_len_wins_over_preimage_code)
 
 BOOST_AUTO_TEST_CASE(zero_hash_len_is_hash_len)
 {
-    modelnet::SwarmHashlock hashlock = NotedHashlock();
+    modelnet::SwarmHashlockRequest hashlock = NotedHashlock();
     hashlock.hash_len = 0;
     std::string err = "prior";
     const modelnet::SwarmHashlockResult result = modelnet::SwarmNoteHashlock(hashlock, err);
@@ -111,7 +111,7 @@ BOOST_AUTO_TEST_CASE(zero_hash_len_is_hash_len)
 
 BOOST_AUTO_TEST_CASE(short_hash_len_is_hash_len)
 {
-    modelnet::SwarmHashlock hashlock = NotedHashlock();
+    modelnet::SwarmHashlockRequest hashlock = NotedHashlock();
     hashlock.hash_len = 31;
     std::string err = "prior";
     const modelnet::SwarmHashlockResult result = modelnet::SwarmNoteHashlock(hashlock, err);
@@ -122,7 +122,7 @@ BOOST_AUTO_TEST_CASE(short_hash_len_is_hash_len)
 
 BOOST_AUTO_TEST_CASE(long_hash_len_is_hash_len)
 {
-    modelnet::SwarmHashlock hashlock = NotedHashlock();
+    modelnet::SwarmHashlockRequest hashlock = NotedHashlock();
     hashlock.hash_len = 33;
     std::string err = "prior";
     const modelnet::SwarmHashlockResult result = modelnet::SwarmNoteHashlock(hashlock, err);
@@ -133,7 +133,7 @@ BOOST_AUTO_TEST_CASE(long_hash_len_is_hash_len)
 
 BOOST_AUTO_TEST_CASE(hash_len_wins_when_want_qualify_is_true)
 {
-    modelnet::SwarmHashlock hashlock = NotedHashlock();
+    modelnet::SwarmHashlockRequest hashlock = NotedHashlock();
     hashlock.hash_len = 31;
     hashlock.want_qualify = true;
     std::string err = "prior";
@@ -145,7 +145,7 @@ BOOST_AUTO_TEST_CASE(hash_len_wins_when_want_qualify_is_true)
 
 BOOST_AUTO_TEST_CASE(hash_len_wins_over_preimage_len)
 {
-    modelnet::SwarmHashlock hashlock = NotedHashlock();
+    modelnet::SwarmHashlockRequest hashlock = NotedHashlock();
     hashlock.hash_len = 16;
     hashlock.preimage_len = 16;
     hashlock.want_qualify = true;
@@ -158,7 +158,7 @@ BOOST_AUTO_TEST_CASE(hash_len_wins_over_preimage_len)
 
 BOOST_AUTO_TEST_CASE(zero_preimage_len_is_preimage)
 {
-    modelnet::SwarmHashlock hashlock = NotedHashlock();
+    modelnet::SwarmHashlockRequest hashlock = NotedHashlock();
     hashlock.preimage_len = 0;
     std::string err = "prior";
     const modelnet::SwarmHashlockResult result = modelnet::SwarmNoteHashlock(hashlock, err);
@@ -169,7 +169,7 @@ BOOST_AUTO_TEST_CASE(zero_preimage_len_is_preimage)
 
 BOOST_AUTO_TEST_CASE(short_preimage_len_is_preimage)
 {
-    modelnet::SwarmHashlock hashlock = NotedHashlock();
+    modelnet::SwarmHashlockRequest hashlock = NotedHashlock();
     hashlock.preimage_len = 31;
     std::string err = "prior";
     const modelnet::SwarmHashlockResult result = modelnet::SwarmNoteHashlock(hashlock, err);
@@ -180,7 +180,7 @@ BOOST_AUTO_TEST_CASE(short_preimage_len_is_preimage)
 
 BOOST_AUTO_TEST_CASE(long_preimage_len_is_preimage)
 {
-    modelnet::SwarmHashlock hashlock = NotedHashlock();
+    modelnet::SwarmHashlockRequest hashlock = NotedHashlock();
     hashlock.preimage_len = 33;
     std::string err = "prior";
     const modelnet::SwarmHashlockResult result = modelnet::SwarmNoteHashlock(hashlock, err);
@@ -191,7 +191,7 @@ BOOST_AUTO_TEST_CASE(long_preimage_len_is_preimage)
 
 BOOST_AUTO_TEST_CASE(preimage_wins_when_want_qualify_is_true)
 {
-    modelnet::SwarmHashlock hashlock = NotedHashlock();
+    modelnet::SwarmHashlockRequest hashlock = NotedHashlock();
     hashlock.preimage_len = 31;
     hashlock.want_qualify = true;
     std::string err = "prior";
@@ -203,7 +203,7 @@ BOOST_AUTO_TEST_CASE(preimage_wins_when_want_qualify_is_true)
 
 BOOST_AUTO_TEST_CASE(want_qualify_with_32_byte_lengths_is_held)
 {
-    modelnet::SwarmHashlock hashlock = NotedHashlock();
+    modelnet::SwarmHashlockRequest hashlock = NotedHashlock();
     hashlock.hash_len = 32;
     hashlock.preimage_len = 32;
     hashlock.want_qualify = true;
@@ -217,7 +217,7 @@ BOOST_AUTO_TEST_CASE(want_qualify_with_32_byte_lengths_is_held)
 
 BOOST_AUTO_TEST_CASE(thirty_two_byte_lengths_without_qualify_is_noted)
 {
-    modelnet::SwarmHashlock hashlock = NotedHashlock();
+    modelnet::SwarmHashlockRequest hashlock = NotedHashlock();
     hashlock.hash_len = 32;
     hashlock.preimage_len = 32;
     hashlock.want_qualify = false;

@@ -37,7 +37,7 @@ namespace modelnet {
  * bytes_moved() is 0. gpu() is false. This board does not graduate,
  * mine, or broadcast.
  */
-class SwarmEvalBoard {
+class SwarmEvalProbeBoard {
 public:
     bool Submit(const std::string& subject, const std::string& author, const std::string& domain, int64_t score,
                 bool independent, bool rotating, std::string& err);

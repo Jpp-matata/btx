@@ -2,10 +2,9 @@
 // Distributed under the MIT software license, see the accompanying
 // file COPYING or https://opensource.org/license/mit/.
 
-#include <modelnet/nif_observe/nif_observe.h>
-#include <modelnet/swarm_bound/swarm_bound.h>
-#include <modelnet/tick_bind/tick_bind.h>
 #include <modelnet/swarm_form/plane.h>
+#include <modelnet/swarm_form/atomic.h>
+#include <modelnet/guard_supervisor.h>
 #include <modelnet/swarm_lifecycle.h>
 #include <modelnet/swarm_live.h>
 #include <modelnet/swarm_node.h>
@@ -206,6 +205,7 @@ struct InputGeneration {
     std::string mappings;
     std::string device;
     std::string peers;
+    std::string native;
 };
 
 } // namespace
@@ -340,26 +340,62 @@ void StartSwarmObserver(const fs::path& modeldir)
     if (modeldir.empty()) return;
     g_stop.store(false);
     g_thread = std::thread([modeldir] {
-        NifObserve nif_observe;
-        SwarmBound swarm_bound;
-        TickBind tick_bind;
-        int64_t nif_now_ms = 0;
         InputGeneration generation;
+        GuardSupervisor guard;
+        std::string guard_error;
+        if (!guard.Start(FindPackagedGuardd(), guard_error)) {
+            LogPrintf("swarm guard: %s (monetary node continues)\n", guard_error);
+        }
+        uint64_t guard_heartbeat = 0;
+        auto publish_guard_status = [&](std::string& error) {
+            const auto status = guard.Snapshot();
+            const int64_t observed_at = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count();
+            UniValue state(UniValue::VOBJ);
+            state.pushKV("schema", "BTX/GuardProcess/1");
+            state.pushKV("enabled", status.enabled);
+            state.pushKV("ready", status.ready);
+            state.pushKV("state", !status.enabled ? "STOPPED" : status.ready ? "READY" : "RESTARTING");
+            state.pushKV("pid", status.pid);
+            state.pushKV("restart_count", status.restart_count);
+            state.pushKV("error", status.error);
+            state.pushKV("transport", "PRIVATE_INHERITED_STDIO");
+            state.pushKV("automatic_spend_atoms", "0");
+            state.pushKV("execution_authorized", false);
+            state.pushKV("observed_at_ms", observed_at);
+            // Readiness is a sampled observation. An abrupt parent exit
+            // cannot leave an indefinitely current ready=true file.
+            state.pushKV("valid_until_ms", status.enabled ? observed_at + 6000 : observed_at);
+            state.pushKV("heartbeat_sequence", ++guard_heartbeat);
+            const fs::path directory = modeldir / "swarm";
+            if (!RejectSymlink(directory, error)) return false;
+            fs::create_directories(directory);
+            return SwarmFormWrite(directory / "guard-process.json", state.write() + "\n", error);
+        };
         while (!g_stop.load()) {
             std::string err;
             bool ok = true;
             try {
+                guard.Tick();
+                if (!publish_guard_status(err)) {
+                    ok = false;
+                    LogPrintf("swarm guard status: %s (monetary node continues)\n", err);
+                }
                 std::lock_guard<std::mutex> lock(g_mu);
                 InputGeneration now;
                 if (!Fingerprint(modeldir / "catalog.json", now.catalog, err) ||
                     !Fingerprint(modeldir / "swarm" / "lineage-mappings.json", now.mappings, err) ||
                     !Fingerprint(modeldir / "swarm" / "device.json", now.device, err) ||
-                    !Fingerprint(modeldir / "swarm" / "peers.json", now.peers, err)) {
+                    !Fingerprint(modeldir / "swarm" / "peers.json", now.peers, err) ||
+                    !Fingerprint(modeldir / "swarm" / "native-participation.json", now.native, err)) {
                     ok = false;
                 } else {
                     const bool catalog_changed = !generation.seen || now.catalog != generation.catalog ||
                                                  now.mappings != generation.mappings;
-                    const bool mesh_changed = !generation.seen || now.device != generation.device || now.peers != generation.peers;
+                    // Reconcile live observations even if a dead helper stops
+                    // changing its snapshot: expired peers must disappear.
+                    const bool mesh_changed = !generation.seen || now.device != generation.device || now.peers != generation.peers ||
+                                              now.native != generation.native || now.native != "missing";
                     bool retain = true;
                     if (catalog_changed) {
                         ok = SwarmObserveCatalog(modeldir, err);
@@ -396,19 +432,8 @@ void StartSwarmObserver(const fs::path& modeldir)
                         generation = std::move(now);
                     }
                 }
-                std::string nif_err;
-                if (!nif_observe.Tick(nif_now_ms, nif_err)) {
-                    LogPrintf("swarm nif observe: %s (monetary node continues)\n", nif_err);
-                }
-                std::string bound_err;
-                if (!swarm_bound.Pass(nif_now_ms, bound_err)) {
-                    LogPrintf("swarm bound: %s (monetary node continues)\n", bound_err);
-                }
-                std::string tick_err;
-                if (!tick_bind.Pass(tick_err)) {
-                    LogPrintf("swarm tick bind: %s (monetary node continues)\n", tick_err);
-                }
-                if (nif_now_ms < INT64_MAX) ++nif_now_ms;
+                // Qualification suites run explicitly against real processes;
+                // production startup no longer runs/latches self-test records.
             } catch (const std::exception& e) {
                 ok = false;
                 err = e.what();
@@ -417,6 +442,15 @@ void StartSwarmObserver(const fs::path& modeldir)
             for (int i = 0; i < 20 && !g_stop.load(); ++i) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
             }
+        }
+        guard.Stop();
+        try {
+            std::string error;
+            if (!publish_guard_status(error)) {
+                LogPrintf("swarm guard shutdown status: %s\n", error);
+            }
+        } catch (const std::exception& e) {
+            LogPrintf("swarm guard shutdown status: %s\n", e.what());
         }
     });
 }

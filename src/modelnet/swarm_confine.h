@@ -13,20 +13,18 @@
 namespace modelnet {
 
 /**
- * Run a helper under rlimits and a private user and network namespace.
- * This is not a command-string filter. launched stays false unless the
- * helper was actually executed.
- *
- * Before any fork: an empty helper or root is CONFINEMENT; a helper that
- * is not a regular file is SANDBOX_ABSENT; network_denied false is
- * NETWORK; a non-positive address, cpu, or nofile limit is LIMIT; a
- * helper that is not lexically inside root, or a path containing "..",
- * is PATH.
- *
- * The child then sets RLIMIT_AS, RLIMIT_CPU, and RLIMIT_NOFILE, unshares
- * a user namespace and a network namespace, and execs the helper with no
- * extra arguments. Fork failure, or a child exit of 126, is
- * CONFINEMENT_ABSENT. An executed child is CONFINED.
+ * Execute an owner-selected helper with bounded CPU/address space/descriptors
+ * and no network. Linux uses user/network namespaces and no_new_privs;
+ * macOS uses a parameterized default-deny Seatbelt profile. Windows uses a
+ * zero-capability AppContainer, private staged files, a one-process Job with
+ * memory/CPU/wall limits and an explicit stdio handle allowlist. max_nofile
+ * is a POSIX descriptor quota; Windows bounds inherited handles and process
+ * memory, not the number of later OS handle allocations. No environment
+ * credentials or inherited RPC/wallet descriptors cross exec. Wall timeout
+ * kills only this invocation's dedicated process group. A CLOEXEC error
+ * pipe distinguishes setup/exec failures from a helper that exits 126.
+ * Paths must be absolute, inside root, and free of symbolic links.
+ * A successful launch is local execution evidence, not release qualification.
  */
 struct SwarmConfineRequest {
     fs::path helper;
@@ -35,6 +33,8 @@ struct SwarmConfineRequest {
     int max_cpu_seconds{0};
     int max_nofile{0};
     bool network_denied{false};
+    int max_wall_seconds{60};
+    uint64_t max_tree_bytes{1024ULL * 1024 * 1024};
 };
 
 struct SwarmConfineResult {

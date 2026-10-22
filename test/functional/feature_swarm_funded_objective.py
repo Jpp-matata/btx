@@ -2,182 +2,214 @@
 # Copyright (c) 2026 The BTX developers
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or https://opensource.org/license/mit/.
-"""Isolated regtest: a funded objective is a wallet submission.
+"""Native funded objective: exact HTLC fund, claim, reorg and presigned refund.
 
-preparefundmodelrelease is called with a release id and, when its help text
-accepts an options object, the wallet inputs and amount the helper uses to
-assemble unsigned_hex. A complete signature is broadcast and the txid is
-recorded. With no signable plan the wallet txcount stays the same.
-automatic_spend_atoms stays 0. One submission does not settle every claimed
-payment mode.
+A missing helper or signable plan is a failure. This test exercises the wallet
+path with an intentionally absent model helper; no model peer holds wallet keys.
+This is one isolated regtest node with two wallets, not a multi-host deployment,
+a production L2 qualification, or evidence for every advertised payment mode.
 """
-
+import hashlib
+import importlib.util
+import json
+from decimal import Decimal
 from pathlib import Path
 
-from test_framework.authproxy import JSONRPCException
-from test_framework.blocktools import COINBASE_MATURITY
-from test_framework.messages import COIN
 from test_framework.test_framework import BitcoinTestFramework
-from test_framework.util import assert_equal
+from test_framework.util import assert_equal, assert_raises_rpc_error
+
+WATCHTOWER_PATH = Path(__file__).resolve().parents[2] / "contrib/swarm/native_payments/watchtower.py"
+spec = importlib.util.spec_from_file_location("native_payment_watchtower", WATCHTOWER_PATH)
+watchtower = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(watchtower)
 
 
-def _is_hex_tx(value):
-    if not isinstance(value, str) or len(value) < 20 or len(value) % 2:
-        return False
-    return all(c in "0123456789abcdefABCDEF" for c in value)
+class WalletRPCAdapter:
+    def __init__(self, wallet):
+        self.wallet = wallet
 
-
-def _candidate_hex(obj, depth=0):
-    if isinstance(obj, str) and _is_hex_tx(obj):
-        return obj
-    if depth > 3 or not isinstance(obj, dict):
-        return None
-    for key in ("unsigned_hex", "hex", "rawtx", "signed_hex"):
-        value = obj.get(key)
-        if _is_hex_tx(value):
-            return value
-    for child in obj.values():
-        if isinstance(child, dict):
-            found = _candidate_hex(child, depth + 1)
-            if found:
-                return found
-    return None
+    def call(self, method, *params):
+        return getattr(self.wallet, method)(*params)
 
 
 class SwarmFundedObjectiveTest(BitcoinTestFramework):
     def add_options(self, parser):
-        self.add_wallet_options(parser)
+        self.add_wallet_options(parser, legacy=False)
 
     def set_test_params(self):
         self.num_nodes = 1
         self.setup_clean_chain = True
+        self.supports_cli = False
         self.rpc_timeout = 180
 
     def skip_test_if_missing_module(self):
         self.skip_if_no_wallet()
+        self.skip_if_no_sqlite()
 
     def setup_nodes(self):
         self.modeldir = Path(self.options.tmpdir) / "funded-objective-models"
         self.modeldir.mkdir(parents=True)
-        # Same local modelnet pattern as feature_swarm_regtest_spend.py.
         self.extra_args = [[
-            "-modelnet=1",
-            "-modelnetrequired=0",
-            "-modelbind=off",
-            "-modelstorage=0",
-            f"-modeldir={self.modeldir}",
-            f"-modelhelper={self.modeldir / 'absent-helper'}",
-            # Keep regtest block production off the matmul path so a coinbase can mature.
-            "-regtestmatmulbindingheight=2147483647",
-            "-regtestmatmulproductdigestheight=2147483647",
-            "-regtestmatmulv4height=2147483647",
-            "-regtestmatmulrequireproductpayload=0",
+            "-autoshieldcoinbase=0", "-modelnet=1", "-modelnetrequired=0", "-modelbind=off", "-modelstorage=0",
+            f"-modeldir={self.modeldir}", f"-modelhelper={self.modeldir / 'absent-helper'}",
+            "-regtestmatmulbindingheight=2147483647", "-regtestmatmulproductdigestheight=2147483647",
+            "-regtestmatmulv4height=2147483647", "-regtestmatmulrequireproductpayload=0",
         ]]
         super().setup_nodes()
-
-    def _assert_automatic_spend_zero(self, node):
-        info = node.getmodelnetworkinfo()
-        assert_equal(info["automatic_spend_atoms"], 0)
-
-    def _try_sign_and_send(self, node, plan):
-        raw = _candidate_hex(plan)
-        if not raw:
-            return None
-        try:
-            signed = node.signrawtransactionwithwallet(raw)
-        except JSONRPCException:
-            return None
-        if not isinstance(signed, dict) or signed.get("complete") is not True:
-            return None
-        signed_hex = signed.get("hex")
-        if not _is_hex_tx(signed_hex):
-            return None
-        try:
-            txid = node.sendrawtransaction(signed_hex)
-        except JSONRPCException:
-            return None
-        if isinstance(txid, str) and txid:
-            return txid
-        return None
-
-    def _funding_options(self, node):
-        # One mature wallet coin. Surplus returns as change so a signed plan is not an absurd fee.
-        amount_atoms = 1_000_000
-        fee_atoms = 10_000
-        coins = node.listunspent()
-        if not coins:
-            return {"amount_atoms": amount_atoms}
-        coin = coins[0]
-        atoms = int(coin["amount"] * COIN)
-        if atoms <= amount_atoms + fee_atoms:
-            amount_atoms = max(1, atoms // 2)
-            fee_atoms = max(1, atoms - amount_atoms - 1) if atoms > amount_atoms else 0
-        return {
-            "amount_atoms": amount_atoms,
-            "inputs": [{
-                "txid": coin["txid"],
-                "vout": int(coin["vout"]),
-                "amount_atoms": atoms,
-            }],
-            "destination": node.getnewaddress(),
-            "fee_atoms": fee_atoms,
-        }
 
     def run_test(self):
         node = self.nodes[0]
         assert_equal(node.getblockchaininfo()["chain"], "regtest")
-        self._assert_automatic_spend_zero(node)
-        # self.generate pays the deterministic key, which this wallet does not own.
-        wallet_addr = node.getnewaddress()
+        funder = node.get_wallet_rpc(self.default_wallet_name)
+        mining_address = funder.getnewaddress()
+        self.generatetoaddress(node, 102, mining_address)
+        node.createwallet(wallet_name="objective_worker")
+        worker = node.get_wallet_rpc("objective_worker")
+        claimant = worker.exportpqkey(worker.getnewaddress())["pubkey"]
+        refund_key = funder.exportpqkey(funder.getnewaddress())["pubkey"]
+        amount, settlement_fee = 10_000_000, 1_000_000
+        receipts = []
 
-        def mine_to(height):
-            stalls = 0
-            while node.getblockcount() < height:
-                before = node.getblockcount()
-                step = min(20, height - before)
-                self.generatetoaddress(node, step, wallet_addr)
-                if node.getblockcount() == before:
-                    stalls += 1
-                    if stalls > 3:
-                        raise AssertionError(f"mining stalled at height {before}")
-                else:
-                    stalls = 0
-            self.wait_until(lambda: node.getwalletinfo()["lastprocessedblock"]["height"] == node.getblockcount())
+        def mine(count=1):
+            self.generatetoaddress(node, count, mining_address)
+            return node.getbestblockhash()
 
-        # Coinbase at height h is spendable once depth reaches COINBASE_MATURITY + 1.
-        # Tip 102 matures the coinbases from heights 1 and 2.
-        assert COINBASE_MATURITY == 100
-        mine_to(102)
-        assert node.getblockcount() >= 102
-        assert node.getbalance() > 0
-        self._assert_automatic_spend_zero(node)
+        def terms(secret, expiry):
+            return {
+                "key_hash": hashlib.sha256(secret).hexdigest(), "claimant": claimant,
+                "refund_pubkey": refund_key, "refund_height": expiry,
+                "amount_atoms": str(amount), "fee_cap_atoms": "1000000", "auto_pay": False,
+                "automatic_spend_atoms": "0",
+            }
 
-        txcount_before = node.getwalletinfo()["txcount"]
-        release_id = "a" * 96
-        helptext = node.help("preparefundmodelrelease")
-        if "options object" in helptext:
-            args = [release_id, self._funding_options(node)]
-        else:
-            args = [release_id]
-        plan = None
+        def fund(objective, options):
+            count = funder.getwalletinfo()["txcount"]
+            prepared = funder.preparefundmodelrelease(objective, options)
+            assert_equal(prepared["plan_stage"], "WALLET_PREPARED")
+            assert_equal(prepared["automatic_spend_atoms"], "0")
+            assert_equal(prepared["amount_atoms"], str(amount))
+            assert isinstance(prepared["fee_atoms"], str)
+            assert isinstance(prepared["fee_cap_atoms"], str)
+            assert_equal(funder.getwalletinfo()["txcount"], count)
+            assert prepared["unsigned_hex"]
+            assert_raises_rpc_error(-4, "fee_cap_atoms", funder.signmodelfunding,
+                                    prepared["unsigned_hex"], dict(prepared, fee_cap_atoms="0"))
+            signed = funder.signmodelfunding(prepared["unsigned_hex"], prepared)
+            assert signed["complete"], signed
+            assert_raises_rpc_error(-8, "fee_cap_atoms", funder.submitmodelfunding,
+                                    signed["hex"], dict(prepared, fee_cap_atoms="0"))
+            submitted = funder.submitmodelfunding(signed["hex"], prepared)
+            txid = submitted["txid"]
+            assert txid in node.getrawmempool()
+            unconfirmed = funder.getmodelfundingsettlement(txid, prepared)
+            assert_equal(unconfirmed["funded"], False)
+            assert_equal(unconfirmed["settled"], False)
+            prepared["funding_blockhash"] = mine()
+            receipt = funder.getmodelfundingsettlement(txid, prepared)
+            assert_equal(receipt["state"], "FUNDED")
+            assert_equal(receipt["principal_atoms"], str(amount))
+            assert_equal(receipt["settled"], False)
+            duplicate = funder.submitmodelfunding(signed["hex"], prepared)
+            assert_equal(duplicate["duplicate"], True)
+            assert_equal(duplicate["submitted"], False)
+            return txid, receipt["funding_vout"], prepared
+
+        # Rejected aliases, malformed atoms and foreign refund ownership must
+        # never be reclassified as a successful no-op funded objective.
+        base = terms(bytes.fromhex("42" * 32), node.getblockcount() + 100)
+        for extra in ({"automatic_spend_atoms": "1"}, {"auto_pay": "true"}, {"autopay": True}):
+            assert_raises_rpc_error(-8, "automatic BTX spend is zero", funder.preparefundmodelrelease, "aa" * 48, dict(base, **extra))
+        assert_raises_rpc_error(-8, "canonical", funder.preparefundmodelrelease, "aa" * 48, dict(base, amount_atoms="01"))
+        assert_raises_rpc_error(-4, "refund pubkey", funder.preparefundmodelrelease, "aa" * 48, dict(base, refund_pubkey=claimant))
+        assert_raises_rpc_error(-4, "exceeds fee_cap_atoms", funder.preparefundmodelrelease,
+                                "aa" * 48, dict(base, fee_cap_atoms="0"))
+        assert_raises_rpc_error(-4, "already expired", funder.preparefundmodelrelease,
+                                "aa" * 48, dict(base, refund_height=node.getblockcount()))
+
+        secret = bytes.fromhex("42" * 32)
+        txid, vout, prepared = fund("aa" * 48, base)
+        destination = worker.getnewaddress()
+        claimed = worker.buildhtlcclaim(prepared["descriptor"], {"txid": txid, "vout": vout}, secret.hex(), destination, settlement_fee)
+        assert_equal(claimed["complete"], True)
+        claim_txid = node.sendrawtransaction(claimed["hex"])
+        expectation = dict(prepared, destination=destination, max_settlement_fee_atoms=str(settlement_fee))
+        pending = funder.getmodelfundingsettlement(txid, expectation, claim_txid)
+        assert_equal(pending["settled"], False)
+        assert_equal(pending["paid_atoms"], "0")
+        expectation["settlement_blockhash"] = mine()
+        receipt = funder.getmodelfundingsettlement(txid, expectation, claim_txid)
+        assert_equal(receipt["state"], "CLAIMED")
+        assert_equal(receipt["settled"], True)
+        assert_equal(receipt["paid_atoms"], str(amount - settlement_fee))
+        assert_equal(receipt["fee_atoms"], str(settlement_fee))
+        assert_equal(Decimal(str(worker.getreceivedbyaddress(destination))), Decimal(amount - settlement_fee) / 100_000_000)
+        assert_equal(receipt["release_qualified"], False)
+        receipts.append(receipt)
+        assert_raises_rpc_error(-8, "SETTLEMENT_MISMATCH", funder.getmodelfundingsettlement, txid,
+                                dict(expectation, destination=funder.getnewaddress()), claim_txid)
+        assert_raises_rpc_error(-8, "FEE_CAP", funder.getmodelfundingsettlement, txid,
+                                dict(expectation, max_settlement_fee_atoms=str(settlement_fee - 1)), claim_txid)
+
+        # A confirmed receipt is never permanently latched across a reorg.
+        claim_block = expectation["settlement_blockhash"]
+        node.invalidateblock(claim_block)
+        orphan = funder.getmodelfundingsettlement(txid, expectation, claim_txid)
+        assert_equal(orphan["settled"], False)
+        assert_equal(orphan["paid_atoms"], "0")
+        node.reconsiderblock(claim_block)
+        assert_equal(funder.getmodelfundingsettlement(txid, expectation, claim_txid)["settled"], True)
+
+        # A previously valid unsigned quote cannot mint a new signature after
+        # its refund height passes while the owner is reviewing it.
+        expired = funder.preparefundmodelrelease("cc" * 48,
+            terms(bytes.fromhex("ca" * 32), node.getblockcount() + 1))
+        mine()
+        assert_raises_rpc_error(-4, "already expired", funder.signmodelfunding,
+                                expired["unsigned_hex"], expired)
+
+        # A second, separately funded work objective has a unilateral owner
+        # refund. Recovery receives a complete presigned transaction, never a
+        # key or permission to sign arbitrary future spends.
+        refund_height = node.getblockcount() + 6
+        rtxid, rvout, refund_quote = fund("bb" * 48, terms(bytes.fromhex("a5" * 32), refund_height))
+        refund_destination = funder.getnewaddress()
+        refund = funder.buildhtlcrefund(refund_quote["descriptor"], {"txid": rtxid, "vout": rvout},
+                                       refund_destination, refund_height, settlement_fee)
+        assert refund["complete"], refund
+        early = node.testmempoolaccept([refund["hex"]])
+        assert_equal(early[0]["allowed"], False)
+        assert_raises_rpc_error(-26, None, node.sendrawtransaction, refund["hex"])
+        database = Path(self.options.tmpdir) / "native-refund-watch.sqlite3"
+        tower = watchtower.RefundWatchtower(database, WalletRPCAdapter(funder))
         try:
-            plan = node.preparefundmodelrelease(*args)
-        except JSONRPCException as err:
-            self.log.info(f"preparefundmodelrelease did not return a plan: {err}")
-            plan = None
-
-        self._assert_automatic_spend_zero(node)
-        submitted = self._try_sign_and_send(node, plan) if isinstance(plan, dict) else None
-        if submitted:
-            assert_equal(len(submitted), 64)
-            self.log.info(f"wallet submitted funded objective txid {submitted}")
-            # ASR-PAY-004: one regtest submission does not settle every claimed mode.
-            self.log.info("one regtest submission does not settle every claimed payment mode")
-            self._assert_automatic_spend_zero(node)
-        else:
-            self.log.info("no signable funded-objective plan; unsigned_hex was not broadcast")
-            assert_equal(node.getwalletinfo()["txcount"], txcount_before)
-            self._assert_automatic_spend_zero(node)
+            tower.register(rtxid, refund_quote, refund_destination, refund["hex"], str(settlement_fee), 1)
+            assert_equal(tower.poll()[0]["state"], "WAITING")
+            tower.close()
+            tower = watchtower.RefundWatchtower(database, WalletRPCAdapter(funder))
+            assert_equal(tower.poll()[0]["state"], "WAITING")
+            while node.getblockcount() < refund_height:
+                mine()
+            assert_equal(tower.poll()[0]["state"], "SUBMITTED")
+            assert_equal(tower.poll()[0]["state"], "SUBMITTED")
+            mine()
+            assert_equal(tower.poll()[0]["state"], "CONFIRMED")
+            refund_txid = node.decoderawtransaction(refund["hex"])["txid"]
+            refund_receipt = funder.getmodelfundingsettlement(rtxid,
+                dict(refund_quote, destination=refund_destination, max_settlement_fee_atoms=str(settlement_fee)), refund_txid)
+            assert_equal(refund_receipt["state"], "REFUNDED")
+            assert_equal(refund_receipt["paid_atoms"], str(amount - settlement_fee))
+            assert_equal(Decimal(str(funder.getreceivedbyaddress(refund_destination))), Decimal(amount - settlement_fee) / 100_000_000)
+            receipts.append(refund_receipt)
+        finally:
+            tower.close()
+        assert_equal(node.getmodelnetworkinfo()["automatic_spend_atoms"], 0)
+        (Path(self.options.tmpdir) / "native-payment-evidence.json").write_text(json.dumps({
+            "profile": "isolated-regtest-sha256-htlc", "physical_hosts": 1,
+            "funding_and_claim": "PASS", "funding_and_refund": "PASS", "reorg_revocation": "PASS",
+            "native_fee_caps_and_expiry": "PASS",
+            "presigned_refund_restart": "PASS", "generic_l2_watchtower": "NOT_RUN",
+            "release_qualified": False, "receipts": receipts,
+        }, indent=2) + "\n", encoding="utf-8")
 
 
 if __name__ == "__main__":

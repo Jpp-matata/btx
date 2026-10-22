@@ -655,6 +655,7 @@ void SetupServerArgs(ArgsManager& argsman, bool can_listen_ipc)
     argsman.AddArg("-modelseed=auto|manual|off", "Demand-seed after intentional import/getmodel (default: auto).", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-modelpreserverare", "Fetch qualified under-replicated public models into spare quota (default: 0).", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-modelfollowpeers", "Follow FREE models announced by -modelpeer / addmodelnode / TTL'd PEX into spare quota (default: 1).", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
+    argsman.AddArg("-modellandiscovery", "Discover model transport peers on private LAN interfaces using bounded multicast hints (default: 1 when the model helper listens). Every peer still requires strict PQ1. Never modifies monetary AddrMan.", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-modelpeer=<host:port>", "Model-plane bootstrap contact passed to the owned helper (repeatable). When unset, resolve chainparams ModelDNSSeeds() (empty until a crawl publishes DNS names; no compiled-in host or address). Alias: -modelseednode. Monetary DNS seeds and MDPEERS hints are not dialed.", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-modelseednode=<host:port>", "Alias of -modelpeer.", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-modeluploadlimit=<bps>", "Aggregate model upload cap. auto = governor ceiling. 0 = connection ceilings only.", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
@@ -4318,6 +4319,8 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
         hcfg.seed = args.GetArg("-modelseed", "auto");
         hcfg.preserve_rare = args.GetBoolArg("-modelpreserverare", false);
         hcfg.follow_peers = args.GetBoolArg("-modelfollowpeers", true);
+        // Respect node-wide proxy/private-network posture; an explicit choice can enable LAN discovery.
+        hcfg.lan_discovery = args.GetBoolArg("-modellandiscovery", !args.IsArgSet("-proxy") && !args.IsArgSet("-connect"));
         hcfg.peers = args.GetArgs("-modelpeer");
         {
             const auto aliases = args.GetArgs("-modelseednode");
@@ -4407,18 +4410,17 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
             if (apply_profile) {
                 modelnet::ApplyProfileToLaunchConfig(policy, hcfg);
             }
-            // The default budget is "auto" (up to 512 GiB). Hold it at 0 until
-            // the operator has consented the way the GUI and btx-open ask:
-            // an explicit -modelstorage/-modelprofile, a saved profile, the
-            // first-run consent file, or BTX_MODEL_STORAGE.
+            // A fresh headless node has a bounded 1 GiB free-model cache.
+            // Explicit settings, saved disable choices and exact consent or
+            // environment limits take precedence over that starter budget.
             const std::string requested_storage = hcfg.storage_arg;
             hcfg.storage_arg = modelnet::ResolveHeadlessStorageArg(
                 requested_storage,
                 args.IsArgSet("-modelstorage") || args.IsArgSet("-modelprofile") || apply_profile,
                 modelnet::FirstRunConsentPath(args.GetDataDirNet()));
             if (hcfg.storage_arg != requested_storage) {
-                LogPrintf("model storage: no first-run consent for a payload budget (%s); keeping 0. "
-                          "Set -modelstorage=<size|auto> or record consent to enable it.\n", requested_storage);
+                LogPrintf("model storage: resolved requested budget %s to %s using saved policy or the bounded starter default.\n",
+                          requested_storage, hcfg.storage_arg);
             }
         }
         const std::string modeld_arg = args.IsArgSet("-modelhelper") ? args.GetArg("-modelhelper", "") :

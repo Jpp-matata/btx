@@ -20,6 +20,9 @@ add_library(bitcoin_modelnet STATIC
   piece_store.cpp
   swarm.cpp
   swarm_observer.cpp
+  native_discovery.cpp
+  guard_supervisor.cpp
+  swarm_windows_sandbox.cpp
   swarm_codec.cpp
   swarm_lifecycle.cpp
   swarm_execution.cpp
@@ -2567,7 +2570,7 @@ if(WIN32)
     ${PROJECT_SOURCE_DIR}/src/compat/mingw)
   target_compile_options(bitcoin_modelnet PRIVATE
     "SHELL:-include ${PROJECT_SOURCE_DIR}/src/compat/mingw/posix_extra.h")
-  target_link_libraries(bitcoin_modelnet PUBLIC ws2_32)
+  target_link_libraries(bitcoin_modelnet PUBLIC ws2_32 iphlpapi bcrypt userenv advapi32 ole32)
 endif()
 
 set(_btx_crl12_schema "${PROJECT_SOURCE_DIR}/contrib/modelnet/crl12/schemas/CognitiveReserveLayer.schema.json")
@@ -2601,6 +2604,10 @@ set_target_properties(btx-modelcheck PROPERTIES OUTPUT_NAME btx-modelcheck)
 target_link_libraries(btx-modelcheck core_interface)
 target_link_btx_linux_archive_group(btx-modelcheck bitcoin_modelnet ${BTX_BASE_ARCHIVES})
 
+add_executable(btx-native-qualify native_qualification_main.cpp)
+target_link_libraries(btx-native-qualify core_interface)
+target_link_btx_linux_archive_group(btx-native-qualify bitcoin_modelnet ${BTX_BASE_ARCHIVES})
+
 add_executable(btx-open ../btx-open.cpp)
 set_target_properties(btx-open PROPERTIES OUTPUT_NAME btx-open)
 target_link_libraries(btx-open core_interface)
@@ -2626,4 +2633,4 @@ set_target_properties(btx-hosted PROPERTIES OUTPUT_NAME btx-hosted)
 target_link_libraries(btx-hosted core_interface)
 target_link_btx_linux_archive_group(btx-hosted bitcoin_modelnet ${BTX_BASE_ARCHIVES})
 
-install(TARGETS btx-modeld btx-modelcheck btx-open btx-capabilityd btx-capability btx-hcpd btx-hosted RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(TARGETS btx-modeld btx-modelcheck btx-native-qualify btx-open btx-capabilityd btx-capability btx-hcpd btx-hosted RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})

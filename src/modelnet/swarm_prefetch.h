@@ -11,7 +11,7 @@
 namespace modelnet {
 
 // A KV prefetch request is held and moves no bytes.
-struct SwarmPrefetch {
+struct SwarmPrefetchRequest {
     std::string page_id;
     bool want_prefetch;
 };
@@ -22,7 +22,7 @@ struct SwarmPrefetchResult {
     int64_t bytes_moved;
 };
 
-SwarmPrefetchResult SwarmNotePrefetch(const SwarmPrefetch& page, std::string& err);
+SwarmPrefetchResult SwarmNotePrefetch(const SwarmPrefetchRequest& page, std::string& err);
 
 } // namespace modelnet
 

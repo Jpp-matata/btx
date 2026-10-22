@@ -13,7 +13,7 @@ BOOST_FIXTURE_TEST_SUITE(swarm_kvpage_tests, BasicTestingSetup)
 
 BOOST_AUTO_TEST_CASE(empty_page)
 {
-    modelnet::SwarmKvPage kv;
+    modelnet::SwarmKvPageRegistry kv;
     std::string err;
     BOOST_CHECK(!kv.Share("", "fam-a", "fam-b", true, err));
     BOOST_CHECK_EQUAL(err, "PAGE");
@@ -23,7 +23,7 @@ BOOST_AUTO_TEST_CASE(empty_page)
 
 BOOST_AUTO_TEST_CASE(same_family_not_compat)
 {
-    modelnet::SwarmKvPage kv;
+    modelnet::SwarmKvPageRegistry kv;
     std::string err;
     BOOST_CHECK(!kv.Share("page-1", "fam", "fam", true, err));
     BOOST_CHECK_EQUAL(err, "NOT_COMPAT");
@@ -33,7 +33,7 @@ BOOST_AUTO_TEST_CASE(same_family_not_compat)
 
 BOOST_AUTO_TEST_CASE(compatible_false)
 {
-    modelnet::SwarmKvPage kv;
+    modelnet::SwarmKvPageRegistry kv;
     std::string err;
     BOOST_CHECK(!kv.Share("page-1", "fam-a", "fam-b", false, err));
     BOOST_CHECK_EQUAL(err, "NOT_COMPAT");
@@ -43,7 +43,7 @@ BOOST_AUTO_TEST_CASE(compatible_false)
 
 BOOST_AUTO_TEST_CASE(share_then_replay)
 {
-    modelnet::SwarmKvPage kv;
+    modelnet::SwarmKvPageRegistry kv;
     std::string err = "stale";
     BOOST_REQUIRE(kv.Share("page-1", "fam-a", "fam-b", true, err));
     BOOST_CHECK(err.empty());

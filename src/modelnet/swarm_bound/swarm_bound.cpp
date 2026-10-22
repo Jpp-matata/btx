@@ -61,7 +61,7 @@ bool TrainOnce(DtDense& dense, std::string& err)
 
 } // namespace
 
-bool SwarmBound::Once(std::string& err)
+bool SwarmBoundProbe::Once(std::string& err)
 {
     if (!PullMemory(m_decode, err)) return false;
     m_remote = NIFDT_ENGINE_ABSENT;
@@ -97,7 +97,7 @@ bool SwarmBound::Once(std::string& err)
     return m_roles.hosts() == static_cast<int64_t>(1) && !m_decode.launched() && !m_decode.gpu();
 }
 
-bool SwarmBound::Pass(int64_t now_ms, std::string& err)
+bool SwarmBoundProbe::Pass(int64_t now_ms, std::string& err)
 {
     if (m_ticks < INT64_MAX) ++m_ticks;
     m_now_ms = now_ms;
@@ -111,13 +111,13 @@ bool SwarmBound::Pass(int64_t now_ms, std::string& err)
     return true;
 }
 
-bool SwarmBound::Spend(std::string& err)
+bool SwarmBoundProbe::Spend(std::string& err)
 {
     err = NIFDT_AUTOMATIC_SPEND;
     return false;
 }
 
-bool SwarmBound::Release(std::string& err)
+bool SwarmBoundProbe::Release(std::string& err)
 {
     err = NIFDT_UNQUALIFIED;
     return false;

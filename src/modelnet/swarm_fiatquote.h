@@ -19,7 +19,7 @@ namespace modelnet {
  * false on every path. A fiat quote is not a BTX balance. No hostnames
  * or IPs are used.
  */
-struct SwarmFiatQuote {
+struct SwarmFiatQuoteRequest {
     std::string quote_id;
     std::string currency;
     int64_t atoms{0};
@@ -44,7 +44,7 @@ struct SwarmFiatQuoteResult {
  * balance_credited stays false on every path. Nothing is credited and
  * nothing is broadcast.
  */
-SwarmFiatQuoteResult SwarmNoteFiatQuote(const SwarmFiatQuote& quote, std::string& err);
+SwarmFiatQuoteResult SwarmNoteFiatQuote(const SwarmFiatQuoteRequest& quote, std::string& err);
 
 } // namespace modelnet
 

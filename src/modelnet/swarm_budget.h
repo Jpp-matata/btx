@@ -17,7 +17,7 @@ namespace modelnet {
  * rejects further spend. This ledger does not broadcast, spawn a child
  * process, open a network connection, or move BTX atoms.
  */
-class SwarmBudget {
+class SwarmResearchBudget {
 public:
     /**
      * An empty experiment is EXPERIMENT. slots < 1 is BUDGET. A second Open

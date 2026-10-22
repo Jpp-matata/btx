@@ -3,13 +3,13 @@
     "id": "DS-PAY-002",
     "final_acceptance": "DEFINED_NEEDS_PROCESS",
     "native_status": "NOT_RUN_NATIVE",
-    "evidence": "RecordFunding records refund and payout paths and does not settle. The objective is stored only when both paths are present, SwarmPayReg::Open and SwarmPayReg::Claim record that open and claim, settled() stays false, and atoms moved stay 0."
+    "evidence": "RecordFunding remains a record. ObserveNative/getmodelfundingsettlement validate exact native SHA256 HTLC funding and spending bytes, destination, fee, confirmations and reorg revocation. The isolated one-host feature_swarm_funded_objective.py profile passed native execution during package development. The all-mode release row remains unqualified and each integrated candidate must retain its own native evidence."
   },
   {
     "id": "DS-PAY-003",
     "final_acceptance": "UNQUALIFIED",
     "native_status": "NOT_RUN_NATIVE",
-    "evidence": "ProveExit stays unqualified when an exit flag is absent and when unilateral exit, expiry, fee, stale state, and watchtower are all present. This module does not prove a watchtower."
+    "evidence": "Boolean ProveExit remains unqualified. The persistent owner-presigned SHA256 HTLC refund tool passed native early-refund rejection, fee/expiry, restart and confirmed owner-refund execution in feature_swarm_funded_objective.py. Generic revocable L2 unilateral/stale-state/watchtower qualification remains open; this bounded profile does not close the all-mode release row."
   },
   {
     "id": "DS-OPS-006",

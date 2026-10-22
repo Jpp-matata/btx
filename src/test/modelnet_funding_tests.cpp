@@ -115,6 +115,48 @@ BOOST_AUTO_TEST_CASE(auto_pay_option_refused)
     BOOST_CHECK(err.find("auto_pay is refused") != std::string::npos);
 }
 
+BOOST_AUTO_TEST_CASE(canonical_atom_inputs_and_fee_ceiling)
+{
+    std::string err;
+    int64_t amount = -1;
+    for (const std::string& text : {"0", "1", "10000000"}) {
+        BOOST_REQUIRE(wallet::ParseFundingAtoms(UniValue(text), amount, err));
+        BOOST_CHECK_EQUAL(std::to_string(amount), text);
+    }
+    for (const std::string& text : {"", "01", "+1", "-1", "1.0", "1e3", " 1", "1 ", "9223372036854775808"}) {
+        BOOST_CHECK(!wallet::ParseFundingAtoms(UniValue(text), amount, err));
+    }
+    UniValue options(UniValue::VOBJ);
+    options.pushKV("amount_atoms", "10000000");
+    options.pushKV("fee_cap_atoms", "0");
+    wallet::FrozenFundingQuote q;
+    BOOST_REQUIRE(wallet::ParseFrozenFundingQuote(options, q, err));
+    BOOST_CHECK_EQUAL(q.amount_atoms, 10000000);
+    BOOST_CHECK_EQUAL(q.fee_cap_atoms, 0);
+    BOOST_CHECK(q.fee_cap_set);
+    options.pushKV("max_atoms", "9999999");
+    BOOST_CHECK(!wallet::ParseFrozenFundingQuote(options, q, err));
+}
+
+BOOST_AUTO_TEST_CASE(auto_spend_aliases_cannot_hide_each_other)
+{
+    std::string err;
+    for (const std::string& name : {"auto_pay", "autopay", "automatic_spend", "automatic_spend_atoms"}) {
+        for (const std::string& value : {"true", "1", "00", "0.0", "-1", "no"}) {
+            UniValue options(UniValue::VOBJ);
+            options.pushKV("auto_pay", false);
+            options.pushKV(name, value);
+            BOOST_CHECK(!wallet::RejectAutoPay(options, err));
+        }
+    }
+    UniValue options(UniValue::VOBJ);
+    options.pushKV("auto_pay", false);
+    options.pushKV("automatic_spend_atoms", "0");
+    BOOST_CHECK(wallet::RejectAutoPay(options, err));
+    options.pushKV("autopay", true);
+    BOOST_CHECK(!wallet::RejectAutoPay(options, err));
+}
+
 BOOST_AUTO_TEST_CASE(forbidden_htlc_sha256_tx)
 {
     UniValue opts(UniValue::VOBJ);

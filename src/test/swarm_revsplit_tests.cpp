@@ -12,9 +12,9 @@
 
 BOOST_FIXTURE_TEST_SUITE(swarm_revsplit_tests, BasicTestingSetup)
 
-static modelnet::SwarmRevenueSplit NotedSplit()
+static modelnet::SwarmRevenueSplitRequest NotedSplit()
 {
-    modelnet::SwarmRevenueSplit split;
+    modelnet::SwarmRevenueSplitRequest split;
     split.pool_id = "pool-local";
     split.gross = 10000;
     split.sponsor_ppm = 700000;
@@ -45,7 +45,7 @@ static void ExpectIllustrationAtoms(const modelnet::SwarmRevenueSplitResult& res
 
 BOOST_AUTO_TEST_CASE(empty_pool_id_is_split)
 {
-    modelnet::SwarmRevenueSplit split = NotedSplit();
+    modelnet::SwarmRevenueSplitRequest split = NotedSplit();
     split.pool_id.clear();
     split.want_pay = true;
     std::string err = "prior";
@@ -58,7 +58,7 @@ BOOST_AUTO_TEST_CASE(empty_pool_id_is_split)
 
 BOOST_AUTO_TEST_CASE(negative_gross_is_split)
 {
-    modelnet::SwarmRevenueSplit split = NotedSplit();
+    modelnet::SwarmRevenueSplitRequest split = NotedSplit();
     split.gross = -1;
     split.want_pay = true;
     std::string err = "prior";
@@ -72,7 +72,7 @@ BOOST_AUTO_TEST_CASE(negative_gross_is_split)
 BOOST_AUTO_TEST_CASE(negative_ppm_is_split)
 {
     std::string err = "prior";
-    modelnet::SwarmRevenueSplit sponsor = NotedSplit();
+    modelnet::SwarmRevenueSplitRequest sponsor = NotedSplit();
     sponsor.sponsor_ppm = -1;
     sponsor.want_pay = true;
     const modelnet::SwarmRevenueSplitResult sponsor_result =
@@ -82,7 +82,7 @@ BOOST_AUTO_TEST_CASE(negative_ppm_is_split)
     BOOST_CHECK_EQUAL(sponsor_result.code, "SPLIT");
     BOOST_CHECK_EQUAL(err, "SPLIT");
 
-    modelnet::SwarmRevenueSplit worker = NotedSplit();
+    modelnet::SwarmRevenueSplitRequest worker = NotedSplit();
     worker.worker_ppm = -1;
     worker.want_pay = true;
     const modelnet::SwarmRevenueSplitResult worker_result =
@@ -92,7 +92,7 @@ BOOST_AUTO_TEST_CASE(negative_ppm_is_split)
     BOOST_CHECK_EQUAL(worker_result.code, "SPLIT");
     BOOST_CHECK_EQUAL(err, "SPLIT");
 
-    modelnet::SwarmRevenueSplit reserve = NotedSplit();
+    modelnet::SwarmRevenueSplitRequest reserve = NotedSplit();
     reserve.reserve_ppm = -1;
     reserve.want_pay = true;
     const modelnet::SwarmRevenueSplitResult reserve_result =
@@ -105,7 +105,7 @@ BOOST_AUTO_TEST_CASE(negative_ppm_is_split)
 
 BOOST_AUTO_TEST_CASE(ppm_overflow_is_split)
 {
-    modelnet::SwarmRevenueSplit split = NotedSplit();
+    modelnet::SwarmRevenueSplitRequest split = NotedSplit();
     split.gross = 10000;
     split.sponsor_ppm = INT64_MAX;
     split.worker_ppm = 1;
@@ -121,7 +121,7 @@ BOOST_AUTO_TEST_CASE(ppm_overflow_is_split)
 
 BOOST_AUTO_TEST_CASE(split_wins_over_sum_and_want_pay)
 {
-    modelnet::SwarmRevenueSplit split = NotedSplit();
+    modelnet::SwarmRevenueSplitRequest split = NotedSplit();
     split.pool_id.clear();
     split.gross = -5;
     split.sponsor_ppm = 1;
@@ -139,7 +139,7 @@ BOOST_AUTO_TEST_CASE(split_wins_over_sum_and_want_pay)
 BOOST_AUTO_TEST_CASE(ppm_sum_other_than_1000000_is_sum)
 {
     std::string err = "prior";
-    modelnet::SwarmRevenueSplit short_sum = NotedSplit();
+    modelnet::SwarmRevenueSplitRequest short_sum = NotedSplit();
     short_sum.sponsor_ppm = 700000;
     short_sum.worker_ppm = 200000;
     short_sum.reserve_ppm = 99999;
@@ -151,7 +151,7 @@ BOOST_AUTO_TEST_CASE(ppm_sum_other_than_1000000_is_sum)
     BOOST_CHECK_EQUAL(short_result.code, "SUM");
     BOOST_CHECK_EQUAL(err, "SUM");
 
-    modelnet::SwarmRevenueSplit zeros = NotedSplit();
+    modelnet::SwarmRevenueSplitRequest zeros = NotedSplit();
     zeros.sponsor_ppm = 0;
     zeros.worker_ppm = 0;
     zeros.reserve_ppm = 0;
@@ -163,7 +163,7 @@ BOOST_AUTO_TEST_CASE(ppm_sum_other_than_1000000_is_sum)
     BOOST_CHECK_EQUAL(zero_result.code, "SUM");
     BOOST_CHECK_EQUAL(err, "SUM");
 
-    modelnet::SwarmRevenueSplit wide = NotedSplit();
+    modelnet::SwarmRevenueSplitRequest wide = NotedSplit();
     wide.sponsor_ppm = INT64_MAX;
     wide.worker_ppm = 0;
     wide.reserve_ppm = 0;
@@ -178,7 +178,7 @@ BOOST_AUTO_TEST_CASE(ppm_sum_other_than_1000000_is_sum)
 
 BOOST_AUTO_TEST_CASE(sum_wins_when_want_pay_is_true)
 {
-    modelnet::SwarmRevenueSplit split = NotedSplit();
+    modelnet::SwarmRevenueSplitRequest split = NotedSplit();
     split.gross = 9999;
     split.sponsor_ppm = 1;
     split.worker_ppm = 1;
@@ -195,7 +195,7 @@ BOOST_AUTO_TEST_CASE(sum_wins_when_want_pay_is_true)
 BOOST_AUTO_TEST_CASE(other_splits_are_illustration)
 {
     std::string err = "prior";
-    modelnet::SwarmRevenueSplit other_gross = NotedSplit();
+    modelnet::SwarmRevenueSplitRequest other_gross = NotedSplit();
     other_gross.gross = 10001;
     const modelnet::SwarmRevenueSplitResult gross =
         modelnet::SwarmNoteRevenueSplit(other_gross, err);
@@ -204,7 +204,7 @@ BOOST_AUTO_TEST_CASE(other_splits_are_illustration)
     BOOST_CHECK_EQUAL(gross.code, "ILLUSTRATION");
     BOOST_CHECK_EQUAL(err, "ILLUSTRATION");
 
-    modelnet::SwarmRevenueSplit other_ppm = NotedSplit();
+    modelnet::SwarmRevenueSplitRequest other_ppm = NotedSplit();
     other_ppm.sponsor_ppm = 500000;
     other_ppm.worker_ppm = 500000;
     other_ppm.reserve_ppm = 0;
@@ -214,7 +214,7 @@ BOOST_AUTO_TEST_CASE(other_splits_are_illustration)
     BOOST_CHECK_EQUAL(ppm.code, "ILLUSTRATION");
     BOOST_CHECK_EQUAL(err, "ILLUSTRATION");
 
-    modelnet::SwarmRevenueSplit zero_gross = NotedSplit();
+    modelnet::SwarmRevenueSplitRequest zero_gross = NotedSplit();
     zero_gross.gross = 0;
     const modelnet::SwarmRevenueSplitResult zero = modelnet::SwarmNoteRevenueSplit(zero_gross, err);
     ExpectPaidStaysFalse(zero);
@@ -225,7 +225,7 @@ BOOST_AUTO_TEST_CASE(other_splits_are_illustration)
 
 BOOST_AUTO_TEST_CASE(illustration_wins_when_want_pay_is_true)
 {
-    modelnet::SwarmRevenueSplit split = NotedSplit();
+    modelnet::SwarmRevenueSplitRequest split = NotedSplit();
     split.gross = 10000;
     split.sponsor_ppm = 700000;
     split.worker_ppm = 200001;
@@ -241,7 +241,7 @@ BOOST_AUTO_TEST_CASE(illustration_wins_when_want_pay_is_true)
 
 BOOST_AUTO_TEST_CASE(want_pay_on_the_known_illustration_is_held)
 {
-    modelnet::SwarmRevenueSplit split = NotedSplit();
+    modelnet::SwarmRevenueSplitRequest split = NotedSplit();
     split.want_pay = true;
     std::string err = "prior";
     const modelnet::SwarmRevenueSplitResult result = modelnet::SwarmNoteRevenueSplit(split, err);
@@ -253,7 +253,7 @@ BOOST_AUTO_TEST_CASE(want_pay_on_the_known_illustration_is_held)
 
 BOOST_AUTO_TEST_CASE(known_illustration_is_noted)
 {
-    modelnet::SwarmRevenueSplit split = NotedSplit();
+    modelnet::SwarmRevenueSplitRequest split = NotedSplit();
     std::string err = "prior";
     const modelnet::SwarmRevenueSplitResult result = modelnet::SwarmNoteRevenueSplit(split, err);
     ExpectPaidStaysFalse(result);

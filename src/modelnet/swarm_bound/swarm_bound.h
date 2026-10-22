@@ -27,7 +27,7 @@ namespace modelnet {
  * hosts() stays 1. passed(), gpu_passed(), and windows_passed() stay false.
  * Spend returns NIFDT_AUTOMATIC_SPEND. No child process is started.
  */
-class SwarmBound {
+class SwarmBoundProbe {
 public:
     bool Pass(int64_t now_ms, std::string& err);
     bool Spend(std::string& err);

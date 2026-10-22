@@ -1,5 +1,7 @@
 # BTX Native Model Network
 
+**Candidate and evidence:** this source tree is **0.35.0rc1** (`CLIENT_VERSION_IS_RELEASE=true`, `CLIENT_VERSION_RC=1`); the last shipping tag recorded here is **v0.34.15**. A release-build flag is not native qualification. See [native participation and release evidence](swarm/16_NATIVE_EXECUTION_AND_RELEASE_EVIDENCE.md) for the current defaults, RPC observations, complete helper build, and remaining hardware/deployment gates. Older version-labelled sections below describe their historical surface introduction.
+
 **Status:** this tree is **0.35.0rc1**. `btxd -version` prints `v0.35.0rc1`.
 It is not the shipping tag `v0.35.0`. The last shipping tag remains
 **v0.34.15**. The Native Model Network shipped in 0.34.7; the pages below
@@ -60,9 +62,10 @@ authority. D01: local use is the end of acquisition; paid/remote inference
 is removed from the product language, not deferred.
 
 This tree reports partial features through a **capabilities** object. Those
-bits are **not** a substitute for `planning/acceptance-matrix.csv`. That file
-is the packaged production bar: **PASS** only where this tree has a Boost
-test or e2e script. Qt Models-first pages ship in `src/qt` (`btx:`
+bits are **not** a substitute for `planning/acceptance-matrix.csv` or the
+sealed native acceptance catalogue. Existing Boost/e2e results describe the
+scope actually executed; source files and local process tests do not qualify
+physical multi-host, GPU, WAN, or platform deployment profiles. Qt Models-first pages ship in `src/qt` (`btx:`
 never enters the payment parser). `btx-qt` needs Qt 6 headers in the same
 compile tree. CLI / `btx-modeld` / `btx-open` remain the no-Qt surfaces.
 
@@ -79,29 +82,27 @@ Complete format vectors are in the spec package `examples/resource-uris.txt`.
 | Router operator | Introduce hosts; resolve signed records | Monetary validation or payload storage |
 | Commercial mirror | Optional paid delivery where free supply is insufficient | Influence over free ranking, consensus, or collection policy |
 
-Fresh-install defaults: payload storage **0**, automatic spending **0**,
-runtime execution **off**. Unsolicited fetch of arbitrary advertised models
-is **off**. After the operator allocates a storage budget, **demand-seed is
-the default** (`-modelseed=auto`): an intentional import or `getmodel`
-retains and re-advertises that qualified public model inside the budget.
-Preserve-rare (fetch under-replicated models into spare space) is explicit.
-See [propagation.md](propagation.md).
-
-Headless `btxd` honours the same first-run gate as `btx-qt` and `btx-open`:
-the payload budget stays **0** until the operator consents, either with an
-explicit `-modelstorage=<size|auto>` (or `-modelprofile`), a saved profile, the
-first-run consent file (`<datadir>/modelnet/firstrun.json`), or a positive
-`BTX_MODEL_STORAGE`. Without one of those the log says so and the budget is 0.
+Fresh headless `btxd` defaults to a bounded **1 GiB** payload budget,
+automatic spending **0**, and runtime execution **off**. Explicit
+`-modelstorage=0`, a saved disable decision, and zero or malformed
+`BTX_MODEL_STORAGE` keep storage disabled. An explicit positive budget or
+explicit `auto` retains its configured behavior. GUI consent handling remains
+separate. **Demand-seed** remains the default (`-modelseed=auto`): verified
+complete public models are served inside the budget. Authenticated native
+LAN contacts can introduce a first free model; the helper verifies its bytes
+before registering observer membership. Preserve-rare remains explicit.
 
 ## Finding a first peer
 
-There is no compiled-in model contact: `ModelDNSSeeds()` is empty until a
-crawl publishes DNS names, and MDPEERS hints from monetary peers are consumed
-as hints and never dialed. A new node therefore needs one `-modelpeer=<host:port>`
-(alias `-modelseednode`) from an operator it chooses; nothing in the protocol
-treats any contact as canonical, and a peer count is only this node's
-observation. Which contacts, if any, ship as defaults is a community decision,
-not something this tree hard-codes.
+Native IPv4 LAN discovery uses multicast `239.192.0.35:29448` with TTL 1 on
+private interfaces. Each hint must complete strict PQ1 and a matching-network
+availability exchange before it becomes an authenticated observation. Read
+`getmodelnetworkinfo.native_participation`, including `lan_error` when no
+eligible private interface exists. A loopback-only test has no physical LAN
+qualification. `ModelDNSSeeds()` remains empty: isolated WAN machines still
+need an enrolled operator `-modelpeer=<host:port>` (alias `-modelseednode`) or
+an independently operated bootstrap deployment. No public seed service is
+created by source code or by a peer counter.
 
 ## Architecture
 
@@ -109,6 +110,10 @@ not something this tree hard-codes.
 catalog, piece, and PQ1 helper. It is separate from the swarm thread. The
 swarm control plane is a thread inside `btxd`. `btxd` starts that thread
 when `-modelnet` is on. `btxd` does not start `btx-swarmd` or `btx-paynetd`.
+The observer also supervises `btx-guardd` over private inherited stdio;
+`modeldir/swarm/guard-process.json` reports its actual PID, readiness,
+restart count, and error. `execution_authorized` remains false until a
+separate owner-authorized operation is supplied.
 
 ```
   researcher / CLI / btx-qt
@@ -269,7 +274,7 @@ In-tree capability bits are not CSV PASS and not a B0 rewrite. The bar is
 | [recovery.md](recovery.md) | DOC-03 helper / campaign / HTLC recovery |
 | [agent-recipes.md](agent-recipes.md) | Agent door (never spend; no remote inference) |
 | [capability-evidence.md](capability-evidence.md) | **0.34.9-dev** local run/capability evidence; not vendor naming |
-| [storage-backends.md](storage-backends.md) | Piece vs cloud object; MinIO/cloud RPCs exist; R2 AUTO; this tree `IS_RELEASE=false`; live R2 WAN **HONEST_NOT_RUN** |
+| [storage-backends.md](storage-backends.md) | Piece vs cloud object; MinIO/cloud RPCs exist; R2 AUTO; this candidate `IS_RELEASE=true`, release evidence separate; live R2 WAN **HONEST_NOT_RUN** |
 | [cloud-seeding.md](cloud-seeding.md) | Origin as bootstrap, not billing model; fail closed |
 | [events.md](events.md) | Local event journal |
 | [watches.md](watches.md) | Filesystem `-modelwatch` vs publisher watch; `.btx` drop retrieves |

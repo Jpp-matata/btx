@@ -1,5 +1,7 @@
 # First run — host, seed, search, share
 
+**Candidate and evidence:** this source tree is **0.35.0rc1** (`CLIENT_VERSION_IS_RELEASE=true`, `CLIENT_VERSION_RC=1`); the last shipping tag recorded here is **v0.34.15**. A release-build flag is not native qualification. See [native participation and release evidence](swarm/16_NATIVE_EXECUTION_AND_RELEASE_EVIDENCE.md) for the current defaults, RPC observations, complete helper build, and remaining hardware/deployment gates. Older version-labelled sections below describe their historical surface introduction.
+
 This is the **people** walkthrough. You do not need a wallet, coins, mining,
 or a chain sync to host a local model and share its `btx://` URI. Inference
 stays **local after acquire**. `generatemodel` is the in-tree one-shot when
@@ -34,6 +36,15 @@ The swarm control plane is a thread in `btxd`. `src/init.cpp` calls
 (default 1). The observer is a thread in `btxd`. `-modelnet=0` disables it.
 Monetary consensus continues if the swarm pass fails. `btxd` does not start
 `btx-swarmd` or `btx-paynetd`.
+
+The observer starts and supervises the packaged `btx-guardd` using private
+inherited stdio. Its readiness, PID, restart count and error are written to
+`modeldir/swarm/guard-process.json`; readiness alone grants no execution.
+On a private IPv4 interface the helper sends bounded LAN discovery hints,
+authenticates contacts with strict PQ1, and can acquire verified free public
+model bytes inside its storage budget. Read the measured
+`getmodelnetworkinfo.native_participation` object. The fresh headless budget
+is 1 GiB; explicit zero and saved disable decisions remain disabled.
 
 `SwarmObserveCatalog` reconciles verified, explicitly complete catalog entries
 into `modeldir/swarm/observers.json`, removing entries that become ineligible or
@@ -177,7 +188,8 @@ You do not call `createmodelidentity` first.
 Pass `{"publish":false}` only when you want a local pin **without** a signed
 search card. Pin stays on unless you pass `{"pin":false}`. Unix RPC waits up
 to **24h** for `importmodel` / `hostmodel` / `getmodel` / `waitformodelevent` /
-`scanmodelwatch` / `loadmodel` / `generatemodel` so a large import or generate
+`scanmodelwatch` / `executemodelimport` / `importbtxpackage` /
+`exportmodelpath` / `loadmodel` / `unloadmodel` / `generatemodel` so a large import or generate
 is not killed by the 30s PQ1 idle window.
 Ordinary helper methods use a **120s** unix reply timeout.
 
@@ -367,7 +379,7 @@ Empty `-modelwatch` is off. The doctor reports the configured path.
 
 This **filesystem drop folder is not a publisher watch**. Publisher /
 collection follow, event journal, and optional cloud backing exist in this
-**0.34.9-dev** helper (`CLIENT_VERSION_IS_RELEASE=false`). FakeS3 is
+**0.35.0rc1** helper (this surface originated in 0.34.9-dev; native release evidence remains separate). FakeS3 is
 unit-tested; live HTTPS/R2 is **NOT_RUN** (OpenSSL HTTPS transport is
 compiled; live R2 WAN is not PASS). SCALE huge / 400GiB body stream is
 **NOT_RUN**. The CLI wrapper still fails closed if an older helper has no
@@ -475,7 +487,7 @@ the agent door (stdout only). People keep stderr hints without `--json`.
 R2 AUTO is `SOURCE_FILES` + `STREAM_FILE`. Pieces remain the swarm unit.
 FakeS3 is unit-tested. Live HTTPS/R2 is **NOT_RUN** (transport compiled; WAN
 not PASS). SCALE huge is **NOT_RUN**. GUI watches are 0.34.8-dev source
-(`BUILD_GUI=OFF`). `CLIENT_VERSION_IS_RELEASE=false`. HF/Xet/torrent adapters
+(`BUILD_GUI=OFF`). `CLIENT_VERSION_IS_RELEASE=true` for the 0.35.0rc1 candidate (native release evidence remains separate). HF/Xet/torrent adapters
 are local-native (pin/SSRF/CAS/infohash). They do **not** download from the
 public internet in this tree. See
 [storage-backends.md](storage-backends.md) and

@@ -106,6 +106,9 @@ BOOST_AUTO_TEST_CASE(pause_leaves_process_absent)
     BOOST_CHECK_EQUAL(eng.bytes_moved(), static_cast<int64_t>(0));
 
     eng.Resume();
+    BOOST_CHECK(!eng.Execute(permit.secret, now, err));
+    BOOST_CHECK_EQUAL(err, "BTX035_REVOKED");
+    BOOST_REQUIRE(eng.Prepare("observe", "fp", static_cast<uint64_t>(2), now, permit, err));
     BOOST_CHECK(eng.Execute(permit.secret, now, err));
     BOOST_CHECK(err.empty());
     BOOST_CHECK(!eng.Execute(permit.secret, now, err));

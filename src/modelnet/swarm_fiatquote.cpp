@@ -8,7 +8,7 @@
 
 namespace modelnet {
 
-SwarmFiatQuoteResult SwarmNoteFiatQuote(const SwarmFiatQuote& quote, std::string& err)
+SwarmFiatQuoteResult SwarmNoteFiatQuote(const SwarmFiatQuoteRequest& quote, std::string& err)
 {
     SwarmFiatQuoteResult result;
     result.balance_credited = false;

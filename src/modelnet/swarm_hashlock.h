@@ -20,7 +20,7 @@ namespace modelnet {
  * This note does not qualify a route. qualified stays false on every path.
  * Nothing is routed and nothing is broadcast. No hostnames or IPs are used.
  */
-struct SwarmHashlock {
+struct SwarmHashlockRequest {
     std::string invoice_id;
     int64_t hash_len{0};
     int64_t preimage_len{0};
@@ -47,7 +47,7 @@ struct SwarmHashlockResult {
  * Otherwise the note is NOTED and err is cleared.
  * qualified stays false. Nothing is routed and nothing is broadcast.
  */
-SwarmHashlockResult SwarmNoteHashlock(const SwarmHashlock& hashlock, std::string& err);
+SwarmHashlockResult SwarmNoteHashlock(const SwarmHashlockRequest& hashlock, std::string& err);
 
 } // namespace modelnet
 

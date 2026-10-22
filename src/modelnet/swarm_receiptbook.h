@@ -10,7 +10,7 @@
 
 namespace modelnet {
 
-struct SwarmReceiptBook {
+struct SwarmReceiptRequest {
     std::string receipt_id;
     bool provisional{false};
     bool want_book{false};
@@ -22,7 +22,7 @@ struct SwarmReceiptBookResult {
     int64_t atoms{0};
 };
 
-SwarmReceiptBookResult SwarmNoteReceipt(const SwarmReceiptBook& receipt, std::string& err);
+SwarmReceiptBookResult SwarmNoteReceipt(const SwarmReceiptRequest& receipt, std::string& err);
 
 } // namespace modelnet
 

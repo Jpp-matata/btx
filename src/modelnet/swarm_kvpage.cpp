@@ -6,7 +6,7 @@
 
 namespace modelnet {
 
-bool SwarmKvPage::Share(const std::string& page, const std::string& family_a, const std::string& family_b, bool compatible, std::string& err)
+bool SwarmKvPageRegistry::Share(const std::string& page, const std::string& family_a, const std::string& family_b, bool compatible, std::string& err)
 {
     if (page.empty() || family_a.empty() || family_b.empty()) {
         err = "PAGE";
@@ -25,12 +25,12 @@ bool SwarmKvPage::Share(const std::string& page, const std::string& family_a, co
     return true;
 }
 
-bool SwarmKvPage::shared(const std::string& page) const
+bool SwarmKvPageRegistry::shared(const std::string& page) const
 {
     return pages.count(page) != 0;
 }
 
-bool SwarmKvPage::bytes_moved() const
+bool SwarmKvPageRegistry::bytes_moved() const
 {
     return false;
 }

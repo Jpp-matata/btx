@@ -15,7 +15,7 @@ constexpr int64_t kIllustrationWorkerPpm = 200000;
 constexpr int64_t kIllustrationReservePpm = 100000;
 constexpr int64_t kPpmTotal = 1000000;
 
-bool KnownIllustration(const SwarmRevenueSplit& split)
+bool KnownIllustration(const SwarmRevenueSplitRequest& split)
 {
     return split.gross == kIllustrationGross &&
            split.sponsor_ppm == kIllustrationSponsorPpm &&
@@ -49,7 +49,7 @@ SwarmRevenueSplitResult Record(const std::string& code, std::string& err)
 
 } // namespace
 
-SwarmRevenueSplitResult SwarmNoteRevenueSplit(const SwarmRevenueSplit& split, std::string& err)
+SwarmRevenueSplitResult SwarmNoteRevenueSplit(const SwarmRevenueSplitRequest& split, std::string& err)
 {
     if (split.pool_id.empty() || split.gross < 0 || split.sponsor_ppm < 0 || split.worker_ppm < 0 ||
         split.reserve_ppm < 0) {

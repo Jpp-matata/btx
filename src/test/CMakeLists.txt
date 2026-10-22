@@ -601,6 +601,7 @@ if(WITH_MODELNET)
     modelnet_035_complete_tests.cpp
     modelnet_035_disk_tests.cpp
     swarm_observer_tests.cpp
+    native_discovery_tests.cpp
     swarm_mesh_tests.cpp
     swarm_records_tests.cpp
     swarm_frontier_tests.cpp

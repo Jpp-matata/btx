@@ -35,15 +35,31 @@ A model is a persistent evolutionary lineage, not merely a download. The product
 
 ## Current behavior
 
-Modelnet defaults on. `src/init.cpp` starts the supervised `btx-modeld` and then `modelnet::StartSwarmObserver` in the `btxd` process. That thread is the default swarm membership. `-modelnet=0` is the off switch. A failure is logged and the monetary node continues. Shutdown joins the thread. There is no second swarm binary and no extra swarm startup flag. `btx-swarmd` and `btx-paynetd` are not used, because a separate daemon would make participation something the operator has to turn on. The reference Python package is not the control plane.
+Modelnet defaults on. `src/init.cpp` starts the supervised `btx-modeld` and then `modelnet::StartSwarmObserver` in the `btxd` process. That thread is the default swarm membership. `-modelnet=0` is the off switch. A failure is logged and the monetary node continues. Shutdown joins the thread. There is no extra swarm startup flag; model and guard helpers are supervised by the node. `btx-swarmd` and `btx-paynetd` are not used, because a separate daemon would make participation something the operator has to turn on. The reference Python package is not the control plane.
 
-About every two seconds the thread writes the catalog to `observers.json` (observers only; no grant, seed, or spend), refreshes the local mesh, integrates the catalog, calls `SwarmFormPlane`, and calls `SwarmPublishLive`. `FormationPlane` does not exec a sidecar, open a socket, add a DNS seed, broadcast, or spend.
+About every two seconds the thread checks catalog generations, reconciles changed observer/contribution views, refreshes expiring peer observations and publishes eligible live state. Observer membership grants no computation or spending authority. `FormationPlane` does not exec a sidecar, open a socket, add a DNS seed, broadcast, or spend.
 
-The same wake calls `NifObserve::Tick`, then `SwarmBound::Pass` once: fixed prompt `abcdefgh`, an 8-byte memory echo, vLLM `ENGINE_ABSENT`, one CPU AdamW step on a 4 by 8 dense net, one one-host two-rank loopback exchange, eight integer replay pairs, one snapshot, and one realm seat. A second host is refused.
+The observer owns a real `btx-guardd` child through private inherited pipes.
+Each poll supervises that process and publishes a bounded heartbeat in
+`swarm/guard-process.json`; clean shutdown publishes `STOPPED` and reaps the
+child. A guard permit records authorization consumption, not completed work.
 
-`TickBind::Pass` runs once: requirement binders, a 12-step node cycle with generation 0 and `passed()` false, local module stores, and the safe slices. It does not quarantine a live model and does not start a guard process.
+The helper performs bounded private-LAN discovery and strict-PQ1 peer
+observation. Its expiring `native-participation.json` snapshot feeds observer
+membership and locally verified shared-model families. Fresh headless implicit
+`auto` storage uses a bounded 1 GiB cache; explicit zero, saved refusal and
+owner-selected limits take precedence. Eligible first-model acquisition uses
+the existing verified download worker. Acquiring bytes and observing a family
+do not authorize computation, private data access or spending.
 
-`Spend` returns `"0"`. `Release` returns `UNQUALIFIED`. `passed()`, `gpu_passed()`, and `windows_passed()` stay false. A missing execution engine is `ENGINE_ABSENT` and moves no model bytes. The rows in the lifecycle table are the required product defaults. This latched pass does not carry them out, and it is not the finished network.
+Production observer startup no longer calls `NifObserve::Tick`,
+`SwarmBoundProbe::Pass` or `TickBind::Pass` to latch in-process acceptance
+records. Those library probes remain available for explicit tests. Native
+qualification uses finite commands and actual execution evidence described in
+[NATIVE EXECUTION AND RELEASE EVIDENCE](16_NATIVE_EXECUTION_AND_RELEASE_EVIDENCE.md).
+Automatic spend stays zero, unavailable engines remain explicit, and the
+candidate and all unqualified profiles remain unqualified. Local process tests
+do not establish physical multi-host, GPU or independent-organization results.
 
 ## Explicit non-goals and compatibility
 
@@ -51,14 +67,14 @@ Do not alter BTX block validity, proof of work, issuance, transaction serializat
 
 ## Product acceptance
 
-A release demonstration begins with a clean install and an eligible model acquisition, not a preseeded test database. It shows the joined family, remaining permissions, the active device budget, and the followed channel. At least three independently administered machines maintain the community after one coordinator disappears. The latched pass in this process does not meet that demonstration. One machine and two local ranks are not two hosts.
+A release demonstration begins with a clean install and an eligible model acquisition, not a preseeded test database. It shows the joined family, remaining permissions, the active device budget, and the followed channel. At least three independently administered machines maintain the community after one coordinator disappears. The measured local process tests do not meet that physical deployment demonstration. One machine and two local ranks are not two hosts.
 
 ## Later releases
 
 Follow-on work toward a fully autonomous network:
 
-- Network peer discovery and admission of a local group.
-- Acquiring a verified model from another participant.
+- Physical multi-host qualification of the implemented peer discovery and observer admission.
+- Physical multi-host qualification of verified acquisition and continued service after peer loss.
 - Submitting a task or prompt and receiving model work.
 - Authorized training checked by a second machine.
 - A private defensive case under an explicit customer grant.

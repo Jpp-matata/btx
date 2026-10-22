@@ -7,6 +7,10 @@
 #endif
 
 #include <modelnet/swarm_fsjail.h>
+#include <modelnet/swarm_confine.h>
+#include <modelnet/swarm_process_guard.h>
+
+#if defined(__linux__)
 
 #include <fcntl.h>
 #include <sched.h>
@@ -19,8 +23,20 @@
 #include <cerrno>
 #include <cstdio>
 
+#endif
+
 namespace modelnet {
 namespace {
+
+SwarmFilesystemJailResult Refuse(const char* code, std::string& err)
+{
+    SwarmFilesystemJailResult result;
+    result.code = code;
+    err = code;
+    return result;
+}
+
+#if defined(__linux__)
 
 constexpr char PUT_OLD_NAME[] = ".btx-fsjail-old";
 constexpr char PUT_OLD_IN_JAIL[] = "/.btx-fsjail-old";
@@ -36,18 +52,6 @@ bool PathContainsDotDot(const fs::path& path)
     return false;
 }
 
-bool HelperInsideRoot(const fs::path& helper, const fs::path& root)
-{
-    if (PathContainsDotDot(helper) || PathContainsDotDot(root)) {
-        return false;
-    }
-    const fs::path relative{helper.lexically_relative(root)};
-    if (relative.empty() || relative == fs::path(".")) {
-        return false;
-    }
-    return !PathContainsDotDot(relative);
-}
-
 bool LexicallyInside(const fs::path& path, const fs::path& root)
 {
     if (PathContainsDotDot(path) || PathContainsDotDot(root)) {
@@ -61,14 +65,6 @@ bool LexicallyInside(const fs::path& path, const fs::path& root)
         return true;
     }
     return !PathContainsDotDot(relative);
-}
-
-SwarmFilesystemJailResult Refuse(const char* code, std::string& err)
-{
-    SwarmFilesystemJailResult result;
-    result.code = code;
-    err = code;
-    return result;
 }
 
 bool WriteAll(const char* path, const char* data, size_t length)
@@ -206,6 +202,7 @@ bool ConfinedToRoot(const fs::path& root, const fs::path& put_old, const fs::pat
     return true;
 }
 
+#endif // __linux__
 } // namespace
 
 SwarmFilesystemJailResult SwarmRunFilesystemJail(const SwarmFilesystemJailRequest& request, std::string& err)
@@ -219,10 +216,12 @@ SwarmFilesystemJailResult SwarmRunFilesystemJail(const SwarmFilesystemJailReques
     if (!request.network_denied) {
         return Refuse("NETWORK", err);
     }
-    if (!HelperInsideRoot(request.helper, request.root)) {
+    if (!process_guard::InsideRoot(request.helper, request.root)) {
         return Refuse("PATH", err);
     }
 
+    if (request.max_wall_seconds <= 0 || request.max_wall_seconds > 86400) return Refuse("LIMIT", err);
+#if defined(__linux__)
     const fs::path root = request.root;
     const fs::path put_old = root / PUT_OLD_NAME;
     const fs::path witness = SelectWitness(root);
@@ -234,47 +233,63 @@ SwarmFilesystemJailResult SwarmRunFilesystemJail(const SwarmFilesystemJailReques
     const int uid_len = snprintf(uid_map, sizeof(uid_map), "0 %lu 1\n", static_cast<unsigned long>(geteuid()));
     const int gid_len = snprintf(gid_map, sizeof(gid_map), "0 %lu 1\n", static_cast<unsigned long>(getegid()));
 
+    if (witness.empty()) return Refuse("JAIL_ABSENT", err);
+    int pipefd[2];
+    if (!process_guard::ErrorPipe(pipefd)) return Refuse("JAIL_ABSENT", err);
+    const long fd_max = std::max(1024L, sysconf(_SC_OPEN_MAX));
+    char* const argv[]{const_cast<char*>(jailed_helper.c_str()), nullptr};
+    char lang[] = "LANG=C", path[] = "PATH=/usr/bin:/bin", offline[] = "HF_HUB_OFFLINE=1";
+    char* const env[]{lang, path, offline, nullptr};
     const pid_t pid = fork();
     if (pid < 0) {
+        close(pipefd[0]); close(pipefd[1]);
         return Refuse("JAIL_ABSENT", err);
     }
     if (pid == 0) {
-        // User namespace, then mount namespace. Either failure exits
-        // before exec. A successful pair still does not prove that root
-        // is a private mount.
-        if (unshare(CLONE_NEWUSER) != 0) {
-            _exit(126);
-        }
-        if (unshare(CLONE_NEWNS) != 0) {
-            _exit(126);
-        }
-        if (!MapUser(uid_map, uid_len, gid_map, gid_len) || !helper_in_jail ||
-            !ConfinedToRoot(root, put_old, witness)) {
-            _exit(126);
-        }
-        for (int fd = STDERR_FILENO + 1; fd < 1024; ++fd) {
-            close(fd);
-        }
-        char* argv[] = {const_cast<char*>(jailed_helper.c_str()), nullptr};
-        execv(jailed_helper.c_str(), argv);
-        _exit(126);
+        close(pipefd[0]);
+        if (setpgid(0, 0) != 0 || !process_guard::NullStandardDescriptors() ||
+            !process_guard::CloseDescriptors(pipefd[1], fd_max)) process_guard::ChildFailure(pipefd[1]);
+        constexpr int error_fd = 3;
+        // The old implementation forgot CLONE_NEWNET and consequently did
+        // not enforce its network_denied contract. Map first; then isolate.
+        if (unshare(CLONE_NEWUSER) != 0 ||
+            !MapUser(uid_map, uid_len, gid_map, gid_len) ||
+            unshare(CLONE_NEWNS | CLONE_NEWNET) != 0 || !helper_in_jail ||
+            !ConfinedToRoot(root, put_old, witness) ||
+            prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0 ||
+            !process_guard::Limit(RLIMIT_CPU, static_cast<rlim_t>(request.max_wall_seconds)) ||
+            !process_guard::Limit(RLIMIT_NOFILE, 256)) process_guard::ChildFailure(error_fd);
+        if (!process_guard::ChildReady(error_fd)) process_guard::ChildFailure(error_fd);
+        execve(jailed_helper.c_str(), argv, env);
+        process_guard::ChildFailure(error_fd);
     }
-
-    int status = 0;
-    pid_t waited = -1;
-    do {
-        waited = waitpid(pid, &status, 0);
-    } while (waited < 0 && errno == EINTR);
-    if (waited < 0 || !WIFEXITED(status) || WEXITSTATUS(status) == 126) {
-        return Refuse("JAIL_ABSENT", err);
-    }
-
+    close(pipefd[1]);
+    const auto waited = process_guard::Wait(pid, pipefd[0], request.max_wall_seconds);
+    if (!waited.executed) return Refuse(waited.timed_out ? "JAIL_TIMEOUT" : "JAIL_ABSENT", err);
     SwarmFilesystemJailResult result;
-    result.launched = true;
-    result.jailed = true;
-    result.code = "JAILED";
-    err.clear();
-    return result;
+    result.launched = true; result.jailed = true; result.code = "JAILED";
+    result.child_status = waited.status;
+    err.clear(); return result;
+#elif defined(__APPLE__) || defined(_WIN32)
+    // Seatbelt and AppContainer enforce native filesystem/network policy.
+    // Their OS runtime resources are documented platform exceptions.
+    SwarmConfineRequest confined;
+    confined.helper = request.helper; confined.root = request.root;
+    confined.max_address_bytes = 8LL * 1024 * 1024 * 1024;
+    confined.max_cpu_seconds = request.max_wall_seconds;
+    confined.max_nofile = 256;
+    confined.max_wall_seconds = request.max_wall_seconds;
+    confined.max_tree_bytes = request.max_tree_bytes;
+    confined.network_denied = true;
+    const auto run = SwarmRunConfined(confined, err);
+    if (!run.launched) return Refuse(run.code == "CONFINEMENT_TIMEOUT" ? "JAIL_TIMEOUT" : "JAIL_ABSENT", err);
+    SwarmFilesystemJailResult result;
+    result.launched = true; result.jailed = true; result.code = "JAILED";
+    result.child_status = run.child_status;
+    err.clear(); return result;
+#else
+    return Refuse("JAIL_ABSENT", err);
+#endif
 }
 
 } // namespace modelnet

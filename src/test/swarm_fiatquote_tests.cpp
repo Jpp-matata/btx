@@ -12,9 +12,9 @@
 
 BOOST_FIXTURE_TEST_SUITE(swarm_fiatquote_tests, BasicTestingSetup)
 
-static modelnet::SwarmFiatQuote NotedQuote()
+static modelnet::SwarmFiatQuoteRequest NotedQuote()
 {
-    modelnet::SwarmFiatQuote quote;
+    modelnet::SwarmFiatQuoteRequest quote;
     quote.quote_id = "q1";
     quote.currency = "BTX";
     quote.atoms = 1;
@@ -24,7 +24,7 @@ static modelnet::SwarmFiatQuote NotedQuote()
 
 BOOST_AUTO_TEST_CASE(empty_quote_id_is_quote)
 {
-    modelnet::SwarmFiatQuote quote = NotedQuote();
+    modelnet::SwarmFiatQuoteRequest quote = NotedQuote();
     quote.quote_id.clear();
     std::string err = "prior";
     const modelnet::SwarmFiatQuoteResult result = modelnet::SwarmNoteFiatQuote(quote, err);
@@ -35,7 +35,7 @@ BOOST_AUTO_TEST_CASE(empty_quote_id_is_quote)
 
 BOOST_AUTO_TEST_CASE(empty_currency_is_quote)
 {
-    modelnet::SwarmFiatQuote quote = NotedQuote();
+    modelnet::SwarmFiatQuoteRequest quote = NotedQuote();
     quote.currency.clear();
     quote.want_balance = true;
     std::string err = "prior";
@@ -47,7 +47,7 @@ BOOST_AUTO_TEST_CASE(empty_currency_is_quote)
 
 BOOST_AUTO_TEST_CASE(negative_atoms_are_quote)
 {
-    modelnet::SwarmFiatQuote quote = NotedQuote();
+    modelnet::SwarmFiatQuoteRequest quote = NotedQuote();
     quote.atoms = -1;
     quote.want_balance = true;
     std::string err = "prior";
@@ -59,7 +59,7 @@ BOOST_AUTO_TEST_CASE(negative_atoms_are_quote)
 
 BOOST_AUTO_TEST_CASE(usd_is_not_btx)
 {
-    modelnet::SwarmFiatQuote quote = NotedQuote();
+    modelnet::SwarmFiatQuoteRequest quote = NotedQuote();
     quote.currency = "USD";
     std::string err = "prior";
     const modelnet::SwarmFiatQuoteResult result = modelnet::SwarmNoteFiatQuote(quote, err);
@@ -70,7 +70,7 @@ BOOST_AUTO_TEST_CASE(usd_is_not_btx)
 
 BOOST_AUTO_TEST_CASE(usd_want_balance_is_still_not_btx)
 {
-    modelnet::SwarmFiatQuote quote = NotedQuote();
+    modelnet::SwarmFiatQuoteRequest quote = NotedQuote();
     quote.currency = "USD";
     quote.want_balance = true;
     std::string err = "prior";
@@ -82,7 +82,7 @@ BOOST_AUTO_TEST_CASE(usd_want_balance_is_still_not_btx)
 
 BOOST_AUTO_TEST_CASE(want_balance_is_held)
 {
-    modelnet::SwarmFiatQuote quote = NotedQuote();
+    modelnet::SwarmFiatQuoteRequest quote = NotedQuote();
     quote.want_balance = true;
     std::string err = "prior";
     const modelnet::SwarmFiatQuoteResult result = modelnet::SwarmNoteFiatQuote(quote, err);
@@ -93,7 +93,7 @@ BOOST_AUTO_TEST_CASE(want_balance_is_held)
 
 BOOST_AUTO_TEST_CASE(btx_quote_is_noted)
 {
-    modelnet::SwarmFiatQuote quote = NotedQuote();
+    modelnet::SwarmFiatQuoteRequest quote = NotedQuote();
     std::string err = "prior";
     const modelnet::SwarmFiatQuoteResult result = modelnet::SwarmNoteFiatQuote(quote, err);
     BOOST_CHECK(!result.balance_credited);
@@ -103,7 +103,7 @@ BOOST_AUTO_TEST_CASE(btx_quote_is_noted)
 
 BOOST_AUTO_TEST_CASE(zero_atoms_are_noted)
 {
-    modelnet::SwarmFiatQuote quote = NotedQuote();
+    modelnet::SwarmFiatQuoteRequest quote = NotedQuote();
     quote.atoms = 0;
     std::string err = "prior";
     const modelnet::SwarmFiatQuoteResult result = modelnet::SwarmNoteFiatQuote(quote, err);
