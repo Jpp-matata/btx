@@ -642,7 +642,7 @@ void SetupServerArgs(ArgsManager& argsman, bool can_listen_ipc)
     argsman.AddArg("-modeld=<path>", "Path to packaged btx-modeld. Alias of -modelhelper. Default: next to the running btxd / libexec/btx-modeld. A missing explicit path does not spawn a substitute.", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-modelhelper=<path>", "Path to packaged btx-modeld. Default: next to the running btxd / libexec/btx-modeld.", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-modeldir=<dir>", "Isolated model store (default: <datadir>/modelnet). Never wallet/chainstate.", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
-    argsman.AddArg("-modelbind=<ip:port>", "PQ1 listen address passed to the owned helper (default: 0.0.0.0:29447, or off with -listen=0). Empty/0/off = unix RPC only. Does not advertise NODE_MODEL_HOST.", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
+    argsman.AddArg("-modelbind=<ip:port>", "PQ1 listen address passed to the owned helper (default: 0.0.0.0:29447, or off with -listen=0). Empty/0/off = unix RPC only. The helper maps it with PCP/NAT-PMP only when -natpmp is on. Does not advertise NODE_MODEL_HOST.", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-modelstorage=<size>", "Model payload budget: auto (packaged default), 0, or 80GiB. AUTO sizes against the model-store filesystem.", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-modelstorageautocap=<size>", "AUTO hard cap (default: 512GiB).", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-modelfreespacereserve=<size>", "AUTO free-space reserve override (default: max(32GiB, 10% of filesystem capacity)).", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
@@ -4352,6 +4352,7 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
         if (hcfg.bind.empty() && hcfg.host_mode != modelnet::HostMode::OFF) {
             LogPrintf("model helper: -modelhost is on but -modelbind is off, so the helper listens on loopback only; set -modelbind=<ip:port> to serve peers (-listen=0 turns the default off)\n");
         }
+        hcfg.natpmp = args.GetBoolArg("-natpmp", DEFAULT_NATPMP);
         LogPrintf("model helper exe=%s socket=%s storage=%s bind=%s host=%s relay=%d missing=%d\n",
                   fs::PathToString(hcfg.helper_exe),
                   fs::PathToString(hcfg.rpc_socket),

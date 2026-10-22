@@ -7,7 +7,7 @@
 A node that does not listen (-listen=0, also set by -connect and -proxy)
 starts its btx-modeld without a TCP listener, so the helper neither accepts
 PQ1 connections nor asks a gateway to map its port. An explicit -modelbind
-still wins.
+still wins. With -natpmp=0 a listening helper does not map its port either.
 """
 
 import os
@@ -71,6 +71,19 @@ class ModelNetListenTest(BitcoinTestFramework):
             self.restart_node(0, extra_args=[*args, "-listen=0", f"-modelbind={bind}"])
         self.helper_info()
         socket.create_connection(("127.0.0.1", port), timeout=10).close()
+
+        self.log.info("-natpmp=0: a listening helper does not try to map its port")
+        # BTX_MODEL_PCP_LAB lets the helper try to map a loopback bind, and
+        # BTX_MODEL_PCP_GATEWAY sends any request to a local address that
+        # nobody answers, so this step stays on loopback and never talks to
+        # the real default gateway. Without the fix the helper tries anyway
+        # and reports "unmapped".
+        bind = f"127.0.0.1:{p2p_port(2)}"
+        self.stop_node(0)
+        with node.assert_debug_log([f"bind={bind} host="]):
+            self.start_node(0, extra_args=[*args, "-natpmp=0", f"-modelbind={bind}"],
+                            env={"BTX_MODEL_PCP_LAB": "1", "BTX_MODEL_PCP_GATEWAY": "127.0.0.1"})
+        assert_equal(self.helper_info()["nat_status"], "disabled")
 
 
 if __name__ == '__main__':
