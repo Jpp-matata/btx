@@ -1248,16 +1248,6 @@ AutoUpdateCheckResult CheckForAutoUpdate(const AutoUpdateConfig& config,
         return result;
     }
 
-    if (!config.datadir.empty()) {
-        const bool raise = !highest_accepted ||
-                           CompareAutoUpdateVersionStrings(*highest_accepted, manifest->version) > 0;
-        if (raise && !WriteHighestAcceptedVersion(config.datadir, manifest->version)) {
-            result.status = AutoUpdateStatus::LAUNCH_FAILED;
-            result.detail = "unable to persist highest accepted version";
-            return result;
-        }
-    }
-
     // Staged/canary gate: the manifest is signed, so rollout_percent is trusted. Apply only if this
     // node's stable cohort is within the rolled-out fraction; otherwise defer (not an error) and the
     // node will re-check on the normal interval as the operator widens the rollout.
@@ -1270,6 +1260,20 @@ AutoUpdateCheckResult CheckForAutoUpdate(const AutoUpdateConfig& config,
     if (config.require_script_hash && !LooksLikeSHA256Hex(manifest->script_sha256)) {
         result.status = AutoUpdateStatus::SCRIPT_HASH_MISSING;
         return result;
+    }
+
+    // Raise the floor only for a release this node takes: inside its rollout
+    // cohort and installable. A canary outside this cohort, or a manifest
+    // staged at 0%, must not make this node refuse a lower release that is
+    // rolled out to it later.
+    if (!config.datadir.empty()) {
+        const bool raise = !highest_accepted ||
+                           CompareAutoUpdateVersionStrings(*highest_accepted, manifest->version) > 0;
+        if (raise && !WriteHighestAcceptedVersion(config.datadir, manifest->version)) {
+            result.status = AutoUpdateStatus::LAUNCH_FAILED;
+            result.detail = "unable to persist highest accepted version";
+            return result;
+        }
     }
 
     if (!config.seamless) {

@@ -136,6 +136,15 @@ std::string Manifest(std::string version,
         hash_field);
 }
 
+std::string RolloutManifest(const std::string& version, int rollout_percent, const std::string& script_sha256)
+{
+    return strprintf(
+        R"({"version":"%s","script_url":"http://updates.test/install.sh","sig_url":"http://updates.test/version.txt.sig","script_sha256":"%s","rollout_percent":%d})",
+        version,
+        script_sha256,
+        rollout_percent);
+}
+
 struct Harness {
     node::AutoUpdateConfig config{TestConfig()};
     FakeFetcher fetcher;
@@ -176,6 +185,29 @@ struct Harness {
         return node::CheckForAutoUpdate(config, fetcher, verifier_in, runner);
     }
 };
+
+std::string HighestAccepted(const fs::path& datadir)
+{
+    std::ifstream in{datadir / "autoupdate" / "highest-accepted-version"};
+    std::string version;
+    std::getline(in, version);
+    return version;
+}
+
+void CheckLowerFullReleaseLaunches(const fs::path& datadir, int cohort)
+{
+    Harness release;
+    release.config.datadir = datadir;
+    release.config.rollout_cohort = cohort;
+    release.AddManifest("98.0.0"); // no rollout_percent: 100%
+    release.AddSignature();
+    release.AddScript();
+    const auto result = release.Run();
+    BOOST_CHECK_MESSAGE(result.status == node::AutoUpdateStatus::LAUNCHED,
+                        node::AutoUpdateStatusString(result.status) << " " << result.detail);
+    BOOST_CHECK_EQUAL(release.runner.calls, 1);
+    BOOST_CHECK_EQUAL(HighestAccepted(datadir), "98.0.0");
+}
 
 //! Capture the message text passed to the last InitError() so a startup
 //! refusal can be asserted on its reason, not merely on the false return.
@@ -722,6 +754,80 @@ BOOST_AUTO_TEST_CASE(failed_state_write_is_not_reported_as_written)
     BOOST_CHECK_EQUAL(marked, "99.0.0");
 }
 #endif
+
+BOOST_AUTO_TEST_CASE(deferred_canary_does_not_raise_the_floor)
+{
+    // A node outside a 1% canary sees it signed; the canary is then replaced
+    // by a lower release at 100%.
+    Harness canary;
+    canary.config.datadir = m_path_root;
+    canary.config.rollout_cohort = 50;
+    canary.fetcher.replies[canary.config.manifest_url] = {
+        .final_url = canary.config.manifest_url,
+        .body = Bytes(RolloutManifest("99.0.0", 1, canary.script_hash)),
+    };
+    canary.AddSignature();
+    canary.AddScript();
+    BOOST_CHECK(canary.Run().status == node::AutoUpdateStatus::ROLLOUT_DEFERRED);
+    BOOST_CHECK(!fs::exists(m_path_root / "autoupdate" / "highest-accepted-version"));
+    CheckLowerFullReleaseLaunches(m_path_root, 50);
+}
+
+BOOST_AUTO_TEST_CASE(manifest_staged_at_zero_does_not_raise_the_floor)
+{
+    Harness staged;
+    staged.config.datadir = m_path_root;
+    staged.config.rollout_cohort = 0;
+    staged.fetcher.replies[staged.config.manifest_url] = {
+        .final_url = staged.config.manifest_url,
+        .body = Bytes(RolloutManifest("99.0.0", 0, staged.script_hash)),
+    };
+    staged.AddSignature();
+    staged.AddScript();
+    BOOST_CHECK(staged.Run().status == node::AutoUpdateStatus::ROLLOUT_DEFERRED);
+    CheckLowerFullReleaseLaunches(m_path_root, 0);
+}
+
+BOOST_AUTO_TEST_CASE(uninstallable_manifest_does_not_raise_the_floor)
+{
+    Harness no_hash;
+    no_hash.config.datadir = m_path_root;
+    no_hash.config.rollout_cohort = 0;
+    no_hash.fetcher.replies[no_hash.config.manifest_url] = {
+        .final_url = no_hash.config.manifest_url,
+        .body = Bytes(Manifest("99.0.0", "http://updates.test/install.sh", "http://updates.test/version.txt.sig")),
+    };
+    no_hash.AddSignature();
+    no_hash.AddScript();
+    BOOST_CHECK(no_hash.Run().status == node::AutoUpdateStatus::SCRIPT_HASH_MISSING);
+    CheckLowerFullReleaseLaunches(m_path_root, 0);
+}
+
+BOOST_AUTO_TEST_CASE(release_offered_with_seamless_off_still_raises_the_floor)
+{
+    // Inside the cohort the release is this node's even when an operator
+    // installs it by hand, so a lower one is still refused afterwards.
+    Harness offered;
+    offered.config.datadir = m_path_root;
+    offered.config.rollout_cohort = 0;
+    offered.config.seamless = false;
+    offered.AddManifest("99.0.0");
+    offered.AddSignature();
+    offered.AddScript();
+    BOOST_CHECK(offered.Run().status == node::AutoUpdateStatus::UPDATE_AVAILABLE);
+    BOOST_CHECK_EQUAL(HighestAccepted(m_path_root), "99.0.0");
+
+    Harness lower;
+    lower.config.datadir = m_path_root;
+    lower.config.rollout_cohort = 0;
+    lower.AddManifest("98.0.0");
+    lower.AddSignature();
+    lower.AddScript();
+    const auto result = lower.Run();
+    BOOST_CHECK(result.status == node::AutoUpdateStatus::NOT_NEWER);
+    BOOST_CHECK(result.detail.find("previously accepted") != std::string::npos);
+    BOOST_CHECK_EQUAL(lower.runner.calls, 0);
+}
 
 // End-to-end artifact generator: when BTX_AUTOUPDATE_E2E_DIR + BTX_AUTOUPDATE_E2E_BASEURL are
 // set, emit a real ML-DSA-44-signed manifest, signature, installer, and public key so a live
