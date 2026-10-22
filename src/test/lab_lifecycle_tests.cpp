@@ -294,6 +294,27 @@ BOOST_AUTO_TEST_CASE(bounded_read_does_not_hold_the_lab_mutex)
     ::close(oversized[0]);
     ::close(oversized[1]);
 
+    // The cap is a multiple of the 4096-byte read chunk: one byte more is
+    // refused instead of returned cut at the cap, and exactly the cap reads.
+    for (const size_t sent : {size_t{4097}, size_t{4096}}) {
+        int chunked[2] = {-1, -1};
+        BOOST_REQUIRE_EQUAL(socketpair(AF_UNIX, SOCK_STREAM, 0, chunked), 0);
+        const std::string body(sent, 'y');
+        BOOST_REQUIRE_EQUAL(::send(chunked[1], body.data(), body.size(), 0), static_cast<ssize_t>(body.size()));
+        ::shutdown(chunked[1], SHUT_WR);
+        std::string got;
+        const bool read = modelnet::ReadLoopbackBounded(chunked[0], got, 4096, 500, err);
+        if (sent > 4096) {
+            BOOST_CHECK(!read);
+            BOOST_CHECK_EQUAL(err, "BTX035_LIMIT_EXCEEDED");
+        } else {
+            BOOST_CHECK(read);
+            BOOST_CHECK_EQUAL(got.size(), sent);
+        }
+        ::close(chunked[0]);
+        ::close(chunked[1]);
+    }
+
     const int listener = static_cast<int>(::socket(AF_INET, SOCK_STREAM, 0));
     BOOST_REQUIRE(listener >= 0);
     sockaddr_in address{};

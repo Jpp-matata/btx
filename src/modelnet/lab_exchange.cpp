@@ -270,7 +270,9 @@ bool ReadBounded(int fd, std::string& out, size_t max_bytes, int timeout_ms, std
     if (timeout_ms < 0) return Fail(err, "BTX035_TRANSPORT");
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
     char buf[4096];
-    while (out.size() < max_bytes) {
+    // Read to end of stream. Stopping at exactly max_bytes would return a
+    // response cut at the cap as if it were complete.
+    for (;;) {
         if (!WaitFd(fd, POLLIN, deadline, err)) return false;
         const auto n = ::recv(fd, buf, sizeof(buf), 0);
         if (n < 0) {
@@ -298,7 +300,7 @@ bool ReadBounded(int fd, std::string& out, size_t max_bytes, int timeout_ms, std
     const DWORD timeout = timeout_ms < 0 ? 0 : static_cast<DWORD>(timeout_ms);
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
     char buf[4096];
-    while (out.size() < max_bytes) {
+    for (;;) {
         const auto n = recv(fd, buf, sizeof(buf), 0);
         if (n < 0) return Fail(err, "BTX035_TRANSPORT");
         if (n == 0) break;
