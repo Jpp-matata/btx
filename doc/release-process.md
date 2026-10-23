@@ -46,8 +46,10 @@ Release Process
   version above the floor from a host library (`--floor NAME=VERSION`); a Windows
   `.exe`/`.dll` imports a DLL that is neither a Windows system DLL nor next to
   it (`libgomp-1.dll`, `libgcc_s_seh-1.dll`, `libwinpthread-1.dll` must ship
-  beside `btxd.exe`); a member is not `root:root`, is group/world-writable, or
-  a directory is empty.
+  beside `btxd.exe`); a Mach-O has ML-DSA keygen but does not define
+  `_btx_mldsa_randombytes` (the 17c2da89 rename; six files in the official
+  v0.34.15 macOS archive fail this); a member is not `root:root`, is
+  group/world-writable, or a directory is empty.
   0.35.0rc1 was repacked outside `package_release_archive.py`; the btxd-only
   gate passed all three archives, and all three fail this one (#235, #237).
   On a gate host that can run the archive's `btxd` (a Mac for the macOS

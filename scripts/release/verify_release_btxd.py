@@ -49,7 +49,8 @@ On top of the GLIBC ceiling and the Mach-O codesign check: an executable
 that NEEDs a library the archive ships must reach it through RUNPATH/RPATH
 or the packaged wrapper; no ELF may need a GLIBCXX, CXXABI, GCC or OPENSSL
 version above the floor from a host library; a Windows .exe/.dll may import
-only system DLLs or DLLs beside it; tar members must be root-owned and not
+only system DLLs or DLLs beside it; a Mach-O with ML-DSA keygen must define
+_btx_mldsa_randombytes (17c2da89); tar members must be root-owned and not
 group/world-writable, no directory may be empty, and no name or link may
 leave the archive. These checks read the files and run nothing, so a Mac
 can gate a Linux archive.
@@ -128,6 +129,64 @@ def macho_dylibs(path: Path) -> list[str]:
             names.append(raw.split(b"\x00", 1)[0].decode("ascii", "replace"))
         off += cmdsize
     return names
+
+
+LC_SYMTAB = 0x2
+N_STAB = 0xE0
+N_TYPE = 0x0E
+N_SECT = 0x0E
+# 17c2da89 compiles the ML-DSA sources with randombytes=btx_mldsa_randombytes.
+# A Mach-O that has ML-DSA keygen but not that symbol calls whichever
+# randombytes ld kept: libsodium's in the official v0.34.15 macOS btxd (#253).
+MLDSA_KEYGEN_SYMBOL = "_ml_dsa_44_keygen"
+MLDSA_RANDOMBYTES_SYMBOL = "_btx_mldsa_randombytes"
+
+
+def macho_defined_symbols(path: Path) -> set[str]:
+    """Names a thin 64-bit Mach-O defines in a section, from LC_SYMTAB.
+
+    The same names `nm -m` lists with a (__SEGMENT,__section), external or
+    not. Read in Python so a Linux host gating the macOS archive gets the
+    same answer. A fully stripped image gives an empty set.
+    """
+    data = path.read_bytes()
+    if len(data) < 32 or struct.unpack_from("<I", data, 0)[0] != MACHO_MAGIC_64LE:
+        raise VerifyError(f"{path}: not a little-endian 64-bit Mach-O")
+    ncmds = struct.unpack_from("<I", data, 16)[0]
+    off = 32
+    for _ in range(ncmds):
+        if off + 8 > len(data):
+            raise VerifyError(f"{path}: truncated Mach-O load commands")
+        cmd, cmdsize = struct.unpack_from("<II", data, off)
+        if cmd == LC_SYMTAB:
+            if off + 24 > len(data):
+                raise VerifyError(f"{path}: truncated LC_SYMTAB")
+            symoff, nsyms, stroff, strsize = struct.unpack_from("<IIII", data, off + 8)
+            if symoff + 16 * nsyms > len(data) or stroff + strsize > len(data):
+                raise VerifyError(f"{path}: symbol table past the end of the file")
+            strings = data[stroff:stroff + strsize]
+            names = set()
+            for n_strx, n_type in struct.iter_unpack("<IB11x", data[symoff:symoff + 16 * nsyms]):
+                if n_type & N_STAB or (n_type & N_TYPE) != N_SECT or n_strx >= len(strings):
+                    continue
+                end = strings.find(b"\0", n_strx)
+                names.add(strings[n_strx:end if end >= 0 else len(strings)].decode("utf-8", "replace"))
+            return names
+        if cmdsize < 8:
+            raise VerifyError(f"{path}: Mach-O load command of size {cmdsize}")
+        off += cmdsize
+    return set()
+
+
+def macho_randombytes_problem(path: Path, label: str) -> str:
+    """'' unless the Mach-O links ML-DSA keygen without btx_mldsa_randombytes."""
+    symbols = macho_defined_symbols(path)
+    if MLDSA_KEYGEN_SYMBOL in symbols and MLDSA_RANDOMBYTES_SYMBOL not in symbols:
+        return (f"{label}: has ML-DSA keygen but no {MLDSA_RANDOMBYTES_SYMBOL}, so keygen calls "
+                "whichever randombytes the linker kept (libsodium's in the v0.34.15 macOS btxd: keys "
+                "did not follow from the seed, #253); build with the 17c2da89 rename in "
+                "src/libbitcoinpqc/CMakeLists.txt")
+    return ""
 
 
 def homebrew_loads(dylibs: list[str]) -> list[str]:
@@ -299,6 +358,9 @@ def verify_macos(path: Path, *, require_zmq: bool) -> None:
             "otool showing no libzmq dylib is necessary but not sufficient; "
             "static libzmq.a plus bitcoin_zmq must actually be in the image."
         )
+    problem = macho_randombytes_problem(path, str(path))
+    if problem:
+        raise VerifyError(problem)
 
 
 def classify(path: Path) -> str:
@@ -1059,7 +1121,7 @@ def archive_member_problems(archive: Path) -> list[str]:
 
 def archive_content_problems(root: Path, *, floor: dict[str, str],
                              require_model_helpers: bool = False) -> list[str]:
-    elves, pes, problems = [], [], []
+    elves, pes, machos, problems = [], [], [], []
     for path in sorted(root.rglob("*")):
         if path.is_symlink() or not path.is_file():
             continue
@@ -1068,8 +1130,17 @@ def archive_content_problems(root: Path, *, floor: dict[str, str],
             elves.append(path)
         elif prefix[:2] == b"MZ":
             pes.append(path)
+        elif len(prefix) >= 4 and struct.unpack_from("<I", prefix, 0)[0] == MACHO_MAGIC_64LE:
+            machos.append(path)
     problems += linux_elf_problems(root, elves, floor)
     problems += pe_problems(root, pes)
+    for path in machos:  # btx-qt, btx-util and the helpers link the PQ code too
+        try:
+            problem = macho_randombytes_problem(path, str(path.relative_to(root)))
+        except (VerifyError, struct.error) as exc:
+            problem = f"{path.relative_to(root)}: unreadable Mach-O: {str(exc).replace(f'{path}: ', '')}"
+        if problem:
+            problems.append(problem)
     if require_model_helpers:
         present = {p.name for p in root.rglob("*") if p.is_file()}
         missing = [name for name in MODEL_HELPER_BINARIES

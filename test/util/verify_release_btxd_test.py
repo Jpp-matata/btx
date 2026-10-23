@@ -9,6 +9,7 @@ import io
 import json
 import os
 import pathlib
+import platform
 import shutil
 import struct
 import subprocess
@@ -34,6 +35,10 @@ RC1_SHA384 = {
     "btx-035-macos-arm64.tar.xz": "fede7a2cda3e4ca397ea562638944b98fda02385c3721ba0d390d558ab4119295a94a2b4c25e717dd8d630de357a5bb7",
     "btx-035-windows-x86_64.tar.xz": "096ea433e18124be142800e8c743c4676a6d1cef4dfa2a87195c0627246f5d6e638bd303d0333c093cdb5bf2a5f268f8",
 }
+# The official v0.34.15 macOS archive (sha256 = the release asset digest). Optional.
+V0_34_15_DIR = pathlib.Path(os.environ.get("BTX_V0_34_15_ARCHIVE_DIR",
+                                           pathlib.Path.home() / ".cache" / "btx-0.34.15"))
+V0_34_15_MACOS_SHA256 = "6e1ec111fcfedb6da356e3897d3d224c07396c82b8897a83fdcfa558b781c4a8"
 ZMQ_HELP = b"Enable publish hash block"
 
 
@@ -107,6 +112,22 @@ def make_pe(dlls):
     head += struct.pack("<HHIIIHH", 0x8664, 1, 0, 0, 0, 240, 0x22) + bytes(opt)
     head += struct.pack("<8sIIIIIIHHI", b".idata", len(raw), rva, len(raw), raw_ptr, 0, 0, 0, 0, 0xC0000040)
     return head + bytes(raw_ptr - len(head)) + raw + ZMQ_HELP
+
+
+def make_macho(defined=(), undefined=(), stabs=(), extra=b""):
+    """Thin arm64 Mach-O with one LC_SYMTAB: defined (N_SECT|N_EXT), undefined and stab entries."""
+    strtab = bytearray(b"\0")
+    entries = b""
+    for names, n_type, n_sect in ((defined, 0x0F, 1), (undefined, 0x01, 0), (stabs, 0x24, 1)):
+        for name in names:
+            entries += struct.pack("<IBBHQ", len(strtab), n_type, n_sect, 0, 0)
+            strtab += name.encode() + b"\0"
+    symoff = 32 + 24
+    stroff = symoff + len(entries)
+    count = len(defined) + len(undefined) + len(stabs)
+    header = struct.pack("<IIIIIIII", 0xFEEDFACF, 0x0100000C, 0, 2, 1, 24, 0, 0)
+    symtab = struct.pack("<IIIIII", 0x2, 24, symoff, count, stroff, len(strtab))
+    return header + symtab + entries + bytes(strtab) + extra
 
 
 def write_tar(archive, files, *, uid=0, uname="root", mode=0o755, dirs=(), links=(), hardlinks=()):
@@ -675,6 +696,73 @@ class ArchiveContentGateTest(unittest.TestCase):
         path.write_bytes(payload)
         return path
 
+    def test_macho_mldsa_keygen_must_use_btx_randombytes(self) -> None:
+        # 17c2da89: ML-DSA keygen calls btx_mldsa_randombytes. Without it ld kept
+        # libsodium's randombytes in the v0.34.15 macOS btxd (#253).
+        bad = make_macho(["_main", "_ml_dsa_44_keygen", "_randombytes", "_randombytes_buf"],
+                         undefined=["_btx_mldsa_randombytes"], stabs=["_btx_mldsa_randombytes"], extra=ZMQ_HELP)
+        btxd = self._write("btxd", bad)
+        self.assertEqual(self.mod.macho_defined_symbols(btxd),
+                         {"_main", "_ml_dsa_44_keygen", "_randombytes", "_randombytes_buf"})
+        with mock.patch.object(self.mod, "verify_macos_signature"):
+            with self.assertRaises(self.mod.VerifyError) as caught:
+                self.mod.verify_macos(btxd, require_zmq=True)
+            self.assertIn("btxd: has ML-DSA keygen but no _btx_mldsa_randombytes", str(caught.exception))
+            for ok in (["_ml_dsa_44_keygen", "_btx_mldsa_randombytes", "_randombytes"],  # rc1 btxd
+                       ["_randombytes"],  # no ML-DSA keygen (btx-cli)
+                       []):  # stripped: nothing to read, the wallet check is the backstop
+                self.mod.verify_macos(self._write("btxd", make_macho(ok, extra=ZMQ_HELP)), require_zmq=True)
+        no_symtab = struct.pack("<IIIIIIII", 0xFEEDFACF, 0x0100000C, 0, 2, 0, 0, 0, 0)
+        self.assertEqual(self.mod.macho_defined_symbols(self._write("btxd", no_symtab)), set())
+        with self.assertRaises(self.mod.VerifyError):  # a zero-size load command is refused, not looped on
+            self.mod.macho_defined_symbols(self._write("btxd", make_macho()[:32] + bytes(24)))
+
+    def test_archive_checks_every_macho_for_the_randombytes_rename(self) -> None:
+        good = make_macho(["_ml_dsa_44_keygen", "_btx_mldsa_randombytes"], extra=ZMQ_HELP)
+        bad = make_macho(["_ml_dsa_44_keygen", "_randombytes"], extra=ZMQ_HELP)
+        qt = "btx-0.35.0/btx-qt.app/Contents/MacOS/btx-qt"
+        archive = self.root / "btx-0.35.0-arm64-apple-darwin.tar.gz"
+        with mock.patch.object(self.mod, "verify_macos_signature"):
+            write_tar(archive, {"btx-0.35.0/bin/btxd": good, qt: good})
+            self.mod.verify_archive(archive, launch=False)
+            write_tar(archive, {"btx-0.35.0/bin/btxd": bad, qt: bad})
+            with self.assertRaises(self.mod.VerifyError) as caught:
+                self.mod.verify_archive(archive, launch=False)
+        text = str(caught.exception)
+        self.assertIn("2 problem(s)", text)  # btxd's line is not repeated by the btxd pass
+        self.assertEqual(text.count("bin/btxd: has ML-DSA keygen but no _btx_mldsa_randombytes"), 1)
+        self.assertIn(f"{qt}: has ML-DSA keygen but no _btx_mldsa_randombytes", text)
+        truncated = good[:40] + struct.pack("<I", 1 << 30) + good[44:]  # nsyms past the end
+        write_tar(archive, {"btx-0.35.0/btx-qt": truncated, "btx-0.35.0/bin/btx-cli": make_macho()})
+        with self.assertRaises(self.mod.VerifyError) as caught:
+            self.mod.verify_archive(archive, launch=False)
+        self.assertIn("btx-qt: unreadable Mach-O: symbol table past the end of the file", str(caught.exception))
+
+    def test_v0_34_15_macos_archive_fails_the_randombytes_checks(self) -> None:
+        archive = V0_34_15_DIR / "btx-0.34.15-arm64-apple-darwin.tar.gz"
+        if not archive.is_file():
+            self.skipTest(f"v0.34.15 macOS archive not in {V0_34_15_DIR} (set BTX_V0_34_15_ARCHIVE_DIR)")
+        self.assertEqual(hashlib.sha256(archive.read_bytes()).hexdigest(), V0_34_15_MACOS_SHA256)
+        native = sys.platform == "darwin" and platform.machine() == "arm64"
+        with self.assertRaises(self.mod.VerifyError) as caught:
+            self.mod.verify_archive(archive, launch=False, wallet_check=native)
+        text = str(caught.exception)
+        for name in ("libexec/btxd.real", "btx-qt.app/Contents/MacOS/btx-qt", "libexec/btx-util.real",
+                     "libexec/btx-modeld.real", "libexec/btx-hosted.real", "libexec/btx-hcpd.real"):
+            self.assertIn(f"btx-0.34.15/{name}: has ML-DSA keygen but no _btx_mldsa_randombytes", text)
+        self.assertEqual(text.count("has ML-DSA keygen"), 6)
+        if native:  # the archive's own btxd, run on regtest (MendeMatthias, #247)
+            self.assertIn("btx-0.34.15/libexec/btxd.real: index 0 of the new wallet's own private receive "
+                          "descriptor derived", text)
+        if sys.platform == "darwin" and shutil.which("nm"):
+            with tarfile.open(archive) as handle:
+                handle.extract("btx-0.34.15/libexec/btxd.real", self.root, **(
+                    {"filter": "data"} if sys.version_info >= (3, 12) else {}))
+            real = self.root / "btx-0.34.15" / "libexec" / "btxd.real"
+            listed = subprocess.run(["nm", "-m", str(real)], capture_output=True, text=True, check=True).stdout
+            self.assertEqual(self.mod.macho_defined_symbols(real),
+                             {line.split()[-1] for line in listed.splitlines() if " (__" in line})
+
     def test_bin_layout_launch_gets_no_lib_dir_and_no_host_loader_env(self) -> None:
         for sub in ("bin", "libexec", "lib"):
             (self.root / sub).mkdir()
@@ -709,6 +797,7 @@ class ArchiveContentGateTest(unittest.TestCase):
             self.assertIn("not owned by root:root", text)
             self.assertIn("model helpers missing", text)
         self.assertNotIn("imports", windows)  # rc1 ships the three MinGW DLLs beside btxd.exe
+        self.assertNotIn("has ML-DSA keygen", macos)  # rc1 is built with 17c2da89
         if shutil.which("codesign"):  # verify_macos_signature runs only where codesign exists
             self.assertIn("bin/btxd: codesign --verify --strict failed", macos)
             self.assertEqual(macos.count("codesign --verify --strict failed"), 1)
