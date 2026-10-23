@@ -202,27 +202,6 @@ bool ConfinedToRoot(const fs::path& root, const fs::path& put_old, const fs::pat
     return true;
 }
 
-bool TreeWithinLimit(const fs::path& root, uint64_t limit)
-{
-    std::error_code ec;
-    uint64_t total = 0;
-    size_t entries = 0;
-    fs::recursive_directory_iterator current(root, fs::directory_options::none, ec), end;
-    if (ec) return false;
-    for (; current != end; current.increment(ec)) {
-        if (ec || ++entries > 8192 || current.depth() > 64) return false;
-        if (!process_guard::NoSymlinkPath(current->path())) return false;
-        if (current->is_directory(ec) && !ec) continue;
-        if (ec || !current->is_regular_file(ec) || ec) return false;
-        const auto size = current->file_size(ec);
-        if (ec) return false;
-        const auto bytes = static_cast<uint64_t>(size);
-        if (bytes > limit || total > limit - bytes) return false;
-        total += bytes;
-    }
-    return !ec;
-}
-
 #endif // __linux__
 } // namespace
 
@@ -288,7 +267,7 @@ SwarmFilesystemJailResult SwarmRunFilesystemJail(const SwarmFilesystemJailReques
     close(pipefd[1]);
     const auto waited = process_guard::Wait(pid, pipefd[0], request.max_wall_seconds);
     if (!waited.executed) return Refuse(waited.timed_out ? "JAIL_TIMEOUT" : "JAIL_ABSENT", err);
-    if (!TreeWithinLimit(root, request.max_tree_bytes)) return Refuse("TREE_LIMIT", err);
+    if (!process_guard::TreeWithinLimit(root, request.max_tree_bytes)) return Refuse("TREE_LIMIT", err);
     SwarmFilesystemJailResult result;
     result.launched = true; result.jailed = true; result.code = "JAILED";
     result.child_status = waited.status;
@@ -305,7 +284,10 @@ SwarmFilesystemJailResult SwarmRunFilesystemJail(const SwarmFilesystemJailReques
     confined.max_tree_bytes = request.max_tree_bytes;
     confined.network_denied = true;
     const auto run = SwarmRunConfined(confined, err);
-    if (!run.launched) return Refuse(run.code == "CONFINEMENT_TIMEOUT" ? "JAIL_TIMEOUT" : "JAIL_ABSENT", err);
+    if (!run.launched) {
+        return Refuse(run.code == "CONFINEMENT_TIMEOUT" ? "JAIL_TIMEOUT" :
+                      run.code == "TREE_LIMIT" ? "TREE_LIMIT" : "JAIL_ABSENT", err);
+    }
     SwarmFilesystemJailResult result;
     result.launched = true; result.jailed = true; result.code = "JAILED";
     result.child_status = run.child_status;

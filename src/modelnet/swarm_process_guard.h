@@ -153,6 +153,34 @@ inline bool NullStandardDescriptors()
     return ok;
 }
 
+/**
+ * True while the regular files below root total at most limit. Symbolic
+ * links, other file types, more than 8192 entries, a depth above 64 or any
+ * error reading the tree count as over the limit. Shared by the Linux
+ * filesystem jail (after exit) and the macOS confinement (before launch and
+ * after exit).
+ */
+inline bool TreeWithinLimit(const fs::path& root, uint64_t limit)
+{
+    std::error_code ec;
+    uint64_t total = 0;
+    size_t entries = 0;
+    fs::recursive_directory_iterator current(root, fs::directory_options::none, ec), end;
+    if (ec) return false;
+    for (; current != end; current.increment(ec)) {
+        if (ec || ++entries > 8192 || current.depth() > 64) return false;
+        if (!NoSymlinkPath(current->path())) return false;
+        if (current->is_directory(ec) && !ec) continue;
+        if (ec || !current->is_regular_file(ec) || ec) return false;
+        const auto size = current->file_size(ec);
+        if (ec) return false;
+        const auto bytes = static_cast<uint64_t>(size);
+        if (bytes > limit || total > limit - bytes) return false;
+        total += bytes;
+    }
+    return !ec;
+}
+
 #ifdef __APPLE__
 inline bool DirectoryOpenable(const char* path)
 {
