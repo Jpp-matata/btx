@@ -53,21 +53,33 @@ only system DLLs or DLLs beside it; tar members must be root-owned and not
 group/world-writable, no directory may be empty, and no name or link may
 leave the archive. These checks read the files and run nothing, so a Mac
 can gate a Linux archive.
+
+`--run-wallet-check` (off by default) also runs btxd (with `--archive`, the
+archive's own) on regtest in a temporary datadir: a new wallet's private
+receive descriptor must derive the wallet's first address, twice. The
+v0.34.15 macOS btxd linked libsodium's randombytes into ML-DSA keygen and
+failed this (#253); `test_btx` is a separate link and cannot show it. It
+needs a gate host that can run the binary.
 """
 
 from __future__ import annotations
 
 import argparse
+import base64
+import http.client
+import json
 import os
 import platform
 import posixpath
 import re
 import shutil
+import socket
 import struct
 import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 import zipfile
 from pathlib import Path
 
@@ -410,13 +422,9 @@ LOADER_ENV_VARS = ("LD_LIBRARY_PATH", "LD_PRELOAD", "DYLD_LIBRARY_PATH",
                    "DYLD_FALLBACK_LIBRARY_PATH", "DYLD_INSERT_LIBRARIES")
 
 
-def verify_launch(path: Path, timeout: float = 30.0, *, clean_env: bool = False) -> None:
-    """Refuse a binary that cannot even print its version.
-
-    The CUDA 0.34 packaging miss (`libcublasLt.so.13` missing) failed here
-    and was invisible to the ZMQ/ldd checks. clean_env drops the gate
-    host's loader variables, so an archive is launched as a user gets it.
-    """
+def launch_env(path: Path, *, clean_env: bool = False) -> dict[str, str]:
+    """The environment a packaged binary gets: clean_env drops the gate host's
+    loader variables; the libexec/*.real layout gets the wrapper's lib/."""
     env = os.environ.copy()
     if clean_env:
         for name in LOADER_ENV_VARS:
@@ -426,6 +434,17 @@ def verify_launch(path: Path, timeout: float = 30.0, *, clean_env: bool = False)
         env["LD_LIBRARY_PATH"] = str(libdir) + (
             f":{env['LD_LIBRARY_PATH']}" if env.get("LD_LIBRARY_PATH") else ""
         )
+    return env
+
+
+def verify_launch(path: Path, timeout: float = 30.0, *, clean_env: bool = False) -> None:
+    """Refuse a binary that cannot even print its version.
+
+    The CUDA 0.34 packaging miss (`libcublasLt.so.13` missing) failed here
+    and was invisible to the ZMQ/ldd checks. clean_env drops the gate
+    host's loader variables, so an archive is launched as a user gets it.
+    """
+    env = launch_env(path, clean_env=clean_env)
     try:
         result = subprocess.run(
             [str(path), "-version"],
@@ -493,6 +512,198 @@ def verify_path_for_ship(path: Path, *, launch: bool = True, clean_env: bool = F
                 file=sys.stderr,
             )
     return how
+
+
+# ---------------------------------------------------------------------------
+# Seeded wallet keys, checked on the shipped btxd itself (--run-wallet-check).
+# The official v0.34.15 macOS btxd linked libsodium's randombytes into ML-DSA
+# keygen (fixed by 17c2da89, #253). A new wallet's own private receive
+# descriptor then derived a different address on every call, none of them the
+# address the wallet gave out, so its seed could not restore it. test_btx is a
+# separate link from the archive's btxd, and nothing else here runs a wallet.
+# MendeMatthias proposed this check in the #247 review.
+
+WALLET_CHECK_ARGS = ("-regtest", "-server=1", "-listen=0", "-connect=0", "-dnsseed=0",
+                     "-printtoconsole=0")
+# Tried first. If btxd rejects one ("Invalid parameter -modelnet=0" from a
+# -DWITH_MODELNET=OFF build), it is started again without that one.
+WALLET_CHECK_OPTIONAL_ARGS = ("-modelnet=0", "-matmulvalidation=economic")
+WALLET_CHECK_WALLET = "release-gate"
+
+
+class RpcError(Exception):
+    def __init__(self, code: object, message: str) -> None:
+        super().__init__(f"{message} (code {code})")
+        self.code = code
+
+
+def _free_local_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
+
+
+def _rpc(port: int, cookie: str, method: str, params: list, *, wallet: str | None = None,
+         timeout: float = 60.0) -> object:
+    # http.client, not urllib: a gate host's http_proxy must never see the cookie.
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=timeout)
+    try:
+        conn.request("POST", f"/wallet/{wallet}" if wallet else "/",
+                     json.dumps({"jsonrpc": "1.0", "id": method, "method": method, "params": params}),
+                     {"Authorization": "Basic " + base64.b64encode(cookie.encode()).decode(),
+                      "Content-Type": "application/json"})
+        response = conn.getresponse()
+        raw = response.read()
+    finally:
+        conn.close()
+    try:
+        reply = json.loads(raw)
+    except ValueError:
+        raise RpcError(response.status, raw[:200].decode("utf-8", "replace").strip() or response.reason)
+    if not isinstance(reply, dict):
+        raise RpcError(response.status, "reply is not a JSON-RPC object")
+    if reply.get("error"):
+        error = reply["error"] if isinstance(reply["error"], dict) else {"message": str(reply["error"])}
+        raise RpcError(error.get("code"), str(error.get("message")))
+    return reply.get("result")
+
+
+def _output_tail(path: Path, limit: int = 600) -> str:
+    try:
+        text = path.read_bytes()[-limit:].decode("utf-8", "replace")
+    except OSError:
+        return ""
+    return " ".join(text.split())
+
+
+def _stop_regtest_btxd(proc: subprocess.Popen, port: int, cookie: str | None, timeout: float) -> bool:
+    """Stop through the stop RPC. True when btxd then exited 0 in time.
+
+    A btxd that ignores the RPC gets SIGTERM, its own clean shutdown signal;
+    one that ignores that too is killed, since its datadir is a throwaway
+    regtest one that is deleted next.
+    """
+    if proc.poll() is None and cookie is not None:
+        try:
+            _rpc(port, cookie, "stop", [], timeout=min(timeout, 30.0))
+        except (OSError, RpcError, http.client.HTTPException):
+            pass
+    try:
+        return proc.wait(timeout=timeout) == 0
+    except subprocess.TimeoutExpired:
+        pass
+    proc.terminate()
+    try:
+        proc.wait(timeout=30)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+    return False
+
+
+def _start_regtest_btxd(path: Path, workdir: Path, env: dict[str, str],
+                        timeout: float) -> tuple[subprocess.Popen, int, str]:
+    """Start btxd on regtest under workdir and wait until its RPC answers."""
+    optional = list(WALLET_CHECK_OPTIONAL_ARGS)
+    for attempt in range(len(WALLET_CHECK_OPTIONAL_ARGS) + 1):
+        datadir = workdir / f"datadir{attempt}"
+        datadir.mkdir()
+        output = workdir / f"output{attempt}.log"
+        port = _free_local_port()
+        command = [str(path), f"-datadir={datadir}", f"-rpcport={port}",
+                   *WALLET_CHECK_ARGS, *optional]
+        with output.open("wb") as log:
+            try:
+                proc = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=log,
+                                        stderr=subprocess.STDOUT, env=env)
+            except OSError as exc:
+                raise VerifyError(f"{path}: cannot execute: {exc}") from exc
+        cookie_path = datadir / "regtest" / ".cookie"
+        deadline = time.monotonic() + timeout
+        while proc.poll() is None:
+            if time.monotonic() > deadline:
+                _stop_regtest_btxd(proc, port, None, 0)
+                raise VerifyError(f"{path}: regtest btxd did not answer RPC within {timeout:.0f}s: "
+                                  f"{_output_tail(output)}")
+            try:
+                cookie = cookie_path.read_text(encoding="utf-8").strip()
+                _rpc(port, cookie, "getblockcount", [], timeout=10)
+                return proc, port, cookie
+            except (OSError, RpcError, http.client.HTTPException):
+                time.sleep(0.2)  # no cookie yet, not listening yet, or warming up (-28)
+        text = _output_tail(output)
+        rejected = re.search(r"Invalid parameter (-[A-Za-z0-9_]+)", text)
+        dropped = [arg for arg in optional if rejected and arg.split("=")[0] == rejected.group(1)]
+        if not dropped:
+            how = (f"was killed by signal {-proc.returncode}" if proc.returncode < 0
+                   else f"exited {proc.returncode}")
+            raise VerifyError(f"{path}: regtest btxd {how} before its RPC answered"
+                              + (f": {text}" if text else ""))
+        optional.remove(dropped[0])
+    raise VerifyError(f"{path}: regtest btxd rejected every start")  # pragma: no cover
+
+
+def verify_wallet_derivation(path: Path, *, timeout: float = 120.0, clean_env: bool = True) -> str:
+    """A new wallet's own private receive descriptor must derive its first address.
+
+    Start btxd -regtest in a temporary datadir; createwallet; listdescriptors
+    true; deriveaddresses on each active receive descriptor for index 0,
+    twice; then getnewaddress. Both derivations must agree, and the address
+    must be one of them. Stop through RPC; the datadir is removed.
+    """
+    env = launch_env(path, clean_env=clean_env)
+    with tempfile.TemporaryDirectory(prefix="btx-wallet-check-") as tmpdir:
+        proc, port, cookie = _start_regtest_btxd(path, Path(tmpdir), env, timeout)
+
+        def call(method: str, *params: object, wallet: str | None = None) -> object:
+            return _rpc(port, cookie, method, list(params), wallet=wallet, timeout=timeout)
+
+        problem = ""
+        try:
+            try:
+                call("createwallet", WALLET_CHECK_WALLET)
+                listed = call("listdescriptors", True, wallet=WALLET_CHECK_WALLET)
+                receive = [entry["desc"] for entry in (listed or {}).get("descriptors", [])
+                           if entry.get("active") and not entry.get("internal")]
+                derived = [(call("deriveaddresses", desc, [0, 0]), call("deriveaddresses", desc, [0, 0]))
+                           for desc in receive]
+                first = call("getnewaddress", wallet=WALLET_CHECK_WALLET)
+            except (RpcError, KeyError, TypeError, AttributeError) as exc:
+                raise VerifyError(f"{path}: wallet RPC on regtest failed: {exc}") from exc
+            except (OSError, http.client.HTTPException) as exc:
+                raise VerifyError(f"{path}: lost the regtest btxd RPC connection: {exc}") from exc
+            for once, again in derived:
+                if once != again or len(once) != 1:
+                    problem = (f"{path}: index 0 of the new wallet's own private receive descriptor "
+                               f"derived {', '.join(once)}, then {', '.join(again)}; the wallet's first "
+                               f"address is {first}")
+                    break
+            if receive and not problem and first not in {once[0] for once, _ in derived}:
+                problem = (f"{path}: index 0 of the new wallet's own private receive descriptor derives "
+                           f"{', '.join(once[0] for once, _ in derived)}, but the wallet's first address "
+                           f"is {first}")
+            if problem:
+                problem += (". Its ML-DSA keys do not follow from its seed, so a seed backup would not "
+                            "restore it (libsodium's randombytes in ML-DSA keygen: v0.34.15 macOS, 17c2da89)")
+            elif not receive:
+                problem = f"{path}: listdescriptors true shows no active receive descriptor"
+        finally:
+            stopped = _stop_regtest_btxd(proc, port, cookie, timeout)
+        if problem:
+            raise VerifyError(problem)
+        if not stopped:
+            raise VerifyError(f"{path}: regtest btxd did not exit 0 within {timeout:.0f}s of the stop RPC")
+    return "wallet-derivation"
+
+
+def run_wallet_check(path: Path, *, clean_env: bool = True) -> str:
+    """verify_wallet_derivation on the real binary, where this host can run it."""
+    target = resolve_verify_target(path)
+    kind = classify(target)
+    if not native_launch_possible(kind):
+        raise VerifyError(f"{target}: --run-wallet-check needs a gate host that can run this btxd "
+                          f"({kind} on {sys.platform})")
+    return verify_wallet_derivation(target, clean_env=clean_env)
 
 
 # ---------------------------------------------------------------------------
@@ -962,11 +1173,14 @@ def verify_glibc_ceiling(root: Path, ceiling: str | None = None) -> None:
 
 
 def verify_archive(archive: Path, *, floor: dict[str, str] | None = None,
-                   require_model_helpers: bool = False, launch: bool = True) -> str:
+                   require_model_helpers: bool = False, launch: bool = True,
+                   wallet_check: bool = False) -> str:
     """Gate a shippable tarball/zip: its members, every binary in it, then btxd.
 
     All problems are collected and reported together. btxd is launched only
     when nothing else failed, with the gate host's loader variables removed.
+    wallet_check (opt-in) runs verify_wallet_derivation on the archive's btxd
+    whatever else failed, so one run reports both.
     """
     if not archive.is_file():
         raise VerifyError(f"{archive}: missing archive")
@@ -982,6 +1196,7 @@ def verify_archive(archive: Path, *, floor: dict[str, str] | None = None,
         except VerifyError as exc:
             problems.append(str(exc).replace(f"{dest}{os.sep}", ""))
         how = ""
+        btxd = None
         try:
             btxd = find_packaged_btxd(dest)
             how = verify_path_for_ship(btxd, launch=launch and not problems, clean_env=True)
@@ -996,6 +1211,16 @@ def verify_archive(archive: Path, *, floor: dict[str, str] | None = None,
                 how = f"{how}+cli"
         except VerifyError as exc:
             problems.append(str(exc).replace(f"{dest}{os.sep}", ""))
+        if wallet_check and btxd is not None:
+            try:
+                how = f"{how}+{run_wallet_check(btxd, clean_env=True)}"
+                if problems:  # the FAIL lists only problems: say that this part passed
+                    print(f"verify_release_btxd: note {archive.name}: "
+                          f"{resolve_verify_target(btxd).relative_to(dest)}: wallet check passed",
+                          file=sys.stderr)
+            except VerifyError as exc:
+                problems.append(str(exc).replace(f"{dest}{os.sep}", ""))
+        problems = list(dict.fromkeys(problems))  # one binary can fail two passes the same way
         if problems:
             raise VerifyError(f"{archive.name}: {len(problems)} problem(s)\n  - " + "\n  - ".join(problems))
         return f"{how}+contents"
@@ -1040,6 +1265,13 @@ def main(argv: list[str] | None = None) -> int:
         "archive). A release cut must launch.",
     )
     parser.add_argument(
+        "--run-wallet-check",
+        action="store_true",
+        help="Also start btxd -regtest in a temporary datadir and require index 0 of a new wallet's "
+        "own private receive descriptor to derive the wallet's first address, twice (ML-DSA keys "
+        "must follow from the seed). Takes a few seconds. FAIL on a host that cannot run the btxd.",
+    )
+    parser.add_argument(
         "--allow-non-binary",
         action="store_true",
         help="Exit 0 on non-ELF/Mach-O/PE inputs (unit-test stubs only; never for release).",
@@ -1047,6 +1279,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if not args.binaries and not args.archives:
         parser.error("pass at least one binary or --archive")
+    if args.run_wallet_check and args.no_launch:
+        parser.error("--run-wallet-check runs btxd; drop --no-launch")
     floor = dict(DEFAULT_ABI_FLOOR)
     for item in args.floor:
         name, _, version = item.partition("=")
@@ -1058,7 +1292,7 @@ def main(argv: list[str] | None = None) -> int:
         path = raw.expanduser().resolve()
         try:
             how = verify_archive(path, floor=floor, require_model_helpers=args.require_model_helpers,
-                                 launch=not args.no_launch)
+                                 launch=not args.no_launch, wallet_check=args.run_wallet_check)
         except VerifyError as exc:
             print(f"verify_release_btxd: FAIL {exc}", file=sys.stderr)
             failures += 1
@@ -1087,10 +1321,24 @@ def main(argv: list[str] | None = None) -> int:
             )
             failures += 1
             continue
+        failed = False
         try:
             how = verify_path_for_ship(path)
         except VerifyError as exc:
             print(f"verify_release_btxd: FAIL {exc}", file=sys.stderr)
+            failed = True
+        if args.run_wallet_check and is_daemon(path):
+            # Run even after a static FAIL, so one run reports both.
+            try:
+                check = run_wallet_check(path, clean_env=False)
+                if failed:
+                    print(f"verify_release_btxd: note {path}: wallet check passed", file=sys.stderr)
+                else:
+                    how = f"{how}+{check}"
+            except VerifyError as exc:
+                print(f"verify_release_btxd: FAIL {exc}", file=sys.stderr)
+                failed = True
+        if failed:
             failures += 1
             continue
         print(f"verify_release_btxd: PASS {path} ({how})")

@@ -50,6 +50,12 @@ Release Process
   a directory is empty.
   0.35.0rc1 was repacked outside `package_release_archive.py`; the btxd-only
   gate passed all three archives, and all three fail this one (#235, #237).
+  On a gate host that can run the archive's `btxd` (a Mac for the macOS
+  archive, Linux for the Linux ones), add `--run-wallet-check`: it starts that
+  `btxd` on regtest in a temporary datadir and fails when a new wallet's own
+  private receive descriptor does not derive the wallet's first address, twice.
+  The official v0.34.15 macOS `btxd` fails it (ML-DSA keygen linked libsodium's
+  `randombytes`, #253); `test_btx` is a separate link and cannot show that.
 * Complete the Profile-1 ExactReplay golden corpus and seal described below.
   Any change under `CMakeLists.txt`, `cmake/`, `src/`, or `contrib/matmul-v4/`
   (except the inert manifest `.data` file) invalidates the previous seal.

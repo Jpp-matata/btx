@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import io
+import json
 import os
 import pathlib
 import shutil
@@ -711,6 +712,168 @@ class ArchiveContentGateTest(unittest.TestCase):
         if shutil.which("codesign"):  # verify_macos_signature runs only where codesign exists
             self.assertIn("bin/btxd: codesign --verify --strict failed", macos)
             self.assertEqual(macos.count("codesign --verify --strict failed"), 1)
+
+
+# A stand-in btxd for --run-wallet-check: regtest-style cookie and JSON-RPC on
+# -rpcport. FAKE_BTXD_MODE picks the behaviour; FAKE_BTXD_LOG records argv.
+FAKE_BTXD = r'''#!{python}
+import base64, http.server, json, os, sys, threading, time
+args = sys.argv[1:]
+mode = os.environ.get("FAKE_BTXD_MODE", "stable")
+with open(os.environ["FAKE_BTXD_LOG"], "a") as fh:
+    fh.write(json.dumps({"pid": os.getpid(), "args": args}) + "\n")
+opts = dict(a[1:].split("=", 1) for a in args if a.startswith("-") and "=" in a)
+if mode == "no-modelnet" and "modelnet" in opts:
+    sys.stderr.write("Error: Error parsing command line arguments: Invalid parameter -modelnet=" + opts["modelnet"] + "\n")
+    sys.exit(1)
+if mode == "exit":
+    sys.stderr.write("Error: Unable to start HTTP server.\n")
+    sys.exit(1)
+if mode == "hang":
+    time.sleep(600)
+cookie_path = os.path.join(opts["datadir"], "regtest", ".cookie")
+os.makedirs(os.path.dirname(cookie_path))
+cookie = "__cookie__:" + os.urandom(16).hex()
+calls = [0]
+
+def address():
+    calls[0] += 1
+    return "bcrt1q" + (str(calls[0]) if mode == "random" else "stable")
+
+class Handler(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        if self.headers.get("Authorization") != "Basic " + base64.b64encode(cookie.encode()).decode():
+            self.send_response(401); self.end_headers(); return
+        method, params, result, error = request["method"], request["params"], None, None
+        if method == "getblockcount":
+            result = 0
+        elif method == "createwallet" and mode != "no-wallet":
+            result = {"name": params[0]}
+        elif method == "listdescriptors":
+            result = {"descriptors": [
+                {"desc": "mr(pqhd(tprv/0/*))#recv", "active": True, "internal": False},
+                {"desc": "mr(pqhd(tprv/1/*))#change", "active": True, "internal": True}]}
+        elif method == "deriveaddresses":
+            result = [address()]
+        elif method == "getnewaddress":
+            result = "bcrt1qother" if mode == "mismatch" else address()
+        elif method == "stop":
+            result = "BTX node stopping"
+            if mode != "no-stop":
+                threading.Thread(target=server.shutdown).start()
+        else:
+            error = {"code": -32601, "message": "Method not found"}
+        body = json.dumps({"result": result, "error": error, "id": request["id"]}).encode()
+        self.send_response(500 if error else 200)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *args):
+        pass
+
+server = http.server.HTTPServer(("127.0.0.1", int(opts["rpcport"])), Handler)
+with open(cookie_path, "w") as fh:
+    fh.write(cookie)
+server.serve_forever()
+os.remove(cookie_path)
+'''
+
+
+class WalletDerivationCheckTest(unittest.TestCase):
+    """--run-wallet-check: the shipped btxd's own wallet must derive its first address."""
+
+    def setUp(self) -> None:
+        self.mod = load_module()
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = pathlib.Path(self.tmp.name)
+        self.btxd = self.root / "btxd"
+        self.btxd.write_text(FAKE_BTXD.replace("{python}", sys.executable), encoding="utf-8")
+        self.btxd.chmod(0o755)
+        self.log = self.root / "argv.log"
+
+    def _check(self, mode, **kwargs):
+        with mock.patch.dict(os.environ, {"FAKE_BTXD_MODE": mode, "FAKE_BTXD_LOG": str(self.log)}):
+            return self.mod.verify_wallet_derivation(self.btxd, **kwargs)
+
+    def _fails(self, mode, **kwargs):
+        with self.assertRaises(self.mod.VerifyError) as caught:
+            self._check(mode, **kwargs)
+        return str(caught.exception)
+
+    def _starts(self):
+        return [json.loads(line) for line in self.log.read_text().splitlines()]
+
+    def _assert_gone(self):
+        for start in self._starts():
+            with self.assertRaises(ProcessLookupError):
+                os.kill(start["pid"], 0)
+            datadir = [a.split("=", 1)[1] for a in start["args"] if a.startswith("-datadir=")][0]
+            self.assertFalse(pathlib.Path(datadir).exists(), datadir)
+
+    def test_reproducible_wallet_passes_and_cleans_up(self) -> None:
+        self.assertEqual(self._check("stable"), "wallet-derivation")
+        (start,) = self._starts()
+        for arg in ("-regtest", "-listen=0", "-modelnet=0", "-matmulvalidation=economic"):
+            self.assertIn(arg, start["args"])
+        self._assert_gone()
+
+    def test_random_keygen_fails(self) -> None:
+        # The v0.34.15 macOS shape: every derivation of index 0 is a new address.
+        text = self._fails("random")
+        self.assertIn("derived bcrt1q1, then bcrt1q2; the wallet's first address is bcrt1q3", text)
+        self.assertIn("a seed backup would not restore it", text)
+        self.assertNotIn("tprv", text)  # never print the private descriptor
+        self._assert_gone()
+
+    def test_stable_derivation_must_still_match_the_wallet(self) -> None:
+        text = self._fails("mismatch")
+        self.assertIn("derives bcrt1qstable, but the wallet's first address is bcrt1qother", text)
+
+    def test_build_without_modelnet_is_started_again_without_that_flag(self) -> None:
+        self.assertEqual(self._check("no-modelnet"), "wallet-derivation")
+        first, second = self._starts()
+        self.assertIn("-modelnet=0", first["args"])
+        self.assertNotIn("-modelnet=0", second["args"])
+        self.assertIn("-matmulvalidation=economic", second["args"])
+        self._assert_gone()
+
+    def test_startup_failure_timeout_and_unclean_stop_fail(self) -> None:
+        self.assertIn("exited 1 before its RPC answered: Error: Unable to start HTTP server.", self._fails("exit"))
+        self.assertIn("did not answer RPC within 2s", self._fails("hang", timeout=2))
+        self.assertIn("did not exit 0 within 2s of the stop RPC", self._fails("no-stop", timeout=2))
+        self.assertIn("wallet RPC on regtest failed: Method not found", self._fails("no-wallet"))
+        self._assert_gone()
+
+    def test_archive_and_cli_plumbing(self) -> None:
+        archive = self.root / "btx-0.35.0-x86_64-linux-gnu.tar.gz"
+        write_tar(archive, {"btx-0.35.0/bin/btxd": make_elf(["libzmq.so.5"], extra=ZMQ_HELP)})
+        with mock.patch.object(self.mod, "elf_needed_ldd", side_effect=lambda p: self.mod.elf_dynamic_info(p).needed):
+            self.mod.verify_archive(archive, launch=False)
+            with mock.patch.object(self.mod, "native_launch_possible", return_value=False):
+                with self.assertRaises(self.mod.VerifyError) as caught:
+                    self.mod.verify_archive(archive, launch=False, wallet_check=True)
+            self.assertIn("bin/btxd: --run-wallet-check needs a gate host that can run this btxd", str(caught.exception))
+            with mock.patch.object(self.mod, "native_launch_possible", return_value=True), \
+                    mock.patch.object(self.mod, "verify_wallet_derivation", return_value="wallet-derivation") as check:
+                self.assertIn("+wallet-derivation", self.mod.verify_archive(archive, launch=False, wallet_check=True))
+            check.assert_called_once()
+            self.assertEqual(check.call_args.kwargs, {"clean_env": True})
+            # When something else fails, the FAIL still says the wallet check passed.
+            write_tar(archive, {"btx-0.35.0/bin/btxd": make_elf(["libzmq.so.5"], extra=ZMQ_HELP)},
+                      uid=1000, uname="builder")
+            with mock.patch.object(self.mod, "native_launch_possible", return_value=True), \
+                    mock.patch.object(self.mod, "verify_wallet_derivation", return_value="wallet-derivation"), \
+                    mock.patch("sys.stderr", new_callable=io.StringIO) as err, \
+                    self.assertRaises(self.mod.VerifyError) as caught:
+                self.mod.verify_archive(archive, launch=False, wallet_check=True)
+            self.assertIn("not owned by root:root", str(caught.exception))
+            self.assertIn(f"note {archive.name}: btx-0.35.0/bin/btxd: wallet check passed", err.getvalue())
+        with self.assertRaises(SystemExit), mock.patch("sys.stderr", new_callable=io.StringIO) as err:
+            self.mod.main(["--run-wallet-check", "--no-launch", "--archive", str(archive)])
+        self.assertIn("--run-wallet-check runs btxd; drop --no-launch", err.getvalue())
 
 
 if __name__ == "__main__":
