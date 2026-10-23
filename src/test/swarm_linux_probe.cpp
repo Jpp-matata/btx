@@ -7,10 +7,12 @@
 // copy it into a root and run it through SwarmRunConfined or
 // SwarmRunFilesystemJail with no arguments; it works in its own directory
 // (/ inside the jail). A marker file there selects a mode:
-// spread.mode writes up to 64 files of 1 MiB, 20 ms apart; burst.mode writes
-// three files of 1 MiB at once and exits. Each mode writes <mode>.started
-// before and <mode>.done after its work. Without a mode it records its
-// RLIMIT_FSIZE in probe.out.
+// spread.mode writes up to 64 files of 1 MiB, 20 ms apart, and writes
+// spread.done at the end; burst.mode writes one file of 1 MiB and
+// burst.done, then extends a second file to 2 MiB with a single ftruncate
+// and exits, so its tree goes over a limit only in its last step. Each mode
+// writes <mode>.started first. Without a mode it records its RLIMIT_FSIZE in
+// probe.out.
 
 #include <fcntl.h>
 #include <sys/resource.h>
@@ -74,12 +76,12 @@ int main(int argc, char** argv)
     }
     if (Exists("burst.mode")) {
         Mark("burst.started");
-        for (int i = 0; i < 3; ++i) {
-            std::snprintf(name, sizeof(name), "burst%d.bin", i);
-            if (!WriteBlock(name)) return 4;
-        }
+        if (!WriteBlock("burst0.bin")) return 4;
         Mark("burst.done");
-        return 0;
+        const int fd = open(At("burst1.bin"), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+        if (fd < 0) return 4;
+        const bool extended = ftruncate(fd, 2 << 20) == 0;
+        return close(fd) == 0 && extended ? 0 : 4;
     }
     rlimit limit{};
     if (getrlimit(RLIMIT_FSIZE, &limit) != 0) return 5;

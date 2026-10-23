@@ -392,8 +392,8 @@ BOOST_AUTO_TEST_CASE(linux_tree_limit_enforced_during_run)
     BOOST_CHECK_LT(files, 64);
 }
 
-// A helper that writes past max_tree_bytes and exits before the next walk is
-// refused by the check after exit.
+// A helper whose tree goes past max_tree_bytes only in its last step before
+// exit, too late for a walk while it runs, is refused by the check after exit.
 BOOST_AUTO_TEST_CASE(linux_tree_limit_refuses_result_after_run)
 {
     if (!ConfinementAvailable()) return;
