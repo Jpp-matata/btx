@@ -7,11 +7,15 @@
 // SwarmRunFilesystemJail with no arguments. It records what it can do in
 // <its directory>/probe.out. A marker file in its directory selects a mode:
 // alloc.mode touches 4 GiB, spin.mode burns 20 s of CPU, spin_ignore.mode
-// does the same with SIGXCPU ignored. Each mode writes <mode>.started before
-// and <mode>.done after its work, so a test can tell a stopped child from one
-// that never ran or ran to the end. Without a mode it also records whether it
-// can look up a Mach service, fork, signal its parent, create POSIX shared
-// memory, and whether it starts in its own directory.
+// does the same with SIGXCPU ignored. fill.mode writes one 64 MiB file in
+// 1 MiB blocks and keeps writing after a short write; fill_ignore.mode
+// ignores SIGXFSZ, stops at the first failed write and writes fill.refused;
+// spread.mode writes eight 1 MiB files.
+// Each mode writes <mode>.started before and <mode>.done after its work, so a
+// test can tell a stopped child from one that never ran or ran to the end.
+// Without a mode it also records whether it can look up a Mach service, fork,
+// signal its parent, create POSIX shared memory, and whether it starts in its
+// own directory.
 
 #include <arpa/inet.h>
 #include <fcntl.h>
@@ -156,6 +160,45 @@ int main(int argc, char** argv)
         Mark(dir + "/spin.done");
         return 5;
     }
+    const bool ignore_sigxfsz = Opens(dir + "/fill_ignore.mode", O_RDONLY);
+    if (ignore_sigxfsz || Opens(dir + "/fill.mode", O_RDONLY)) {
+        if (ignore_sigxfsz) {
+            signal(SIGXFSZ, SIG_IGN);
+        }
+        Mark(dir + "/fill.started");
+        static char block[1 << 20];
+        const int fd = open((dir + "/fill.bin").c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+        if (fd < 0) {
+            return 8;
+        }
+        // A short write stops at the limit; only the next write raises SIGXFSZ.
+        bool full = true;
+        for (int i = 0; i < 64; ++i) {
+            if (write(fd, block, sizeof(block)) != static_cast<ssize_t>(sizeof(block))) {
+                full = false;
+                if (ignore_sigxfsz) {
+                    break;
+                }
+            }
+        }
+        close(fd);
+        Mark(dir + (full ? "/fill.done" : "/fill.refused"));
+        return 0;
+    }
+    if (Opens(dir + "/spread.mode", O_RDONLY)) {
+        Mark(dir + "/spread.started");
+        static char block[1 << 20];
+        for (int i = 0; i < 8; ++i) {
+            const int fd = open((dir + "/spread" + std::to_string(i) + ".bin").c_str(),
+                                O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+            if (fd < 0 || write(fd, block, sizeof(block)) != static_cast<ssize_t>(sizeof(block))) {
+                return 9;
+            }
+            close(fd);
+        }
+        Mark(dir + "/spread.done");
+        return 0;
+    }
     FILE* out = std::fopen((dir + "/probe.out").c_str(), "w");
     if (out == nullptr) {
         return 6;
@@ -165,6 +208,7 @@ int main(int argc, char** argv)
     std::fprintf(out, "loopback_bind=%d\n", LoopbackBind() ? 1 : 0);
     std::fprintf(out, "nofile=%llu\n", Limit(RLIMIT_NOFILE));
     std::fprintf(out, "cpu=%llu\n", Limit(RLIMIT_CPU));
+    std::fprintf(out, "fsize=%llu\n", Limit(RLIMIT_FSIZE));
     std::fprintf(out, "mach_lookup=%d\n", MachLookup() ? 1 : 0);
     std::fprintf(out, "fork=%d\n", Forks() ? 1 : 0);
     std::fprintf(out, "signal_parent=%d\n", kill(getppid(), 0) == 0 ? 1 : 0);

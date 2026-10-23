@@ -282,7 +282,10 @@ SwarmFilesystemJailResult SwarmRunFilesystemJail(const SwarmFilesystemJailReques
     confined.max_tree_bytes = request.max_tree_bytes;
     confined.network_denied = true;
     const auto run = SwarmRunConfined(confined, err);
-    if (!run.launched) return Refuse(run.code == "CONFINEMENT_TIMEOUT" ? "JAIL_TIMEOUT" : "JAIL_ABSENT", err);
+    if (!run.launched) {
+        return Refuse(run.code == "CONFINEMENT_TIMEOUT" ? "JAIL_TIMEOUT" :
+                      run.code == "TREE_LIMIT" ? "JAIL_TREE_LIMIT" : "JAIL_ABSENT", err);
+    }
     SwarmFilesystemJailResult result;
     result.launched = true; result.jailed = true; result.code = "JAILED";
     result.child_status = run.child_status;

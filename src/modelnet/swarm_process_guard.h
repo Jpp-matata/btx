@@ -153,6 +153,29 @@ inline bool NullStandardDescriptors()
     return ok;
 }
 
+/**
+ * True while the regular files below root total at most max_bytes (logical
+ * sizes; links are not followed). Any error reading the tree, such as a
+ * directory the helper made unreadable, counts as over the limit.
+ */
+inline bool TreeWithin(const fs::path& root, uint64_t max_bytes)
+{
+    std::error_code ec;
+    uint64_t total = 0;
+    fs::recursive_directory_iterator current(root, fs::directory_options::none, ec), end;
+    if (ec) return false;
+    for (; current != end; current.increment(ec)) {
+        if (ec) return false;
+        const auto status = current->symlink_status(ec);
+        if (ec) return false;
+        if (!fs::is_regular_file(status)) continue;
+        const uintmax_t bytes = current->file_size(ec);
+        if (ec || bytes > max_bytes - total) return false;
+        total += bytes;
+    }
+    return !ec;
+}
+
 #ifdef __APPLE__
 inline bool DirectoryOpenable(const char* path)
 {

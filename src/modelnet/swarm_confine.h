@@ -23,7 +23,10 @@ namespace modelnet {
  * useful RLIMIT_AS and only sends SIGXCPU at RLIMIT_CPU, so there the parent
  * enforces max_address_bytes on the physical footprint and max_cpu_seconds
  * (plus 250 ms) on CPU time, sampled every 10 ms (SIGKILL; one interval of
- * overshoot). Windows uses a
+ * overshoot). On macOS, RLIMIT_FSIZE caps each file at max_tree_bytes during
+ * the run, and the regular files below root must total at most
+ * max_tree_bytes before launch and after exit (TREE_LIMIT otherwise). Linux
+ * does not enforce max_tree_bytes yet. Windows uses a
  * zero-capability AppContainer, private staged files, a one-process Job with
  * memory/CPU/wall limits and an explicit stdio handle allowlist. max_nofile
  * is a POSIX descriptor quota; Windows bounds inherited handles and process

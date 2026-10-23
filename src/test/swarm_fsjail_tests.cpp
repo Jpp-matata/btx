@@ -207,6 +207,23 @@ BOOST_AUTO_TEST_CASE(macos_interpreter_outside_root_refused)
     BOOST_CHECK_EQUAL(result.code, "JAIL_ABSENT");
     BOOST_CHECK(!ran);
 }
+
+// The jail passes max_tree_bytes to the macOS confinement: a root over the
+// limit is refused before launch with its own code.
+BOOST_AUTO_TEST_CASE(macos_tree_limit_refused)
+{
+    const fs::path root = MacRoot("btx-swarm-fsjail-macos-tree");
+    modelnet::SwarmFilesystemJailRequest request = BaseRequest(CopyProbe(root), root);
+    request.max_tree_bytes = fs::file_size(request.helper) + 1024;
+    {
+        std::ofstream extra{root / "input.bin", std::ios::binary};
+        extra << std::string(4096, 'x');
+    }
+    ExpectRefusal(request, "JAIL_TREE_LIMIT");
+    const bool ran = fs::exists(root / "probe.out");
+    fs::remove_all(root);
+    BOOST_CHECK(!ran);
+}
 #endif
 
 BOOST_AUTO_TEST_SUITE_END()

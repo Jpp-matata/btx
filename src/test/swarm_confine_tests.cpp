@@ -199,6 +199,7 @@ BOOST_AUTO_TEST_CASE(macos_helper_runs_confined)
     BOOST_CHECK(out.find("loopback_bind=0\n") != std::string::npos);
     BOOST_CHECK(out.find("nofile=64\n") != std::string::npos);
     BOOST_CHECK(out.find("cpu=30\n") != std::string::npos);
+    BOOST_CHECK(out.find("fsize=1073741824\n") != std::string::npos);
     // Regression checks for the default-deny profile.
     for (const char* line : {"mach_lookup=0\n", "fork=0\n", "signal_parent=0\n", "posix_shm=0\n", "cwd_root=1\n"}) {
         BOOST_CHECK_MESSAGE(out.find(line) != std::string::npos, "probe line " << line);
@@ -261,6 +262,84 @@ BOOST_AUTO_TEST_CASE(macos_cpu_limit_holds_when_sigxcpu_ignored)
     BOOST_CHECK(started);
     BOOST_CHECK(!done);
     BOOST_CHECK_LT(seconds, 10);
+}
+
+namespace {
+void WriteBytes(const fs::path& path, size_t bytes)
+{
+    std::ofstream out{path, std::ios::binary};
+    out << std::string(bytes, 'x');
+    BOOST_REQUIRE(out);
+}
+
+uintmax_t FileBytes(const fs::path& path)
+{
+    return fs::exists(path) ? fs::file_size(path) : 0;
+}
+} // namespace
+
+// A root that is already over max_tree_bytes is refused before launch.
+BOOST_AUTO_TEST_CASE(macos_tree_limit_refuses_root_before_launch)
+{
+    const fs::path root = MacRoot("btx-swarm-confine-macos-tree-before");
+    modelnet::SwarmConfineRequest request = BaseRequest(CopyProbe(root, nullptr), root);
+    request.max_tree_bytes = fs::file_size(request.helper) + 1024;
+    WriteBytes(root / "input.bin", 4096);
+    ExpectRefusal(request, "TREE_LIMIT");
+    const bool ran = fs::exists(root / "probe.out");
+    fs::remove_all(root);
+    BOOST_CHECK(!ran);
+}
+
+// RLIMIT_FSIZE stops one large file during the run: SIGXFSZ kills the probe
+// (a signal reads as not executed), and the file never passes max_tree_bytes.
+BOOST_AUTO_TEST_CASE(macos_file_size_limit_enforced)
+{
+    const fs::path root = MacRoot("btx-swarm-confine-macos-fill");
+    modelnet::SwarmConfineRequest request = BaseRequest(CopyProbe(root, "fill.mode"), root);
+    request.max_tree_bytes = fs::file_size(request.helper) + (8 << 20);
+    std::string err;
+    const modelnet::SwarmConfineResult result = modelnet::SwarmRunConfined(request, err);
+    const bool started = fs::exists(root / "fill.started");
+    const bool done = fs::exists(root / "fill.done");
+    const uintmax_t written = FileBytes(root / "fill.bin");
+    fs::remove_all(root);
+    BOOST_CHECK_EQUAL(result.code, "CONFINEMENT_ABSENT");
+    BOOST_CHECK(!result.launched);
+    BOOST_CHECK(started);
+    BOOST_CHECK(!done);
+    BOOST_CHECK_LE(written, request.max_tree_bytes);
+}
+
+// A helper that ignores SIGXFSZ gets EFBIG and exits normally. The file still
+// stops at max_tree_bytes, and the tree check after exit refuses the result.
+BOOST_AUTO_TEST_CASE(macos_file_size_limit_holds_when_sigxfsz_ignored)
+{
+    const fs::path root = MacRoot("btx-swarm-confine-macos-fill-ignore");
+    modelnet::SwarmConfineRequest request = BaseRequest(CopyProbe(root, "fill_ignore.mode"), root);
+    request.max_tree_bytes = fs::file_size(request.helper) + (8 << 20);
+    ExpectRefusal(request, "TREE_LIMIT");
+    const bool refused = fs::exists(root / "fill.refused");
+    const bool done = fs::exists(root / "fill.done");
+    const uintmax_t written = FileBytes(root / "fill.bin");
+    fs::remove_all(root);
+    BOOST_CHECK(refused);
+    BOOST_CHECK(!done);
+    BOOST_CHECK_GT(written, 0U);
+    BOOST_CHECK_LE(written, request.max_tree_bytes);
+}
+
+// Files that are each below RLIMIT_FSIZE but together above max_tree_bytes:
+// the probe runs to the end, and the tree check after exit refuses the result.
+BOOST_AUTO_TEST_CASE(macos_tree_limit_refuses_result_after_run)
+{
+    const fs::path root = MacRoot("btx-swarm-confine-macos-spread");
+    modelnet::SwarmConfineRequest request = BaseRequest(CopyProbe(root, "spread.mode"), root);
+    request.max_tree_bytes = fs::file_size(request.helper) + (4 << 20);
+    ExpectRefusal(request, "TREE_LIMIT");
+    const bool done = fs::exists(root / "spread.done");
+    fs::remove_all(root);
+    BOOST_CHECK(done);
 }
 #endif
 
