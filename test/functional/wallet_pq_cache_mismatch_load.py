@@ -20,6 +20,7 @@ the seed. The wallets must load over RPC and at startup, unlock with a relock
 timer, log the mismatch, keep the cached pubkeys (their scripts are built from
 them), and spend coins received after the load through the SLH-DSA leaf.
 """
+from pathlib import Path
 import sqlite3
 import struct
 
@@ -44,14 +45,26 @@ class WalletPQCacheMismatchLoadTest(BitcoinTestFramework):
         self.setup_clean_chain = True
         self.extra_args = [[
             "-autoshieldcoinbase=0",
-            "-modelnet=0",
-            "-modelbind=off",
+            *self.modelnet_off_args(),
             # Regtest-only MatMul knobs that keep block generation fast.
             "-regtestmatmulbindingheight=2147483647",
             "-regtestmatmulproductdigestheight=2147483647",
             "-regtestmatmulv4height=2147483647",
             "-regtestmatmulrequireproductpayload=0",
         ]]
+
+    def modelnet_off_args(self):
+        """Keep the model helper off on builds that have it.
+
+        A -DWITH_MODELNET=OFF build does not register -modelnet or -modelbind
+        and refuses to start with them. It does not build btx-modeld either;
+        the model network tests skip on the same check.
+        """
+        exeext = self.config["environment"].get("EXEEXT", "")
+        builddir = self.config["environment"].get("BUILDDIR", "")
+        if Path(builddir, "bin", f"btx-modeld{exeext}").is_file():
+            return ["-modelnet=0", "-modelbind=off"]
+        return []
 
     def skip_test_if_missing_module(self):
         self.skip_if_no_wallet()
