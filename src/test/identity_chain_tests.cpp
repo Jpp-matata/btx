@@ -13,7 +13,7 @@
 
 namespace {
 
-void Idle(modelnet::IdentityChain& eng)
+void Idle(modelnet::IdentityChainRecord& eng)
 {
     std::string err;
     BOOST_CHECK(!eng.launched());
@@ -50,7 +50,7 @@ BOOST_FIXTURE_TEST_SUITE(identity_chain_tests, BasicTestingSetup)
 
 BOOST_AUTO_TEST_CASE(empty_id_is_field)
 {
-    modelnet::IdentityChain eng;
+    modelnet::IdentityChainRecord eng;
     std::string err = "stale";
     BOOST_CHECK(!eng.Open("", err));
     BOOST_CHECK_EQUAL(err, "FIELD");
@@ -66,7 +66,7 @@ BOOST_AUTO_TEST_CASE(empty_id_is_field)
 
 BOOST_AUTO_TEST_CASE(open_sets_epoch_one)
 {
-    modelnet::IdentityChain eng;
+    modelnet::IdentityChainRecord eng;
     std::string err = "stale";
     BOOST_CHECK(eng.Open("alpha", err));
     BOOST_CHECK(err.empty());
@@ -85,7 +85,7 @@ BOOST_AUTO_TEST_CASE(open_sets_epoch_one)
 
 BOOST_AUTO_TEST_CASE(expiry_equality_does_not_advance)
 {
-    modelnet::IdentityChain eng;
+    modelnet::IdentityChainRecord eng;
     std::string err = "stale";
     BOOST_CHECK(eng.Open("alpha", err));
     BOOST_CHECK_EQUAL(eng.epoch("alpha"), static_cast<int64_t>(1));
@@ -108,7 +108,7 @@ BOOST_AUTO_TEST_CASE(expiry_equality_does_not_advance)
 
 BOOST_AUTO_TEST_CASE(rotate_advances_to_epoch_two)
 {
-    modelnet::IdentityChain eng;
+    modelnet::IdentityChainRecord eng;
     std::string err = "stale";
     BOOST_CHECK(eng.Open("alpha", err));
     BOOST_CHECK(eng.Open("beta", err));
@@ -131,7 +131,7 @@ BOOST_AUTO_TEST_CASE(rotate_advances_to_epoch_two)
 
 BOOST_AUTO_TEST_CASE(stale_recover_keeps_epoch)
 {
-    modelnet::IdentityChain eng;
+    modelnet::IdentityChainRecord eng;
     std::string err = "stale";
     BOOST_CHECK(eng.Open("alpha", err));
     const int64_t now_ms = static_cast<int64_t>(8000);
@@ -160,7 +160,7 @@ BOOST_AUTO_TEST_CASE(stale_recover_keeps_epoch)
 
 BOOST_AUTO_TEST_CASE(unknown_id_is_identity)
 {
-    modelnet::IdentityChain eng;
+    modelnet::IdentityChainRecord eng;
     std::string err = "stale";
     const int64_t now_ms = static_cast<int64_t>(1000);
     const int64_t until_ms = now_ms + static_cast<int64_t>(1);

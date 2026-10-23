@@ -369,7 +369,6 @@ void Shutdown(NodeContext& node)
     Assert(node.args);
 
 #ifdef ENABLE_MODELNET
-    modelnet::StopSwarmObserver();
     if (g_model_helper) {
         LogPrintf("Shutdown: stopping owned btx-modeld helper\n");
         g_model_helper->Stop();
@@ -428,6 +427,10 @@ void Shutdown(NodeContext& node)
         }
     };
     flush_chainstate_for_shutdown("before HTTP worker join");
+#ifdef ENABLE_MODELNET
+    // The observer can block in a pass. Seal chainstate before joining it.
+    modelnet::StopSwarmObserver();
+#endif
 
     StopHTTPRPC();
     StopREST();

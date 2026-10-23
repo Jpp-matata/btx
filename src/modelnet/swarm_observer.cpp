@@ -179,6 +179,12 @@ bool Fingerprint(const fs::path& path, std::string& out, std::string& err)
         out = "missing";
         return true;
     }
+    std::error_code kind;
+    // A fifo or directory must not be read. stat is enough; a read would block.
+    if (!fs::is_regular_file(path, kind) || kind) {
+        out = "skipped";
+        return true;
+    }
     std::error_code ec;
     const auto sz = fs::file_size(path, ec);
     if (ec) {
@@ -339,6 +345,7 @@ void StartSwarmObserver(const fs::path& modeldir)
     StopSwarmObserver();
     if (modeldir.empty()) return;
     g_stop.store(false);
+    try {
     g_thread = std::thread([modeldir] {
         InputGeneration generation;
         GuardSupervisor guard;
@@ -347,15 +354,26 @@ void StartSwarmObserver(const fs::path& modeldir)
             LogPrintf("swarm guard: %s (monetary node continues)\n", guard_error);
         }
         uint64_t guard_heartbeat = 0;
+        std::string guard_stable;
+        int64_t guard_written_at = 0;
+        std::string last_observer_err;
+        int observer_failures = 0;
         auto publish_guard_status = [&](std::string& error) {
             const auto status = guard.Snapshot();
+            const std::string phase = !status.enabled ? "STOPPED" : status.ready ? "READY" : "RESTARTING";
+            const std::string stable = phase + "\n" + std::to_string(status.pid) + "\n" +
+                                       std::to_string(status.restart_count) + "\n" + status.error + "\n" +
+                                       (status.enabled ? "1" : "0") + (status.ready ? "1" : "0");
             const int64_t observed_at = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::system_clock::now().time_since_epoch()).count();
+            // Refresh the lease before it expires. An unchanged guard does not
+            // rewrite the file on every poll.
+            if (stable == guard_stable && observed_at < guard_written_at + 20000) return true;
             UniValue state(UniValue::VOBJ);
             state.pushKV("schema", "BTX/GuardProcess/1");
             state.pushKV("enabled", status.enabled);
             state.pushKV("ready", status.ready);
-            state.pushKV("state", !status.enabled ? "STOPPED" : status.ready ? "READY" : "RESTARTING");
+            state.pushKV("state", phase);
             state.pushKV("pid", status.pid);
             state.pushKV("restart_count", status.restart_count);
             state.pushKV("error", status.error);
@@ -365,12 +383,15 @@ void StartSwarmObserver(const fs::path& modeldir)
             state.pushKV("observed_at_ms", observed_at);
             // Readiness is a sampled observation. An abrupt parent exit
             // cannot leave an indefinitely current ready=true file.
-            state.pushKV("valid_until_ms", status.enabled ? observed_at + 6000 : observed_at);
+            state.pushKV("valid_until_ms", status.enabled ? observed_at + 30000 : observed_at);
             state.pushKV("heartbeat_sequence", ++guard_heartbeat);
             const fs::path directory = modeldir / "swarm";
             if (!RejectSymlink(directory, error)) return false;
             fs::create_directories(directory);
-            return SwarmFormWrite(directory / "guard-process.json", state.write() + "\n", error);
+            if (!SwarmFormWrite(directory / "guard-process.json", state.write() + "\n", error)) return false;
+            guard_stable = stable;
+            guard_written_at = observed_at;
+            return true;
         };
         while (!g_stop.load()) {
             std::string err;
@@ -438,7 +459,19 @@ void StartSwarmObserver(const fs::path& modeldir)
                 ok = false;
                 err = e.what();
             }
-            if (!ok) LogPrintf("swarm observer: %s (monetary node continues)\n", err);
+            if (!ok) {
+                if (err != last_observer_err) {
+                    last_observer_err = err;
+                    observer_failures = 0;
+                }
+                ++observer_failures;
+                if (observer_failures == 1 || observer_failures == 8 || observer_failures % 64 == 0) {
+                    LogPrintf("swarm observer: %s (monetary node continues, repeated %d)\n", err, observer_failures);
+                }
+            } else {
+                last_observer_err.clear();
+                observer_failures = 0;
+            }
             for (int i = 0; i < 20 && !g_stop.load(); ++i) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(100));
             }
@@ -453,6 +486,9 @@ void StartSwarmObserver(const fs::path& modeldir)
             LogPrintf("swarm guard shutdown status: %s\n", e.what());
         }
     });
+    } catch (const std::exception& e) {
+        LogPrintf("swarm observer: thread not started: %s (monetary node continues)\n", e.what());
+    }
 }
 
 void StopSwarmObserver() noexcept

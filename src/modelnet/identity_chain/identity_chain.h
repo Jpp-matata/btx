@@ -54,7 +54,7 @@ inline constexpr char IDENTITY_CHAIN_EPOCH[] = "EPOCH";
  * This class opens no file, opens no socket, starts no process, and holds
  * no spend key.
  */
-class IdentityChain {
+class IdentityChainRecord {
 public:
     bool Open(const std::string& id, std::string& err);
     bool Rotate(const std::string& id, int64_t now_ms, int64_t until_ms, std::string& err);

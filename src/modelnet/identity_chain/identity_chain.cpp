@@ -11,7 +11,7 @@
 
 namespace modelnet {
 
-IdentityChain::Record* IdentityChain::Find(const std::string& id)
+IdentityChainRecord::Record* IdentityChainRecord::Find(const std::string& id)
 {
     for (Record& row : m_rows) {
         if (row.id == id) return &row;
@@ -19,7 +19,7 @@ IdentityChain::Record* IdentityChain::Find(const std::string& id)
     return nullptr;
 }
 
-const IdentityChain::Record* IdentityChain::Find(const std::string& id) const
+const IdentityChainRecord::Record* IdentityChainRecord::Find(const std::string& id) const
 {
     for (const Record& row : m_rows) {
         if (row.id == id) return &row;
@@ -27,19 +27,19 @@ const IdentityChain::Record* IdentityChain::Find(const std::string& id) const
     return nullptr;
 }
 
-bool IdentityChain::stored(const std::string& id) const
+bool IdentityChainRecord::stored(const std::string& id) const
 {
     return Find(id) != nullptr;
 }
 
-int64_t IdentityChain::epoch(const std::string& id) const
+int64_t IdentityChainRecord::epoch(const std::string& id) const
 {
     const Record* row = Find(id);
     if (row == nullptr) return static_cast<int64_t>(0);
     return row->epoch;
 }
 
-bool IdentityChain::Open(const std::string& id, std::string& err)
+bool IdentityChainRecord::Open(const std::string& id, std::string& err)
 {
     if (id.empty()) {
         err = IDENTITY_CHAIN_FIELD;
@@ -57,7 +57,7 @@ bool IdentityChain::Open(const std::string& id, std::string& err)
     return true;
 }
 
-bool IdentityChain::Rotate(const std::string& id, int64_t now_ms, int64_t until_ms, std::string& err)
+bool IdentityChainRecord::Rotate(const std::string& id, int64_t now_ms, int64_t until_ms, std::string& err)
 {
     Record* row = Find(id);
     if (row == nullptr) {
@@ -74,7 +74,7 @@ bool IdentityChain::Rotate(const std::string& id, int64_t now_ms, int64_t until_
     return true;
 }
 
-bool IdentityChain::Recover(const std::string& id, int64_t epoch, std::string& err)
+bool IdentityChainRecord::Recover(const std::string& id, int64_t epoch, std::string& err)
 {
     Record* row = Find(id);
     if (row == nullptr) {
@@ -93,25 +93,25 @@ bool IdentityChain::Recover(const std::string& id, int64_t epoch, std::string& e
     return true;
 }
 
-bool IdentityChain::Spend(std::string& err)
+bool IdentityChainRecord::Spend(std::string& err)
 {
     err = NIFDT_AUTOMATIC_SPEND;
     return false;
 }
 
-bool IdentityChain::Release(std::string& err)
+bool IdentityChainRecord::Release(std::string& err)
 {
     err = NIFDT_UNQUALIFIED;
     return false;
 }
 
-bool IdentityChain::Vendor(std::string& err)
+bool IdentityChainRecord::Vendor(std::string& err)
 {
     err = NIFDT_ENGINE_ABSENT;
     return false;
 }
 
-bool IdentityChain::Gpu(std::string& err)
+bool IdentityChainRecord::Gpu(std::string& err)
 {
     err = NIFDT_ENGINE_ABSENT;
     return false;

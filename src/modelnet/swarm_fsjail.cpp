@@ -202,6 +202,27 @@ bool ConfinedToRoot(const fs::path& root, const fs::path& put_old, const fs::pat
     return true;
 }
 
+bool TreeWithinLimit(const fs::path& root, uint64_t limit)
+{
+    std::error_code ec;
+    uint64_t total = 0;
+    size_t entries = 0;
+    fs::recursive_directory_iterator current(root, fs::directory_options::none, ec), end;
+    if (ec) return false;
+    for (; current != end; current.increment(ec)) {
+        if (ec || ++entries > 8192 || current.depth() > 64) return false;
+        if (!process_guard::NoSymlinkPath(current->path())) return false;
+        if (current->is_directory(ec) && !ec) continue;
+        if (ec || !current->is_regular_file(ec) || ec) return false;
+        const auto size = current->file_size(ec);
+        if (ec) return false;
+        const auto bytes = static_cast<uint64_t>(size);
+        if (bytes > limit || total > limit - bytes) return false;
+        total += bytes;
+    }
+    return !ec;
+}
+
 #endif // __linux__
 } // namespace
 
@@ -220,7 +241,7 @@ SwarmFilesystemJailResult SwarmRunFilesystemJail(const SwarmFilesystemJailReques
         return Refuse("PATH", err);
     }
 
-    if (request.max_wall_seconds <= 0 || request.max_wall_seconds > 86400) return Refuse("LIMIT", err);
+    if (request.max_wall_seconds <= 0 || request.max_wall_seconds > 86400 || request.max_tree_bytes == 0) return Refuse("LIMIT", err);
 #if defined(__linux__)
     const fs::path root = request.root;
     const fs::path put_old = root / PUT_OLD_NAME;
@@ -258,7 +279,8 @@ SwarmFilesystemJailResult SwarmRunFilesystemJail(const SwarmFilesystemJailReques
             !ConfinedToRoot(root, put_old, witness) ||
             prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0 ||
             !process_guard::Limit(RLIMIT_CPU, static_cast<rlim_t>(request.max_wall_seconds)) ||
-            !process_guard::Limit(RLIMIT_NOFILE, 256)) process_guard::ChildFailure(error_fd);
+            !process_guard::Limit(RLIMIT_NOFILE, 256) ||
+            !process_guard::Limit(RLIMIT_FSIZE, static_cast<rlim_t>(request.max_tree_bytes))) process_guard::ChildFailure(error_fd);
         if (!process_guard::ChildReady(error_fd)) process_guard::ChildFailure(error_fd);
         execve(jailed_helper.c_str(), argv, env);
         process_guard::ChildFailure(error_fd);
@@ -266,6 +288,7 @@ SwarmFilesystemJailResult SwarmRunFilesystemJail(const SwarmFilesystemJailReques
     close(pipefd[1]);
     const auto waited = process_guard::Wait(pid, pipefd[0], request.max_wall_seconds);
     if (!waited.executed) return Refuse(waited.timed_out ? "JAIL_TIMEOUT" : "JAIL_ABSENT", err);
+    if (!TreeWithinLimit(root, request.max_tree_bytes)) return Refuse("TREE_LIMIT", err);
     SwarmFilesystemJailResult result;
     result.launched = true; result.jailed = true; result.code = "JAILED";
     result.child_status = waited.status;
