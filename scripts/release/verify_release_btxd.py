@@ -48,7 +48,8 @@ archive's floor instead of only the host's missing symbol.
 On top of the GLIBC ceiling and the Mach-O codesign check: an executable
 that NEEDs a library the archive ships must reach it through RUNPATH/RPATH
 or the packaged wrapper; no ELF may need a GLIBCXX, CXXABI, GCC or OPENSSL
-version above the floor from a host library; a Windows .exe/.dll may import
+version above the floor from a host library (OPENSSL per library: libssl
+and libcrypto define different nodes); a Windows .exe/.dll may import
 only system DLLs or DLLs beside it; a Mach-O with ML-DSA keygen must define
 _btx_mldsa_randombytes (17c2da89); tar members must be root-owned and not
 group/world-writable, no directory may be empty, and no name or link may
@@ -776,15 +777,24 @@ def run_wallet_check(path: Path, *, clean_env: bool = True) -> str:
 # verify_macos_signature cover the GLIBC_2.43 files and the re-signed btxd.
 
 # The host libraries other than libc. GLIBCXX/CXXABI: the floor recorded in
-# doc/release/0.35.0-rc1-checklist.md, as GLIBC_CEILING is. GCC/OPENSSL: the
-# highest version node Ubuntu 24.04's libgcc_s/libcrypto define (objdump -T).
+# doc/release/0.35.0-rc1-checklist.md, as GLIBC_CEILING is. GCC: the highest
+# version node Ubuntu 24.04's libgcc_s defines. "<soname>:<family>" sets the
+# floor for the version nodes needed from that one library: OPENSSL nodes
+# are per library, and 24.04's libssl.so.3 defines only OPENSSL_3.0.0 while
+# its libcrypto.so.3 goes to OPENSSL_3.0.9 (readelf -V, libssl3t64 3.0.13).
+# A need for OPENSSL_3.0.3 from the host libssl.so.3 does not load there
+# (bs1812, #247). The family entry covers any other library.
+ABI_FAMILIES = ("GLIBCXX", "CXXABI", "GCC", "OPENSSL")
 DEFAULT_ABI_FLOOR = {
     "GLIBCXX": "3.4.32",
     "CXXABI": "1.3.15",
     "GCC": "14.0.0",
     "OPENSSL": "3.0.9",
+    "libssl.so.3:OPENSSL": "3.0.0",
+    "libcrypto.so.3:OPENSSL": "3.0.9",
 }
 ABI_NODE_RE = re.compile(r"^(GLIBCXX|CXXABI|GCC|OPENSSL)_([0-9]+(?:\.[0-9]+)*)$")
+FLOOR_NAME_RE = re.compile(r"^(?:([A-Za-z0-9_.+-]+\.so(?:\.[0-9]+)*):)?(" + "|".join(ABI_FAMILIES) + r")$")
 # Same names as package_release_archive.MODEL_HELPER_BINARIES (a test pins it).
 MODEL_HELPER_BINARIES = (
     "btx-modeld", "btx-hcpd", "btx-hosted", "btx-open",
@@ -947,7 +957,7 @@ def linux_elf_problems(root: Path, files: list[Path], floor: dict[str, str]) -> 
                        if info.search else f"no RUNPATH reaches {', '.join(where)}")
                 problems.append(f"{rel}: {how}, so the host's {', '.join(stranded)} load "
                                 "instead of the copies this archive ships")
-        over: dict[str, tuple[str, str]] = {}
+        over: dict[tuple[str, str], tuple[str, str]] = {}  # (family, soname) -> (need, floor)
         for soname, versions in info.verneed.items():
             for version in versions:
                 match = ABI_NODE_RE.match(version)
@@ -956,13 +966,16 @@ def linux_elf_problems(root: Path, files: list[Path], floor: dict[str, str]) -> 
                 family, number = match.groups()
                 if reaches(soname):
                     continue  # resolved to the archive's own copy, gated as its own ELF
-                limit = floor.get(family)
+                # A version node belongs to the library that defines it: the
+                # loader looks for it in that soname only.
+                limit = floor.get(f"{soname}:{family}", floor.get(family))
                 if limit and version_key(number) > version_key(limit):
-                    if family not in over or version_key(number) > version_key(over[family][0]):
-                        over[family] = (number, soname)
+                    key = (family, soname)
+                    if key not in over or version_key(number) > version_key(over[key][0]):
+                        over[key] = (number, limit)
         if over:
-            needs = ", ".join(f"{fam}_{num} from the host's {so} (floor {fam}_{floor[fam]})"
-                              for fam, (num, so) in sorted(over.items()))
+            needs = ", ".join(f"{fam}_{num} from the host's {so} (floor {fam}_{limit})"
+                              for (fam, so), (num, limit) in sorted(over.items()))
             problems.append(f"{rel}: needs {needs}")
     return problems
 
@@ -1320,9 +1333,10 @@ def main(argv: list[str] | None = None) -> int:
         "--floor",
         action="append",
         default=[],
-        metavar="NAME=VERSION",
+        metavar="[SONAME:]NAME=VERSION",
         help="Override one floor entry: " + ", ".join(f"{k}={v}" for k, v in DEFAULT_ABI_FLOOR.items())
-        + ". GLIBC is the separate ceiling (BTX_RELEASE_GLIBC_CEILING).",
+        + ". NAME alone also replaces that NAME's per-library entries. GLIBC is the separate "
+        "ceiling (BTX_RELEASE_GLIBC_CEILING).",
     )
     parser.add_argument(
         "--require-model-helpers",
@@ -1353,11 +1367,18 @@ def main(argv: list[str] | None = None) -> int:
     if args.run_wallet_check and args.no_launch:
         parser.error("--run-wallet-check runs btxd; drop --no-launch")
     floor = dict(DEFAULT_ABI_FLOOR)
+    overrides: dict[str, str] = {}
     for item in args.floor:
         name, _, version = item.partition("=")
-        if name not in DEFAULT_ABI_FLOOR or not re.fullmatch(r"[0-9]+(\.[0-9]+)*", version):
-            parser.error(f"bad floor {item!r}; expected one of {', '.join(DEFAULT_ABI_FLOOR)}=<version>")
-        floor[name] = version
+        if not FLOOR_NAME_RE.match(name) or not re.fullmatch(r"[0-9]+(\.[0-9]+)*", version):
+            parser.error(f"bad floor {item!r}; expected [<soname>:]{{{','.join(ABI_FAMILIES)}}}=<version>, "
+                         f"e.g. OPENSSL=3.2.0 or libssl.so.3:OPENSSL=3.0.0")
+        overrides[name] = version
+    for name in overrides:
+        if ":" not in name:  # OPENSSL=3.2.0 means every library's OPENSSL floor
+            for key in [k for k in floor if k.endswith(f":{name}")]:
+                del floor[key]
+    floor.update(overrides)
     failures = 0
     for raw in args.archives:
         path = raw.expanduser().resolve()

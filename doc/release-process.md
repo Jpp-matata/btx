@@ -43,7 +43,9 @@ Release Process
   `--archive` reads every file in the archive and fails it when:
   an executable NEEDs a library the archive ships but no RUNPATH (or the
   packaged wrapper) reaches it; an ELF needs a `GLIBCXX_`/`CXXABI_`/`GCC_`/`OPENSSL_`
-  version above the floor from a host library (`--floor NAME=VERSION`); a Windows
+  version above the floor from a host library (`--floor [SONAME:]NAME=VERSION`;
+  the OpenSSL floor is per library, because Ubuntu 24.04's `libssl.so.3` defines
+  only `OPENSSL_3.0.0` and its `libcrypto.so.3` up to `OPENSSL_3.0.9`); a Windows
   `.exe`/`.dll` imports a DLL that is neither a Windows system DLL nor next to
   it (`libgomp-1.dll`, `libgcc_s_seh-1.dll`, `libwinpthread-1.dll` must ship
   beside `btxd.exe`); a Mach-O has ML-DSA keygen but does not define

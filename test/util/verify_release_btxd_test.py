@@ -535,7 +535,7 @@ class ArchiveContentGateTest(unittest.TestCase):
                                "btx-0.35.0/lib/libssl.so.3": self._libssl()})
         self.assertIn("bin/btxd: no RUNPATH reaches btx-0.35.0/lib", text)
         self.assertIn("libssl.so.3 load instead of the copies this archive ships", text)
-        self.assertIn("bin/btxd: needs OPENSSL_3.2.0 from the host's libssl.so.3 (floor OPENSSL_3.0.9)", text)
+        self.assertIn("bin/btxd: needs OPENSSL_3.2.0 from the host's libssl.so.3 (floor OPENSSL_3.0.0)", text)
 
     def test_bundled_libssl_with_origin_runpath_passes(self) -> None:
         how = self._gate({"btx-0.35.0/bin/btxd": self._btxd(runpath="$ORIGIN/../lib"),
@@ -552,6 +552,42 @@ class ArchiveContentGateTest(unittest.TestCase):
         text = self._problems({"btx-0.35.0/bin/btxd": self._btxd()})
         self.assertIn("needs OPENSSL_3.2.0 from the host's libssl.so.3", text)
         self._gate({"btx-0.35.0/bin/btxd": self._btxd(openssl="OPENSSL_3.0.0")})
+
+    def test_openssl_floor_is_per_library(self) -> None:
+        # Ubuntu 24.04's libssl.so.3 defines only OPENSSL_3.0.0; its libcrypto.so.3
+        # defines up to OPENSSL_3.0.9. ld.so looks for a version node only in the
+        # library the need names, so OPENSSL_3.0.3 from libssl does not load there
+        # although libcrypto has it (bs1812, #247).
+        def btxd(ssl, crypto):
+            return make_elf(["libssl.so.3", "libcrypto.so.3", "libzmq.so.5"], extra=ZMQ_HELP,
+                            verneed={"libssl.so.3": [ssl], "libcrypto.so.3": [crypto]})
+
+        self._gate({"btx-0.35.0/bin/btxd": btxd("OPENSSL_3.0.0", "OPENSSL_3.0.9")})
+        text = self._problems({"btx-0.35.0/bin/btxd": btxd("OPENSSL_3.0.3", "OPENSSL_3.0.9")})
+        self.assertIn("bin/btxd: needs OPENSSL_3.0.3 from the host's libssl.so.3 (floor OPENSSL_3.0.0)", text)
+        self.assertNotIn("libcrypto", text)
+        text = self._problems({"btx-0.35.0/bin/btxd": btxd("OPENSSL_3.0.8", "OPENSSL_3.1.0")})
+        self.assertIn("bin/btxd: needs OPENSSL_3.1.0 from the host's libcrypto.so.3 (floor OPENSSL_3.0.9), "
+                      "OPENSSL_3.0.8 from the host's libssl.so.3 (floor OPENSSL_3.0.0)", text)
+        # Any other library that defines OPENSSL_ nodes keeps the family floor.
+        other = make_elf(["libother.so.1", "libzmq.so.5"], extra=ZMQ_HELP, verneed={"libother.so.1": ["OPENSSL_3.0.9"]})
+        self._gate({"btx-0.35.0/bin/btxd": other})
+
+    def test_floor_option_takes_a_library(self) -> None:
+        archive = self.root / "btx-0.35.0-x86_64-linux-gnu.tar.gz"
+        write_tar(archive, {"btx-0.35.0/bin/btxd": make_elf(
+            ["libssl.so.3", "libzmq.so.5"], extra=ZMQ_HELP, verneed={"libssl.so.3": ["OPENSSL_3.0.3"]})})
+        run = ["--no-launch", "--archive", str(archive)]
+        with mock.patch("sys.stderr", new_callable=io.StringIO), mock.patch("sys.stdout", new_callable=io.StringIO):
+            self.assertEqual(self.mod.main(run), 1)
+            self.assertEqual(self.mod.main(["--floor", "libssl.so.3:OPENSSL=3.0.3"] + run), 0)
+            self.assertEqual(self.mod.main(["--floor", "libcrypto.so.3:OPENSSL=3.0.3"] + run), 1)
+            # A family value covers every library unless one is named too.
+            self.assertEqual(self.mod.main(["--floor", "OPENSSL=3.2.0"] + run), 0)
+            self.assertEqual(self.mod.main(["--floor", "OPENSSL=3.2.0", "--floor", "libssl.so.3:OPENSSL=3.0.0"] + run), 1)
+            for bad in ("libssl.so.3:GLIBC=2.38", "OPENSSL=3.x", "libssl:OPENSSL=3.0.3", "openssl=3.0.3"):
+                with self.assertRaises(SystemExit):
+                    self.mod.main(["--floor", bad] + run)
 
     def test_runpath_must_be_a_literal_origin(self) -> None:
         # The loader expands only $ORIGIN and ${ORIGIN}. A RUNPATH escaped once
