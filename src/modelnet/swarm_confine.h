@@ -24,6 +24,12 @@ namespace modelnet {
  * kills only this invocation's dedicated process group. A CLOEXEC error
  * pipe distinguishes setup/exec failures from a helper that exits 126.
  * Paths must be absolute, inside root, and free of symbolic links.
+ * On Linux, RLIMIT_FSIZE caps each file at max_tree_bytes, and the regular
+ * files below root must total at most max_tree_bytes before launch, every
+ * 10 ms while the helper runs (SIGKILL to its process group; one interval of
+ * overshoot) and after exit (TREE_LIMIT otherwise). Linux confinement does
+ * not restrict the filesystem, so a file written outside root is bounded only
+ * by RLIMIT_FSIZE.
  * A successful launch is local execution evidence, not release qualification.
  */
 struct SwarmConfineRequest {

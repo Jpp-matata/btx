@@ -148,21 +148,70 @@ inline bool NullStandardDescriptors()
     return ok;
 }
 
+/**
+ * True while the regular files below root total at most max_bytes (logical
+ * sizes; links are not followed). Any error reading the tree, such as a
+ * directory the helper made unreadable, counts as over the limit. With
+ * running set, an entry removed between listing and reading it is skipped:
+ * a helper that is still running may rename or delete its own files.
+ */
+inline bool TreeWithin(const fs::path& root, uint64_t max_bytes, bool running = false)
+{
+    std::error_code ec;
+    uint64_t total = 0;
+    const auto vanished = [&] { return running && ec == std::errc::no_such_file_or_directory; };
+    fs::recursive_directory_iterator current(root, fs::directory_options::none, ec), end;
+    if (ec) return false;
+    for (; current != end; current.increment(ec)) {
+        if (ec) return false;
+        const auto status = current->symlink_status(ec);
+        if (vanished()) {
+            current.disable_recursion_pending();
+            continue;
+        }
+        if (ec) return false;
+        if (!fs::is_regular_file(status)) continue;
+        const uintmax_t bytes = current->file_size(ec);
+        if (vanished()) continue;
+        if (ec || bytes > max_bytes - total) return false;
+        total += bytes;
+    }
+    return !ec;
+}
+
 struct WaitResult {
     bool executed{false};
     bool timed_out{false};
+    bool over_tree{false};
     int status{-1};
     int setup_errno{0};
 };
 
-inline WaitResult Wait(pid_t child, int error_fd, int wall_seconds)
+/**
+ * max_tree_bytes (0 = off): while the child runs, the tree below tree_root is
+ * checked with TreeWithin every 10 ms, and the child's process group gets
+ * SIGKILL once it is over (over_tree; the signal reads as not executed). A
+ * failed walk is repeated once before the kill, since a directory removed
+ * during a walk ends it early. A child can overshoot by what it writes
+ * within one interval; a walk reads every entry below tree_root, so a large
+ * tree lengthens the interval.
+ */
+inline WaitResult Wait(pid_t child, int error_fd, int wall_seconds, const fs::path& tree_root = {},
+                       uint64_t max_tree_bytes = 0)
 {
     WaitResult result;
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(wall_seconds);
-    while (true) {
+    for (bool first = true;; first = false) {
         const pid_t done = waitpid(child, &result.status, WNOHANG);
         if (done == child) break;
         if (done < 0 && errno != EINTR) { close(error_fd); return result; }
+        // Not on the first pass: the caller checked the tree just before launch.
+        if (!first && max_tree_bytes != 0 && !TreeWithin(tree_root, max_tree_bytes, true) &&
+            !TreeWithin(tree_root, max_tree_bytes, true)) {
+            result.over_tree = true;
+            kill(-child, SIGKILL);
+            kill(child, SIGKILL);
+        }
         if (std::chrono::steady_clock::now() >= deadline) {
             result.timed_out = true;
             // Only the dedicated process group created by this invocation.

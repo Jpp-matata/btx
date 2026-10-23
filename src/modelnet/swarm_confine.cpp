@@ -22,12 +22,19 @@ SwarmConfineResult SwarmRunConfined(const SwarmConfineRequest& request, std::str
     if (!fs::is_regular_file(request.helper, ec) || ec) return Refuse("SANDBOX_ABSENT", err);
     if (!request.network_denied) return Refuse("NETWORK", err);
     if (request.max_address_bytes <= 0 || request.max_cpu_seconds <= 0 || request.max_nofile < 4 ||
-        request.max_wall_seconds <= 0 || request.max_wall_seconds > 86400) return Refuse("LIMIT", err);
+        request.max_wall_seconds <= 0 || request.max_wall_seconds > 86400 ||
+        request.max_tree_bytes == 0) return Refuse("LIMIT", err);
     if (!process_guard::InsideRoot(request.helper, request.root)) return Refuse("PATH", err);
 #if defined(__linux__) || defined(__APPLE__)
 #ifdef __APPLE__
     const process_guard::Seatbelt seatbelt;
     if (!seatbelt.Available()) return Refuse("CONFINEMENT_ABSENT", err);
+    const uint64_t poll_tree_bytes = 0;
+#else
+    // max_tree_bytes: RLIMIT_FSIZE caps each file, and the tree below root is
+    // checked before launch, every 10 ms while the helper runs, and after exit.
+    if (!process_guard::TreeWithin(request.root, request.max_tree_bytes)) return Refuse("TREE_LIMIT", err);
+    const uint64_t poll_tree_bytes = request.max_tree_bytes;
 #endif
     int pipefd[2];
     if (!process_guard::ErrorPipe(pipefd)) return Refuse("CONFINEMENT_ABSENT", err);
@@ -48,7 +55,8 @@ SwarmConfineResult SwarmRunConfined(const SwarmConfineRequest& request, std::str
             !process_guard::Limit(RLIMIT_NOFILE, static_cast<rlim_t>(request.max_nofile)) ||
             chdir(request.root.c_str()) != 0) process_guard::ChildFailure(error_fd);
 #ifdef __linux__
-        if (unshare(CLONE_NEWUSER | CLONE_NEWNET) != 0 ||
+        if (!process_guard::Limit(RLIMIT_FSIZE, static_cast<rlim_t>(request.max_tree_bytes)) ||
+            unshare(CLONE_NEWUSER | CLONE_NEWNET) != 0 ||
             prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0) process_guard::ChildFailure(error_fd);
 #else
         if (!seatbelt.Apply(request.root.c_str(), request.helper.c_str())) process_guard::ChildFailure(error_fd);
@@ -58,8 +66,15 @@ SwarmConfineResult SwarmRunConfined(const SwarmConfineRequest& request, std::str
         process_guard::ChildFailure(error_fd);
     }
     close(pipefd[1]);
-    const auto waited = process_guard::Wait(pid, pipefd[0], request.max_wall_seconds);
-    if (!waited.executed) return Refuse(waited.timed_out ? "CONFINEMENT_TIMEOUT" : "CONFINEMENT_ABSENT", err);
+    const auto waited =
+        process_guard::Wait(pid, pipefd[0], request.max_wall_seconds, request.root, poll_tree_bytes);
+    if (!waited.executed) {
+        return Refuse(waited.timed_out ? "CONFINEMENT_TIMEOUT" :
+                      waited.over_tree ? "TREE_LIMIT" : "CONFINEMENT_ABSENT", err);
+    }
+#ifdef __linux__
+    if (!process_guard::TreeWithin(request.root, request.max_tree_bytes)) return Refuse("TREE_LIMIT", err);
+#endif
     SwarmConfineResult result;
     result.launched = true; result.limits_applied = true;
     result.child_status = waited.status; result.code = "CONFINED";
