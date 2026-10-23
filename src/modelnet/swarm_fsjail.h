@@ -24,10 +24,10 @@ namespace modelnet {
  * OS system resources and the private profile are platform exceptions.
  * A CLOEXEC error pipe proves setup and exec; child exit 126 is not confused
  * with failure to install the sandbox. Paths reject symlinks and traversal.
- * Limits and a wall timeout apply. On Linux, max_tree_bytes is enforced as
- * in SwarmRunConfined (JAIL_TREE_LIMIT); the helper can only write below
- * root, so the checks see every file it leaves there, and a file it unlinks
- * while holding it open is bounded by RLIMIT_FSIZE. Neither success nor
+ * Limits and a wall timeout apply. On Linux and macOS, max_tree_bytes is
+ * enforced as in SwarmRunConfined (JAIL_TREE_LIMIT); the helper can only
+ * write below root, so the checks see every file it leaves there, and a file
+ * it unlinks while holding it open is bounded by RLIMIT_FSIZE. Neither success nor
  * compile qualifies a platform release; native escape and workload tests
  * must run on that OS.
  */

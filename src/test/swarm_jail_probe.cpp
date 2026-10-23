@@ -9,8 +9,15 @@
 // alloc.mode touches 4 GiB, spin.mode burns 20 s of CPU, spin_ignore.mode
 // does the same with SIGXCPU ignored. fill.mode writes one 64 MiB file in
 // 1 MiB blocks and keeps writing after a short write; fill_ignore.mode
-// ignores SIGXFSZ, stops at the first failed write and writes fill.refused;
-// spread.mode writes eight 1 MiB files.
+// ignores SIGXFSZ, stops at the first failed write and writes one block to
+// fill.refused. Both fill modes first remove the probe and its marker, so
+// the tree is only what they write and does not pass max_tree_bytes while
+// the file grows to RLIMIT_FSIZE: the parent's tree check cannot stop them
+// first.
+// spread.mode writes up to 64 files of 1 MiB, 20 ms apart; burst.mode writes
+// one file of 1 MiB and burst.done, then extends a second file to 2 MiB with
+// a single ftruncate and exits, so its tree goes over a limit only in its
+// last step.
 // Each mode writes <mode>.started before and <mode>.done after its work, so a
 // test can tell a stopped child from one that never ran or ran to the end.
 // Without a mode it also records whether it can look up a Mach service, fork,
@@ -27,6 +34,7 @@
 #include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <cstdio>
@@ -68,6 +76,18 @@ void Mark(const std::string& path)
     if (fd >= 0) {
         close(fd);
     }
+}
+
+char g_block[1 << 20];
+
+bool WriteBlock(const std::string& path)
+{
+    const int fd = open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+    if (fd < 0) {
+        return false;
+    }
+    const bool full = write(fd, g_block, sizeof(g_block)) == static_cast<ssize_t>(sizeof(g_block));
+    return close(fd) == 0 && full;
 }
 
 bool MachLookup()
@@ -165,6 +185,10 @@ int main(int argc, char** argv)
         if (ignore_sigxfsz) {
             signal(SIGXFSZ, SIG_IGN);
         }
+        if (unlink(self.c_str()) != 0 ||
+            unlink((dir + (ignore_sigxfsz ? "/fill_ignore.mode" : "/fill.mode")).c_str()) != 0) {
+            return 10;
+        }
         Mark(dir + "/fill.started");
         static char block[1 << 20];
         const int fd = open((dir + "/fill.bin").c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
@@ -182,22 +206,38 @@ int main(int argc, char** argv)
             }
         }
         close(fd);
-        Mark(dir + (full ? "/fill.done" : "/fill.refused"));
-        return 0;
+        if (full) {
+            Mark(dir + "/fill.done");
+            return 0;
+        }
+        // The file is at RLIMIT_FSIZE (max_tree_bytes): one more block takes
+        // the tree over the limit in this last step.
+        return WriteBlock(dir + "/fill.refused") ? 0 : 8;
     }
     if (Opens(dir + "/spread.mode", O_RDONLY)) {
         Mark(dir + "/spread.started");
-        static char block[1 << 20];
-        for (int i = 0; i < 8; ++i) {
-            const int fd = open((dir + "/spread" + std::to_string(i) + ".bin").c_str(),
-                                O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
-            if (fd < 0 || write(fd, block, sizeof(block)) != static_cast<ssize_t>(sizeof(block))) {
+        const timespec pause{0, 20 * 1000 * 1000};
+        for (int i = 0; i < 64; ++i) {
+            if (!WriteBlock(dir + "/spread" + std::to_string(i) + ".bin")) {
                 return 9;
             }
-            close(fd);
+            nanosleep(&pause, nullptr);
         }
         Mark(dir + "/spread.done");
         return 0;
+    }
+    if (Opens(dir + "/burst.mode", O_RDONLY)) {
+        Mark(dir + "/burst.started");
+        if (!WriteBlock(dir + "/burst0.bin")) {
+            return 11;
+        }
+        Mark(dir + "/burst.done");
+        const int fd = open((dir + "/burst1.bin").c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+        if (fd < 0) {
+            return 11;
+        }
+        const bool extended = ftruncate(fd, 2 << 20) == 0;
+        return close(fd) == 0 && extended ? 0 : 11;
     }
     FILE* out = std::fopen((dir + "/probe.out").c_str(), "w");
     if (out == nullptr) {

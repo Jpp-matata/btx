@@ -304,6 +304,8 @@ BOOST_AUTO_TEST_CASE(macos_tree_limit_refuses_root_before_launch)
 
 // RLIMIT_FSIZE stops one large file during the run: SIGXFSZ kills the probe
 // (a signal reads as not executed), and the file never passes max_tree_bytes.
+// The probe removes itself and its marker first, so the tree stays within the
+// limit and the tree check while it runs never fires.
 BOOST_AUTO_TEST_CASE(macos_file_size_limit_enforced)
 {
     const fs::path root = MacRoot("btx-swarm-confine-macos-fill");
@@ -323,7 +325,8 @@ BOOST_AUTO_TEST_CASE(macos_file_size_limit_enforced)
 }
 
 // A helper that ignores SIGXFSZ gets EFBIG and exits normally. The file still
-// stops at max_tree_bytes, and the tree check after exit refuses the result.
+// stops at max_tree_bytes. The tree goes over only with the probe's last
+// write, after fill.refused exists, and the result is refused.
 BOOST_AUTO_TEST_CASE(macos_file_size_limit_holds_when_sigxfsz_ignored)
 {
     const fs::path root = MacRoot("btx-swarm-confine-macos-fill-ignore");
@@ -340,15 +343,15 @@ BOOST_AUTO_TEST_CASE(macos_file_size_limit_holds_when_sigxfsz_ignored)
     BOOST_CHECK_LE(written, request.max_tree_bytes);
 }
 
-// Files that are each below RLIMIT_FSIZE but together above max_tree_bytes:
-// the probe runs to the end, and the tree check after exit refuses the result.
+// A helper whose tree goes past max_tree_bytes only in its last step before
+// exit, too late for a walk while it runs, is refused by the check after exit.
 BOOST_AUTO_TEST_CASE(macos_tree_limit_refuses_result_after_run)
 {
-    const fs::path root = MacRoot("btx-swarm-confine-macos-spread");
-    modelnet::SwarmConfineRequest request = BaseRequest(CopyProbe(root, "spread.mode"), root);
-    request.max_tree_bytes = fs::file_size(request.helper) + (4 << 20);
+    const fs::path root = MacRoot("btx-swarm-confine-macos-burst");
+    modelnet::SwarmConfineRequest request = BaseRequest(CopyProbe(root, "burst.mode"), root);
+    request.max_tree_bytes = fs::file_size(request.helper) + (2 << 20);
     ExpectRefusal(request, "TREE_LIMIT");
-    const bool done = fs::exists(root / "spread.done");
+    const bool done = fs::exists(root / "burst.done");
     fs::remove_all(root);
     BOOST_CHECK(done);
 }
@@ -504,6 +507,25 @@ BOOST_AUTO_TEST_CASE(wait_skips_files_removed_during_walk)
     BOOST_CHECK(!waited.over_tree);
 }
 #endif // _WIN32
+
+#if defined(__APPLE__) && defined(BTX_SWARM_JAIL_PROBE)
+// A helper that keeps writing files below RLIMIT_FSIZE under Seatbelt is
+// killed while it runs, once the tree passes max_tree_bytes.
+BOOST_AUTO_TEST_CASE(macos_tree_limit_enforced_during_run)
+{
+    const fs::path root = MacRoot("btx-swarm-confine-macos-spread");
+    modelnet::SwarmConfineRequest request = BaseRequest(CopyProbe(root, "spread.mode"), root);
+    request.max_tree_bytes = fs::file_size(request.helper) + (8 << 20);
+    ExpectRefusal(request, "TREE_LIMIT");
+    const bool started = fs::exists(root / "spread.started");
+    const bool done = fs::exists(root / "spread.done");
+    const int files = CountFiles(root, "spread");
+    fs::remove_all(root);
+    BOOST_CHECK(started);
+    BOOST_CHECK(!done);
+    BOOST_CHECK_LT(files, 64);
+}
+#endif
 
 #ifdef __linux__
 // A root that is already over max_tree_bytes is refused before launch.

@@ -224,6 +224,24 @@ BOOST_AUTO_TEST_CASE(macos_tree_limit_refused)
     fs::remove_all(root);
     BOOST_CHECK(!ran);
 }
+
+// A jailed helper that keeps writing files is killed while it runs, once the
+// tree passes max_tree_bytes.
+BOOST_AUTO_TEST_CASE(macos_jail_tree_limit_enforced_during_run)
+{
+    const fs::path root = MacRoot("btx-swarm-fsjail-macos-spread");
+    modelnet::SwarmFilesystemJailRequest request = BaseRequest(CopyProbe(root), root);
+    WriteRegularFile(root / "spread.mode");
+    request.max_tree_bytes = fs::file_size(request.helper) + (8 << 20);
+    ExpectRefusal(request, "JAIL_TREE_LIMIT");
+    const bool started = fs::exists(root / "spread.started");
+    const bool done = fs::exists(root / "spread.done");
+    const bool last = fs::exists(root / "spread63.bin");
+    fs::remove_all(root);
+    BOOST_CHECK(started);
+    BOOST_CHECK(!done);
+    BOOST_CHECK(!last);
+}
 #endif
 
 BOOST_AUTO_TEST_CASE(zero_tree_limit)
