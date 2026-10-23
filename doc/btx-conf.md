@@ -94,8 +94,10 @@ cp share/examples/btx.conf ~/.btx
 ## Native Model Network (`btxd` bridge)
 
 Model-plane options are optional for consensus. A validating node does not
-need them. Packaged `btxd` **does** start `btx-modeld` by default
-(`modelnet=1`). Disable with `modelnet=0`. If the helper dies, model RPCs
+need them. If the `btx-modeld` binary is present (next to `btxd`, in
+`libexec/`, or at `modelhelper=<path>`), `btxd` **does** start it by default
+(`modelnet=1`); without it, `btxd` logs that and runs without the helper.
+Disable with `modelnet=0`. If the helper dies, model RPCs
 fail closed and the chain continues. Set `modelrpcsocket=` to attach to an
 already-running helper instead of spawning.
 
@@ -109,6 +111,7 @@ cp share/examples/modelnet.conf.example ~/.btx/modelnet.conf
 | Option | Role |
 |---|---|
 | `modelnet=1` | Enable the model network. Packaged default **on**. `modelnet=0` disables the helper. |
+| `modelbind=<ip:port>` | PQ1 listen address of the helper `btxd` starts. Default: port 29447 on all interfaces. `0`, `off` or `none` = unix RPC socket only (loopback port 29447 if hosting is on). |
 | `modelrpcsocket=<path>` | Unix socket for helper JSON-RPC (default `<datadir>/modelnet/modeld.sock`). If set, `btxd` does not spawn or kill that helper. |
 | `modelrelay=1` | CPU-only model discovery relay hint; default **off**. Not monetary AddrMan. |
 | `modelhost=1` | Advertise a public model-serving hint only after proven reachability. Default **off**. |
