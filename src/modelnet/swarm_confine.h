@@ -25,8 +25,7 @@ namespace modelnet {
  * (plus 250 ms) on CPU time, sampled every 10 ms (SIGKILL; one interval of
  * overshoot). On macOS, RLIMIT_FSIZE caps each file at max_tree_bytes during
  * the run, and the regular files below root must total at most
- * max_tree_bytes before launch and after exit (TREE_LIMIT otherwise). Linux
- * does not enforce max_tree_bytes yet. Windows uses a
+ * max_tree_bytes before launch and after exit (TREE_LIMIT otherwise). Windows uses a
  * zero-capability AppContainer, private staged files, a one-process Job with
  * memory/CPU/wall limits and an explicit stdio handle allowlist. max_nofile
  * is a POSIX descriptor quota; Windows bounds inherited handles and process
@@ -35,6 +34,10 @@ namespace modelnet {
  * kills only this invocation's dedicated process group. A CLOEXEC error
  * pipe distinguishes setup/exec failures from a helper that exits 126.
  * Paths must be absolute, inside root, and free of symbolic links.
+ * On Linux, max_tree_bytes is enforced the same way and also every 10 ms
+ * while the helper runs (SIGKILL to its process group; one interval of
+ * overshoot). Linux confinement does not restrict the filesystem, so a file
+ * written outside root is bounded only by RLIMIT_FSIZE.
  * A successful launch is local execution evidence, not release qualification.
  */
 struct SwarmConfineRequest {

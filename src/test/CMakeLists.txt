@@ -2669,6 +2669,24 @@ else()
   )
 endif()
 
+if(WITH_MODELNET AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  # The Linux filesystem jail has no dynamic loader below its root, so the
+  # swarm confinement tests use a static helper. Without static libc the
+  # tests that need a running helper are skipped.
+  include(CheckCXXSourceCompiles)
+  set(CMAKE_REQUIRED_LINK_OPTIONS -static)
+  check_cxx_source_compiles("int main() { return 0; }" BTX_HAVE_STATIC_TEST_PROBE)
+  unset(CMAKE_REQUIRED_LINK_OPTIONS)
+  if(BTX_HAVE_STATIC_TEST_PROBE)
+    add_executable(test_swarm_linux_probe swarm_linux_probe.cpp)
+    target_link_options(test_swarm_linux_probe PRIVATE -static)
+    add_dependencies(test_btx test_swarm_linux_probe)
+    target_compile_definitions(test_btx PRIVATE
+      BTX_SWARM_LINUX_PROBE=\"$<TARGET_FILE:test_swarm_linux_probe>\"
+    )
+  endif()
+endif()
+
 add_library(test_translation_stub OBJECT
   util/translation_stub.cpp
 )

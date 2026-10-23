@@ -3,6 +3,7 @@
 // file COPYING or https://opensource.org/license/mit/.
 
 #include <modelnet/swarm_confine.h>
+#include <modelnet/swarm_process_guard.h>
 #include <test/util/setup_common.h>
 #include <util/fs.h>
 
@@ -11,10 +12,17 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
 
+#ifndef _WIN32
+#include <fcntl.h>
+#include <time.h>
+#include <unistd.h>
+#endif
+
 #include <chrono>
 #include <fstream>
 #include <iterator>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -96,6 +104,9 @@ BOOST_AUTO_TEST_CASE(non_positive_limits)
     modelnet::SwarmConfineRequest nofile = BaseRequest(helper, root);
     nofile.max_nofile = -1;
     ExpectRefusal(nofile, "LIMIT");
+    modelnet::SwarmConfineRequest tree = BaseRequest(helper, root);
+    tree.max_tree_bytes = 0;
+    ExpectRefusal(tree, "LIMIT");
     fs::remove_all(root);
 }
 
@@ -342,5 +353,258 @@ BOOST_AUTO_TEST_CASE(macos_tree_limit_refuses_result_after_run)
     BOOST_CHECK(done);
 }
 #endif
+
+#ifndef _WIN32
+namespace process_guard = modelnet::process_guard;
+
+namespace {
+
+fs::path FreshRoot(const char* name)
+{
+    const fs::path root = fs::temp_directory_path() / name;
+    fs::remove_all(root);
+    fs::create_directories(root);
+    return root;
+}
+
+void WriteSized(const fs::path& path, size_t bytes)
+{
+    std::ofstream out{path, std::ios::binary};
+    out << std::string(bytes, 'x');
+    BOOST_REQUIRE(out);
+}
+
+int CountFiles(const fs::path& root, const std::string& prefix)
+{
+    int count = 0;
+    for (const auto& entry : fs::directory_iterator(root)) {
+        if (entry.path().filename().native().rfind(prefix, 0) == 0) ++count;
+    }
+    return count;
+}
+
+// A plain forked child (no namespaces) for the process_guard::Wait checks:
+// it reports ready on the error pipe like a confined child, then runs work.
+template <typename Work>
+process_guard::WaitResult WaitOnChild(const fs::path& root, uint64_t max_tree_bytes, Work work)
+{
+    int fds[2];
+    BOOST_REQUIRE(process_guard::ErrorPipe(fds));
+    const pid_t pid = fork();
+    BOOST_REQUIRE(pid >= 0);
+    if (pid == 0) {
+        close(fds[0]);
+        if (setpgid(0, 0) != 0 || !process_guard::ChildReady(fds[1])) _exit(126);
+        work();
+        _exit(0);
+    }
+    close(fds[1]);
+    return process_guard::Wait(pid, fds[0], 30, 0, 0, root, max_tree_bytes);
+}
+
+// Only async-signal-safe calls run in the forked child.
+void ChildWrite(const char* path, const char* data, size_t bytes)
+{
+    const int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+    if (fd < 0) _exit(3);
+    if (write(fd, data, bytes) != static_cast<ssize_t>(bytes)) _exit(4);
+    close(fd);
+}
+
+} // namespace
+
+// Logical sizes of regular files count; a symlink is not followed.
+BOOST_AUTO_TEST_CASE(tree_within_counts_regular_files)
+{
+    const fs::path root = FreshRoot("btx-swarm-tree-within");
+    const fs::path outside = FreshRoot("btx-swarm-tree-within-outside");
+    fs::create_directories(root / "sub");
+    WriteSized(root / "a.bin", 3000);
+    WriteSized(root / "sub" / "b.bin", 1000);
+    WriteSized(outside / "big.bin", 1 << 20);
+    fs::create_symlink(outside / "big.bin", root / "link");
+    const bool exact = process_guard::TreeWithin(root, 4000);
+    const bool over = process_guard::TreeWithin(root, 3999);
+    const bool missing = process_guard::TreeWithin(root / "missing", 1 << 30);
+    fs::remove_all(root);
+    fs::remove_all(outside);
+    BOOST_CHECK(exact);
+    BOOST_CHECK(!over);
+    BOOST_CHECK(!missing);
+}
+
+// Wait kills the child's process group once the tree is over the limit.
+BOOST_AUTO_TEST_CASE(wait_kills_child_over_tree_limit)
+{
+    const fs::path root = FreshRoot("btx-swarm-wait-tree");
+    const std::string block(1 << 20, 'x');
+    std::vector<std::string> names;
+    for (int i = 0; i < 64; ++i) names.push_back(fs::PathToString(root / fs::PathFromString("f" + std::to_string(i) + ".bin")));
+    const std::string done = fs::PathToString(root / "done");
+    const auto waited = WaitOnChild(root, 8 << 20, [&] {
+        const timespec pause{0, 20 * 1000 * 1000};
+        for (const std::string& name : names) {
+            ChildWrite(name.c_str(), block.data(), block.size());
+            nanosleep(&pause, nullptr);
+        }
+        ChildWrite(done.c_str(), "", 0);
+    });
+    const bool finished = fs::exists(root / "done");
+    const int files = CountFiles(root, "f");
+    fs::remove_all(root);
+    BOOST_CHECK(waited.over_tree);
+    BOOST_CHECK(!waited.executed);
+    BOOST_CHECK(WIFSIGNALED(waited.status));
+    BOOST_CHECK(!finished);
+    BOOST_CHECK_GT(files, 8);
+    BOOST_CHECK_LT(files, 64);
+}
+
+// The same child under a limit it never reaches runs to the end.
+BOOST_AUTO_TEST_CASE(wait_lets_child_within_tree_limit_finish)
+{
+    const fs::path root = FreshRoot("btx-swarm-wait-tree-ok");
+    const std::string block(1 << 20, 'x');
+    const std::string first = fs::PathToString(root / "f0.bin");
+    const std::string second = fs::PathToString(root / "f1.bin");
+    const auto waited = WaitOnChild(root, 2 << 20, [&] {
+        const timespec pause{0, 300 * 1000 * 1000};
+        ChildWrite(first.c_str(), block.data(), block.size());
+        nanosleep(&pause, nullptr);
+        ChildWrite(second.c_str(), block.data(), block.size());
+        nanosleep(&pause, nullptr);
+    });
+    fs::remove_all(root);
+    BOOST_CHECK(waited.executed);
+    BOOST_CHECK(!waited.over_tree);
+}
+
+// Files the child renames and removes while the parent walks the tree are
+// skipped, not counted as over: the child keeps churning and is not killed.
+BOOST_AUTO_TEST_CASE(wait_skips_files_removed_during_walk)
+{
+    const fs::path root = FreshRoot("btx-swarm-wait-tree-churn");
+    std::vector<std::string> from, to;
+    for (int i = 0; i < 64; ++i) {
+        from.push_back(fs::PathToString(root / fs::PathFromString("a" + std::to_string(i))));
+        to.push_back(fs::PathToString(root / fs::PathFromString("b" + std::to_string(i))));
+    }
+    const auto waited = WaitOnChild(root, 1 << 20, [&] {
+        timespec start{}, now{};
+        clock_gettime(CLOCK_MONOTONIC, &start);
+        do {
+            for (size_t i = 0; i < from.size(); ++i) ChildWrite(from[i].c_str(), "x", 1);
+            for (size_t i = 0; i < from.size(); ++i) rename(from[i].c_str(), to[i].c_str());
+            for (size_t i = 0; i < to.size(); ++i) unlink(to[i].c_str());
+            clock_gettime(CLOCK_MONOTONIC, &now);
+        } while (now.tv_sec - start.tv_sec < 2);
+    });
+    fs::remove_all(root);
+    BOOST_CHECK(waited.executed);
+    BOOST_CHECK(!waited.over_tree);
+}
+#endif // _WIN32
+
+#ifdef __linux__
+// A root that is already over max_tree_bytes is refused before launch.
+BOOST_AUTO_TEST_CASE(linux_tree_limit_refuses_root_before_launch)
+{
+    const fs::path root = FreshRoot("btx-swarm-confine-tree-before");
+    const fs::path helper = root / "helper.sh";
+    {
+        std::ofstream out{helper};
+        out << "#!/bin/sh\ntouch ran\n";
+        BOOST_REQUIRE(out);
+    }
+    BOOST_REQUIRE(chmod(helper.c_str(), S_IRUSR | S_IWUSR | S_IXUSR) == 0);
+    WriteSized(root / "input.bin", 4096);
+    modelnet::SwarmConfineRequest request = BaseRequest(helper, root);
+    request.max_tree_bytes = fs::file_size(helper) + 1024;
+    ExpectRefusal(request, "TREE_LIMIT");
+    const bool ran = fs::exists(root / "ran");
+    fs::remove_all(root);
+    BOOST_CHECK(!ran);
+}
+
+#ifdef BTX_SWARM_LINUX_PROBE
+namespace {
+
+fs::path CopyProbe(const fs::path& root, const char* marker)
+{
+    const fs::path helper = root / "probe";
+    fs::copy_file(fs::path{BTX_SWARM_LINUX_PROBE}, helper, fs::copy_options::overwrite_existing);
+    BOOST_REQUIRE(chmod(helper.c_str(), S_IRUSR | S_IWUSR | S_IXUSR) == 0);
+    if (marker != nullptr) WriteRegularFile(root / marker);
+    return helper;
+}
+
+std::string ProbeOutput(const fs::path& root)
+{
+    std::ifstream in{root / "probe.out"};
+    return std::string{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+}
+
+// The checks below need the helper to run. Without user namespaces the
+// helper never starts and they have nothing to measure.
+bool ConfinementAvailable()
+{
+    const fs::path root = FreshRoot("btx-swarm-confine-linux-available");
+    std::string err;
+    const auto result = modelnet::SwarmRunConfined(BaseRequest(CopyProbe(root, nullptr), root), err);
+    fs::remove_all(root);
+    if (result.code != "CONFINED") BOOST_TEST_MESSAGE("Linux confinement absent here: " << result.code);
+    return result.code == "CONFINED";
+}
+
+} // namespace
+
+// The child sets RLIMIT_FSIZE to max_tree_bytes before exec.
+BOOST_AUTO_TEST_CASE(linux_file_size_limit_applied)
+{
+    if (!ConfinementAvailable()) return;
+    const fs::path root = FreshRoot("btx-swarm-confine-linux-fsize");
+    modelnet::SwarmConfineRequest request = BaseRequest(CopyProbe(root, nullptr), root);
+    request.max_tree_bytes = 64 << 20;
+    std::string err;
+    const auto result = modelnet::SwarmRunConfined(request, err);
+    const std::string out = ProbeOutput(root);
+    fs::remove_all(root);
+    BOOST_CHECK_EQUAL(result.code, "CONFINED");
+    BOOST_CHECK_EQUAL(out, "fsize=67108864\n");
+}
+
+// A helper that keeps writing files below RLIMIT_FSIZE is killed while it
+// runs, once the tree passes max_tree_bytes.
+BOOST_AUTO_TEST_CASE(linux_tree_limit_enforced_during_run)
+{
+    if (!ConfinementAvailable()) return;
+    const fs::path root = FreshRoot("btx-swarm-confine-linux-spread");
+    modelnet::SwarmConfineRequest request = BaseRequest(CopyProbe(root, "spread.mode"), root);
+    request.max_tree_bytes = fs::file_size(request.helper) + (8 << 20);
+    ExpectRefusal(request, "TREE_LIMIT");
+    const bool started = fs::exists(root / "spread.started");
+    const bool done = fs::exists(root / "spread.done");
+    const int files = CountFiles(root, "spread");
+    fs::remove_all(root);
+    BOOST_CHECK(started);
+    BOOST_CHECK(!done);
+    BOOST_CHECK_LT(files, 64);
+}
+
+// A helper that writes past max_tree_bytes and exits before the next walk is
+// refused by the check after exit.
+BOOST_AUTO_TEST_CASE(linux_tree_limit_refuses_result_after_run)
+{
+    if (!ConfinementAvailable()) return;
+    const fs::path root = FreshRoot("btx-swarm-confine-linux-burst");
+    modelnet::SwarmConfineRequest request = BaseRequest(CopyProbe(root, "burst.mode"), root);
+    request.max_tree_bytes = fs::file_size(request.helper) + (2 << 20);
+    ExpectRefusal(request, "TREE_LIMIT");
+    const bool done = fs::exists(root / "burst.done");
+    fs::remove_all(root);
+    BOOST_CHECK(done);
+}
+#endif // BTX_SWARM_LINUX_PROBE
+#endif // __linux__
 
 BOOST_AUTO_TEST_SUITE_END()
