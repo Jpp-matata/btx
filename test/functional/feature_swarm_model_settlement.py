@@ -177,6 +177,7 @@ class SwarmModelSettlementTest(BitcoinTestFramework):
         self._assert_automatic_spend_zero(node)
 
         txcount_before = node.getwalletinfo()["txcount"]
+        mempool_before = node.getrawmempool()
         helptext = node.help("preparefundmodelrelease")
         args = [_required_value(name) for name in _required_argument_names(helptext)]
         plan = None
@@ -186,6 +187,9 @@ class SwarmModelSettlementTest(BitcoinTestFramework):
             plan = None
 
         self._assert_automatic_spend_zero(node)
+        # The call itself never spends. Check before anything below signs or sends.
+        assert_equal(node.getwalletinfo()["txcount"], txcount_before)
+        assert_equal(node.getrawmempool(), mempool_before)
         submitted = self._try_sign_and_send(node, plan) if plan is not None else None
         if submitted:
             assert submitted
