@@ -1,0 +1,1983 @@
+# btx-035 CI for a public fork, branch ci-035 only.
+#
+# Builds btx-035/swarm plus the open swarm fixes on GitHub-hosted runners and
+# runs the swarm suites on Linux (real unprivileged user namespaces), Windows
+# (mingw-w64 cross build, run natively) and macOS arm64 (Seatbelt).
+#
+# - No secrets. The job token is read-only (permissions: contents: read).
+# - Runs only on branch ci-035 and never in btxchain/* (guard on the tools job).
+# - Third-party code: only actions/* pinned to full commit SHAs, plus the
+#   OpenSSL and Boost tarballs checked against fixed sha256 values.
+# - Every result is an annotation titled RESULT, readable without a token via
+#   GET /repos/{owner}/{repo}/check-runs/{id}/annotations.
+# - Heavy builds are split in two jobs per platform. The first compiles the
+#   libraries and the daemon and saves ccache; the second restores it and
+#   builds test_btx. Build jobs get up to 350-355 minutes, under GitHub's
+#   6 h limit for hosted jobs. If a build step still hits its own timeout,
+#   ccache is saved and "Re-run failed jobs" continues from there.
+# - Every suites step has a relative budget (--stop-in) below its own
+#   timeout, so its RESULT summary is always printed.
+
+name: btx-035 CI
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ci-035]
+
+concurrency:
+  group: btx-035-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  OSSL_VER: "3.5.4"
+  OSSL_SHA256: "967311f84955316969bdb1d8d4b983718ef42338639c621ec4c34fddef355e99"
+  BOOST_PIN_VER: "1.81.0"
+  BOOST_PIN_SHA256: "205666dea9f6a7cfed87c7a6dfbeb52a2c1b9de55712c9c1a87735d7181452b6"
+  CCACHE_MAXSIZE: "2500M"
+  CCACHE_COMPRESS: "true"
+  CCACHE_NOHASHDIR: "true"
+  CCACHE_COMPILERCHECK: "content"
+  HOMEBREW_NO_AUTO_UPDATE: "1"
+  HOMEBREW_NO_INSTALL_CLEANUP: "1"
+  HOMEBREW_NO_ANALYTICS: "1"
+  HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: "1"
+  PYTHONUNBUFFERED: "1"
+  LINUX_TEST_TARGETS: "test_btx btxd btx-cli btx-open btx-modeld btx-wallet btx-util btx-hcpd btx-tx btx-hosted"
+  CORE_SUITES: "util_tests,crypto_tests,hash_tests,key_tests,base58_tests,bech32_tests,uint256_tests,arith_uint256_tests,serialize_tests,streams_tests,script_tests,transaction_tests,sighash_tests,coins_tests,mempool_tests,validation_tests,blockchain_tests,net_tests,addrman_tests,getarg_tests,fs_tests,sock_tests,pq_crypto_tests,wallet_tests,lightwatch_tests,lab_lifecycle_tests,nif_sandbox_tests,guard_permit_tests,native_discovery_tests,cap02_tests,hire01_tests,acc07_tests"
+  GUARD_SUITES: "guard_permit_tests,native_discovery_tests,cap02_tests,hire01_tests,acc07_tests"
+
+jobs:
+  tools:
+    name: tools
+    # Every other job needs this one, so this guard keeps the whole workflow
+    # off upstream and off every branch except ci-035 (push or dispatch).
+    if: ${{ github.repository_owner != 'btxchain' && github.ref == 'refs/heads/ci-035' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Write the CI helper
+        run: |
+          mkdir -p ci-tools
+          cat > ci-tools/ci.py <<'CI_PY_EOF'
+          #!/usr/bin/env python3
+          """btx-035 CI helper (standard library only; Linux, macOS and Windows).
+
+          Every result is printed as a GitHub annotation titled RESULT, so it can be
+          read through the public check-runs annotations API without a token.
+          GitHub keeps at most 10 annotations of each level per step, so each command
+          spends at most 9 notices and 9 errors and folds the rest into one line.
+
+          Subcommands: ann, configure, build, build-summary, suites, prune, relink,
+          test-defs, dlls, smoke, userns, selftest.
+          """
+          import argparse
+          import glob
+          import json
+          import os
+          import re
+          import shutil
+          import signal
+          import subprocess
+          import sys
+          import threading
+          import time
+          from concurrent.futures import ThreadPoolExecutor
+
+          IS_WIN = os.name == "nt"
+          MAX_MSG = 900
+
+
+          def esc(s):
+              return s.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
+          class Ann:
+              """Annotation emitter with a per-step budget (GitHub: 10 per level per step)."""
+
+              def __init__(self, notices=9, errors=9, logfile=None):
+                  self.left = {"notice": notices, "error": errors, "warning": 3}
+                  self.lock = threading.Lock()
+                  self.logfile = logfile
+
+              def emit(self, level, msg):
+                  msg = " ".join(msg.split())
+                  if len(msg) > MAX_MSG:
+                      msg = msg[: MAX_MSG - 12] + " ...(cut)"
+                  with self.lock:
+                      if self.logfile:
+                          with open(self.logfile, "a", encoding="utf-8") as f:
+                              f.write(f"{level}\t{msg}\n")
+                      if self.left.get(level, 0) <= 0:
+                          print(f"[annotation budget spent] {level}: {msg}", flush=True)
+                          return
+                      self.left[level] -= 1
+                      print(f"::{level} title=RESULT::{esc(msg)}", flush=True)
+
+
+          def tail(path, n=40):
+              try:
+                  with open(path, "r", encoding="utf-8", errors="replace") as f:
+                      lines = f.readlines()
+                  sys.stdout.write("".join(lines[-n:]))
+                  sys.stdout.flush()
+              except OSError:
+                  pass
+
+
+          def read(path):
+              try:
+                  with open(path, "r", encoding="utf-8", errors="replace") as f:
+                      return f.read()
+              except OSError:
+                  return ""
+
+
+          def gh_output(key, value):
+              out = os.environ.get("GITHUB_OUTPUT")
+              if out:
+                  with open(out, "a", encoding="utf-8") as f:
+                      f.write(f"{key}={value}\n")
+              print(f"[output] {key}={value}")
+
+
+          def ccache_stats():
+              exe = shutil.which("ccache")
+              if not exe:
+                  return "ccache=absent"
+              try:
+                  out = subprocess.run([exe, "--print-stats"], capture_output=True, text=True, timeout=60).stdout
+              except Exception:
+                  return "ccache=?"
+              hit = miss = 0
+              for line in out.splitlines():
+                  parts = line.split("\t")
+                  if len(parts) == 2 and parts[1].strip().isdigit():
+                      if parts[0] in ("direct_cache_hit", "preprocessed_cache_hit"):
+                          hit += int(parts[1])
+                      elif parts[0] == "cache_miss":
+                          miss += int(parts[1])
+              return f"ccache_hit={hit} ccache_miss={miss}"
+
+
+          def strip_dashdash(rest):
+              return rest[1:] if rest and rest[0] == "--" else rest
+
+
+          # ---------------------------------------------------------------- ann
+          def cmd_ann(a):
+              Ann().emit(a.level, " ".join(a.msg))
+              return 0
+
+
+          # ---------------------------------------------------------------- configure
+          def cmd_configure(a):
+              os.makedirs(a.logs, exist_ok=True)
+              log = os.path.join(a.logs, f"cmake-{a.name}.log")
+              cmd = ["cmake"] + strip_dashdash(a.cmake)
+              t0 = time.time()
+              with open(log, "w", encoding="utf-8") as f:
+                  f.write("$ " + " ".join(cmd) + "\n")
+                  f.flush()
+                  rc = subprocess.call(cmd, stdout=f, stderr=subprocess.STDOUT)
+              secs = int(time.time() - t0)
+              txt = read(log)
+              tail(log, 30)
+              info = [f"job={a.job}", f"step=configure-{a.name}", f"rc={rc}", f"secs={secs}"]
+              m = re.search(r"The CXX compiler identification is (.+)", txt)
+              if m:
+                  info.append("cxx=" + m.group(1).strip().replace(" ", "-"))
+              m = re.search(r'Found Boost: (\S+) \(found suitable version "([^"]+)"', txt)
+              if m:
+                  info.append("boost=" + m.group(2))
+              m = re.search(r'Found OpenSSL: .*?\(found (?:suitable )?version "([^"]+)"', txt)
+              if m:
+                  info.append("openssl=" + m.group(1))
+              cache = read(os.path.join(a.builddir, "CMakeCache.txt"))
+              for key in ("BTX_HAVE_STATIC_TEST_PROBE", "WITH_MODELNET", "BTX_ENABLE_METAL", "BTX_MATMUL_METAL_PRECOMPILE_KERNELS"):
+                  m = re.search(r"^" + key + r":[A-Z]+=(.*)$", cache, re.M)
+                  if m:
+                      info.append(f"{key}={m.group(1)}")
+              Ann().emit("notice" if rc == 0 else "error", " ".join(info))
+              return rc
+
+
+          # ---------------------------------------------------------------- build
+          def cmd_build(a):
+              os.makedirs(a.logs, exist_ok=True)
+              log = os.path.join(a.logs, f"build-{a.name}.log")
+              with open(os.path.join(a.logs, f"build-{a.name}.t0"), "w") as f:
+                  f.write(str(int(time.time())))
+              rcfile = os.path.join(a.logs, f"build-{a.name}.rc")
+              if os.path.exists(rcfile):
+                  os.remove(rcfile)
+              if shutil.which("ccache"):
+                  subprocess.call(["ccache", "-z"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+              cmd = ["ninja", "-C", a.builddir] + strip_dashdash(a.ninja)
+              t0 = time.time()
+              with open(log, "w", encoding="utf-8") as f:
+                  f.write("$ " + " ".join(cmd) + "\n")
+                  f.flush()
+                  rc = subprocess.call(cmd, stdout=f, stderr=subprocess.STDOUT)
+              with open(rcfile, "w") as f:
+                  f.write(f"{rc} {int(time.time() - t0)}\n")
+              tail(log, 60)
+              return rc
+
+
+          def cmd_build_summary(a):
+              log = os.path.join(a.logs, f"build-{a.name}.log")
+              rcfile = os.path.join(a.logs, f"build-{a.name}.rc")
+              t0 = read(os.path.join(a.logs, f"build-{a.name}.t0")).strip()
+              if os.path.exists(rcfile):
+                  rc, secs = read(rcfile).split()
+              else:
+                  rc = "timeout"
+                  secs = str(int(time.time()) - int(t0)) if t0.isdigit() else "?"
+              txt = read(log)
+              failed = re.findall(r"^FAILED: (?:\[code=\d+\] )?(\S+)", txt, re.M)
+              prog = re.findall(r"^\[(\d+)/(\d+)\]", txt, re.M)
+              warnings = len(re.findall(r"warning: ", txt))
+              exes = []
+              for spec in a.exe or []:
+                  key, _, path = spec.partition("=")
+                  ok = os.path.isfile(path)
+                  exes.append(f"{key}={'yes' if ok else 'no'}")
+                  gh_output(key, "yes" if ok else "no")
+              msg = [f"job={a.job}", f"step=build-{a.name}", f"rc={rc}", f"secs={secs}", f"failed_edges={len(failed)}",
+                     f"warnings={warnings}", ccache_stats()]
+              if prog:
+                  msg.append(f"progress={prog[-1][0]}/{prog[-1][1]}")
+              msg += exes
+              if failed:
+                  msg.append("first_failed=" + ",".join(os.path.basename(x) for x in failed[:4]))
+              if rc == "timeout":
+                  msg.append("note=step-timeout:ccache-saved,re-run-continues")
+              Ann().emit("notice" if rc == "0" else "error", " ".join(msg))
+              return 0
+
+
+          # ---------------------------------------------------------------- suites
+          RE_RUNNING = re.compile(r"Running (\d+) test cases?")
+          RE_SKIP = re.compile(r'Test (suite|case) "([^"]+)" is skipped because')
+          RE_ERR = re.compile(r'error: in "([^"]+)"[:]?(.*)')
+
+
+          def kill_tree(p):
+              try:
+                  if IS_WIN:
+                      subprocess.call(["taskkill", "/F", "/T", "/PID", str(p.pid)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                  else:
+                      os.killpg(p.pid, signal.SIGKILL)
+              except Exception:
+                  pass
+              try:
+                  p.kill()
+              except Exception:
+                  pass
+
+
+          def list_suites(binary):
+              p = subprocess.run([binary, "--list_content"], capture_output=True, text=True, errors="replace", timeout=600)
+              names = []
+              for line in (p.stderr + "\n" + p.stdout).splitlines():
+                  m = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)\*?\s*$", line)
+                  if m:
+                      names.append(m.group(1))
+              return names, p.returncode
+
+
+          def run_one(binary, suite, timeout, extra):
+              cmd = [binary, f"--run_test={suite}", "--log_level=test_suite", "--color_output=no"] + extra
+              kw = {}
+              if IS_WIN:
+                  kw["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+              else:
+                  kw["start_new_session"] = True
+              t0 = time.time()
+              p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, **kw)
+              timed_out = False
+              try:
+                  out, _ = p.communicate(timeout=max(1, timeout))
+              except subprocess.TimeoutExpired:
+                  timed_out = True
+                  kill_tree(p)
+                  try:
+                      out, _ = p.communicate(timeout=30)
+                  except Exception:
+                      out = b""
+              secs = time.time() - t0
+              text = (out or b"").decode("utf-8", errors="replace")
+              kept, skipped_cases = [], 0
+              for line in text.splitlines():
+                  m = RE_SKIP.search(line)
+                  if m:
+                      if m.group(1) == "case" and m.group(2).startswith(suite + "/"):
+                          skipped_cases += 1
+                          kept.append(line)
+                      continue
+                  kept.append(line)
+              text = "\n".join(kept)
+              m = RE_RUNNING.search(text)
+              errs = RE_ERR.findall(text)
+              rc = p.returncode
+              if timed_out:
+                  status = "timeout"
+              elif rc == 0:
+                  status = "pass"
+              elif rc == 200 and "no test cases matching filter" in text:
+                  status = "absent"
+              elif rc in (200, 201):
+                  status = "fail"
+              else:
+                  status = "crash"
+              first = ""
+              if errs:
+                  first = (errs[0][0] + ":" + errs[0][1]).strip()[:240]
+              elif status in ("crash", "fail", "timeout"):
+                  lines = [x for x in kept if x.strip()]
+                  first = (lines[-1] if lines else "")[:240]
+              return {
+                  "suite": suite, "status": status, "rc": rc, "secs": round(secs, 1),
+                  "expected": int(m.group(1)) if m else -1,
+                  "cases": text.count("Leaving test case"),
+                  "errors": len(errs),
+                  "absent_msgs": text.count("absent here"),
+                  "skipped": skipped_cases,
+                  "first": first, "log": text,
+              }
+
+
+          def cmd_suites(a):
+              out = a.out
+              os.makedirs(os.path.join(out, "logs"), exist_ok=True)
+              ann = Ann(notices=a.max_notices, errors=a.max_errors, logfile=os.path.join(out, "annotations.tsv"))
+              binary = os.path.abspath(a.bin)
+              t_start = time.time()
+              if not os.path.isfile(binary):
+                  ann.emit("error", f"label={a.label} job={a.job} status=no-binary bin={os.path.basename(binary)}")
+                  return 1
+              have, lrc = list_suites(binary)
+              if not have:
+                  ann.emit("error", f"label={a.label} job={a.job} status=list_content-failed rc={lrc}")
+                  return 1
+              have_set = set(have)
+              absent_listed = []
+              if a.suites:
+                  want = [s.strip() for s in a.suites.split(",") if s.strip()]
+                  absent_listed = [s for s in want if s not in have_set]
+                  sel = [s for s in want if s in have_set]
+              else:
+                  inc = re.compile(a.include)
+                  exc = re.compile(a.exclude) if a.exclude else None
+                  sel = [s for s in have if inc.search(s) and not (exc and exc.search(s))]
+              serial_re = re.compile(a.serial) if a.serial else None
+              par = [s for s in sel if not (serial_re and serial_re.search(s))]
+              ser = [s for s in sel if serial_re and serial_re.search(s)]
+              stop_at = a.stop_at if a.stop_at else None
+              if a.stop_in:
+                  # Relative budget, so the summary is emitted before the step's own timeout fires.
+                  rel = int(t_start + a.stop_in * 60)
+                  stop_at = min(stop_at, rel) if stop_at else rel
+              extra = strip_dashdash(a.extra or [])
+              results = []
+              rlock = threading.Lock()
+
+              def job(suite, rep):
+                  now = time.time()
+                  if stop_at and now >= stop_at:
+                      r = {"suite": suite, "status": "not_run", "rc": "", "secs": 0, "expected": -1, "cases": 0,
+                           "errors": 0, "absent_msgs": 0, "skipped": 0, "first": "", "log": ""}
+                  else:
+                      tmo = a.timeout
+                      deadline_cut = False
+                      if stop_at and stop_at - now < tmo:
+                          tmo = stop_at - now
+                          deadline_cut = True
+                      r = run_one(binary, suite, tmo, extra)
+                      if r["status"] == "timeout" and deadline_cut:
+                          r["status"] = "deadline"
+                  r["rep"] = rep
+                  if r["status"] not in ("pass", "not_run") or a.keep_logs:
+                      fn = os.path.join(out, "logs", f"{suite}-{rep}.log")
+                      with open(fn, "w", encoding="utf-8") as f:
+                          f.write(r["log"])
+                  r["log"] = ""
+                  with rlock:
+                      results.append(r)
+                      if r["status"] not in ("pass", "not_run"):
+                          print(f"[{a.label}] {suite} #{rep}: {r['status']} rc={r['rc']} {r['first']}", flush=True)
+                  return r
+
+              for rep in range(1, a.repeat + 1):
+                  with ThreadPoolExecutor(max_workers=max(1, a.jobs)) as ex:
+                      list(ex.map(lambda s: job(s, rep), par))
+                  for s in ser:
+                      job(s, rep)
+
+              results.sort(key=lambda r: (r["suite"], r["rep"]))
+              with open(os.path.join(out, "results.tsv"), "w", encoding="utf-8") as f:
+                  f.write("label\tsuite\trep\tstatus\trc\tsecs\texpected\tcases\terrors\tabsent_msgs\tskipped\tfirst\n")
+                  for r in results:
+                      f.write("\t".join(str(x) for x in (a.label, r["suite"], r["rep"], r["status"], r["rc"], r["secs"], r["expected"],
+                                                           r["cases"], r["errors"], r["absent_msgs"], r["skipped"], r["first"])) + "\n")
+              count = {}
+              for r in results:
+                  count[r["status"]] = count.get(r["status"], 0) + 1
+              bad = [r for r in results if r["status"] in ("fail", "crash", "timeout")]
+              tot = lambda k: sum(r[k] for r in results)
+              secs = int(time.time() - t_start)
+              summary = (f"label={a.label} job={a.job} suites={len(sel)} runs={len(results)} pass={count.get('pass', 0)} "
+                         f"fail={count.get('fail', 0)} crash={count.get('crash', 0)} timeout={count.get('timeout', 0)} "
+                         f"deadline={count.get('deadline', 0)} not_run={count.get('not_run', 0)} absent={count.get('absent', 0)} "
+                         f"cases={tot('cases')} errors={tot('errors')} absent_msgs={tot('absent_msgs')} skipped={tot('skipped')} "
+                         f"secs={secs} jobs={a.jobs} repeat={a.repeat}")
+              if absent_listed:
+                  summary += " not_in_binary=" + ",".join(absent_listed)
+              ann.emit("error" if bad else "notice", summary)
+
+              if a.per_suite:
+                  for s in sel:
+                      rs = [r for r in results if r["suite"] == s]
+                      ok = all(r["status"] == "pass" for r in rs)
+                      j = lambda k: "/".join(str(r[k]) for r in rs)
+                      line = (f"label={a.label} suite={s} runs={len(rs)} pass={sum(r['status'] == 'pass' for r in rs)} "
+                              f"status={j('status')} cases={j('cases')} errors={j('errors')} absent_msgs={j('absent_msgs')} "
+                              f"skipped={j('skipped')} secs={j('secs')}")
+                      if not ok:
+                          firsts = [r["first"] for r in rs if r["first"]]
+                          if firsts:
+                              line += f" first={firsts[0]}"
+                      ann.emit("notice" if ok else "error", line)
+              else:
+                  seen, names = set(), []
+                  for r in bad:
+                      if r["suite"] not in seen:
+                          seen.add(r["suite"])
+                          names.append(r)
+                  shown = names[: max(0, a.max_errors - 2)]
+                  for r in shown:
+                      ann.emit("error", f"label={a.label} suite={r['suite']} status={r['status']} rc={r['rc']} "
+                                        f"cases={r['cases']} errors={r['errors']} secs={r['secs']} first={r['first']}")
+                  rest = names[len(shown):]
+                  if rest:
+                      ann.emit("error", f"label={a.label} more_failing={len(rest)}: " + ",".join(r["suite"] for r in rest))
+                  nr = [r["suite"] for r in results if r["status"] in ("not_run", "deadline")]
+                  if nr:
+                      ann.emit("notice", f"label={a.label} not_run_or_deadline={len(nr)} first=" + ",".join(nr[:20]))
+              with open(os.path.join(out, "summary.json"), "w", encoding="utf-8") as f:
+                  json.dump({"label": a.label, "counts": count, "selected": len(sel), "secs": secs}, f, indent=1)
+              return 1 if bad else 0
+
+
+          # ---------------------------------------------------------------- prune (mingw test_btx)
+          def obj_to_src(obj, target, src_root):
+              """Build-dir object path of <target> (relative to the build dir) -> absolute source path, or None."""
+              marker = f"/CMakeFiles/{target}.dir/"
+              t = obj.replace("\\", "/")
+              if marker not in t:
+                  return None
+              tdir, rel = t.split(marker, 1)
+              rel = re.sub(r"\.(obj|o)$", "", rel)
+              parts = [".." if p == "__" else p for p in rel.split("/")]
+              return os.path.normpath(os.path.join(os.path.abspath(src_root), tdir, *parts))
+
+
+          def drop_sources(src_root, target, want):
+              """Remove the files in `want` (absolute paths) from add_executable(<target> ...) and
+              target_sources(<target> ...) blocks under src/. A library that lists the same file keeps it.
+              Returns the dropped files relative to src_root."""
+              pruned = []
+              start = re.compile(r"^\s*(add_executable|target_sources)\(\s*" + re.escape(target) + r"(\s|$|\))")
+              for root, _dirs, files in os.walk(os.path.join(src_root, "src")):
+                  if "CMakeLists.txt" not in files:
+                      continue
+                  cml = os.path.join(root, "CMakeLists.txt")
+                  lines = read(cml).splitlines(keepends=True)
+                  keep, changed, depth = [], False, 0
+                  for line in lines:
+                      code = line.split("#", 1)[0]
+                      if depth == 0 and start.match(code):
+                          depth = code.count("(") - code.count(")")
+                          keep.append(line)
+                          continue
+                      if depth > 0:
+                          tok = code.strip()
+                          if re.fullmatch(r"[A-Za-z0-9_./+-]+\.(cpp|cc|c)", tok):
+                              full = os.path.normpath(os.path.join(os.path.abspath(root), tok))
+                              if full in want:
+                                  pruned.append(os.path.relpath(full, os.path.abspath(src_root)).replace("\\", "/"))
+                                  changed = True
+                                  continue
+                          depth += code.count("(") - code.count(")")
+                      keep.append(line)
+                  if changed:
+                      with open(cml, "w", encoding="utf-8", newline="") as f:
+                          f.write("".join(keep))
+              return pruned
+
+
+          def prune_state(logs):
+              try:
+                  with open(os.path.join(logs, "pruned.json"), encoding="utf-8") as f:
+                      return json.load(f)
+              except (OSError, ValueError):
+                  return {"compile": [], "link": [], "other": [], "unmapped": [], "rounds": []}
+
+
+          def write_prune_state(logs, st):
+              os.makedirs(logs, exist_ok=True)
+              with open(os.path.join(logs, "pruned.json"), "w", encoding="utf-8") as f:
+                  json.dump(st, f, indent=1)
+              with open(os.path.join(logs, "pruned.txt"), "w", encoding="utf-8") as f:
+                  f.write("# test sources removed from the mingw test_btx build because they do not compile there\n")
+                  f.write("".join(x + "\n" for x in sorted(st["compile"])))
+                  f.write("# test sources removed because they use code from the files above (undefined at link time)\n")
+                  f.write("".join(x + "\n" for x in sorted(st["link"])))
+                  for r in st["rounds"]:
+                      f.write(f"#   link round {r['round']}: dropped {len(r['dropped'])}; first undefined: {' | '.join(r['first_undefined'][:6])}\n")
+                  f.write("# failed edges outside test_btx objects\n" + "".join(x + "\n" for x in st["other"]))
+                  f.write("# failed test objects that could not be mapped to a CMakeLists line\n" + "".join(x + "\n" for x in st["unmapped"]))
+
+
+          def cmd_prune(a):
+              ann = Ann()
+              txt = read(a.log)
+              failed = [t.replace("\\", "/") for t in re.findall(r"^FAILED: (?:\[code=\d+\] )?(\S+)", txt, re.M)]
+              srcs, other = [], []
+              for t in failed:
+                  s = obj_to_src(t, a.target, a.src)
+                  if s is None:
+                      other.append(t)
+                  else:
+                      srcs.append(s)
+              pruned = drop_sources(a.src, a.target, set(srcs))
+              pruned_set = set(pruned)
+              unpruned = [os.path.relpath(s, os.path.abspath(a.src)).replace("\\", "/") for s in srcs]
+              unpruned = [s for s in unpruned if s not in pruned_set]
+              st = prune_state(a.logs)
+              st["compile"] = sorted(set(st["compile"]) | pruned_set)
+              st["other"], st["unmapped"] = other, unpruned
+              write_prune_state(a.logs, st)
+              names = sorted(set(os.path.basename(p) for p in pruned))
+              swarm = [n for n in names if n.startswith("swarm_")]
+              htlc = [n for n in names if "htlc" in n]
+              ann.emit("notice" if not other else "error",
+                       f"job={a.job} step=prune failed_edges={len(failed)} test_objects={len(srcs)} pruned={len(pruned)} "
+                       f"pruned_swarm={len(swarm)} pruned_htlc={len(htlc)} unmapped={len(unpruned)} other_failed={len(other)} "
+                       f"other_first={','.join(os.path.basename(o) for o in other[:4])}")
+              if names:
+                  ann.emit("notice", f"job={a.job} step=prune-list n={len(names)}: " + ",".join(n[:-4] if n.endswith('.cpp') else n for n in names))
+              gh_output("pruned", str(len(pruned)))
+              return 0
+
+
+          TEST_DEFS_MARK = "# btx-035 CI only (mingw): test_btx gets secp256k1's interface definitions"
+
+
+          def cmd_test_defs(a):
+              """CI-only edit: give <target> the INTERFACE_COMPILE_DEFINITIONS of secp256k1 (SECP256K1_STATIC for a
+              static build). test_btx already takes secp256k1's include directories, and key_tests.cpp includes
+              <secp256k1.h>; without the definition, SECP256K1_API is dllimport on Windows and the link looks for
+              __imp_secp256k1_* (run 1). On Linux and macOS the definition has no effect."""
+              ann = Ann()
+              cml = os.path.join(a.src, "src", "test", "CMakeLists.txt")
+              txt = read(cml)
+              if not txt:
+                  ann.emit("error", f"job={a.job} step=test-defs status=fail missing={cml}")
+                  return 1
+              if TEST_DEFS_MARK in txt:
+                  ann.emit("notice", f"job={a.job} step=test-defs status=already-present")
+                  return 0
+              line = f"target_compile_definitions({a.target} PRIVATE $<TARGET_PROPERTY:secp256k1,INTERFACE_COMPILE_DEFINITIONS>)\n"
+              with open(cml, "a", encoding="utf-8", newline="") as f:
+                  f.write(("" if txt.endswith("\n") else "\n") + "\n" + TEST_DEFS_MARK + "\n" + line)
+              ann.emit("notice", f"job={a.job} step=test-defs status=ok file=src/test/CMakeLists.txt added=" + line.strip().replace(" ", "_"))
+              return 0
+
+
+          RE_IN_FUNC = re.compile(r"(\S+?\.obj): in function")
+          RE_UNDEF_OBJ = re.compile(r"(\S+?\.obj):\S*:?\s*(?:more )?undefined references? to [`']([^'`]+)'")
+          RE_UNDEF_LIB = re.compile(r"(\S+?\.a)\(([^)]+)\):\S*:?\s*(?:more )?undefined references? to [`']([^'`]+)'")
+          RE_UNDEF_ANY = re.compile(r"undefined references? to [`']([^'`]+)'")
+
+
+          def link_undefined(txt, target):
+              """Parse GNU ld errors: (test objects of <target> with undefined references, archive members with
+              undefined references, first undefined symbols). Handles the one-line form and the 'in function' form."""
+              objs, libs, syms = [], [], []
+              last_obj = None
+              for line in txt.splitlines():
+                  m = RE_IN_FUNC.search(line)
+                  if m:
+                      last_obj = m.group(1)
+                      continue
+                  if "undefined reference" not in line:
+                      continue
+                  ml = RE_UNDEF_LIB.search(line)
+                  mo = RE_UNDEF_OBJ.search(line)
+                  ma = RE_UNDEF_ANY.search(line)
+                  if ma and ma.group(1) not in syms:
+                      syms.append(ma.group(1))
+                  if ml:
+                      libs.append(os.path.basename(ml.group(1)) + "(" + ml.group(2) + ")")
+                  elif mo:
+                      objs.append(mo.group(1))
+                  elif last_obj:
+                      objs.append(last_obj)
+              marker = f"/CMakeFiles/{target}.dir/"
+              tobjs = sorted(set(o.replace("\\", "/") for o in objs if marker in o.replace("\\", "/")))
+              other = sorted(set(o for o in objs if marker not in o.replace("\\", "/"))) + sorted(set(libs))
+              return tobjs, other, syms
+
+
+          def cmd_relink(a):
+              """Build <target> again after `prune`; when the link fails because kept test files use code from the
+              pruned ones, drop those test files too and link again, up to --rounds times."""
+              ann = Ann()
+              os.makedirs(a.logs, exist_ok=True)
+              final = os.path.join(a.logs, f"build-{a.name}.log")
+              t0 = time.time()
+              with open(os.path.join(a.logs, f"build-{a.name}.t0"), "w") as f:
+                  f.write(str(int(t0)))
+              rcfile = os.path.join(a.logs, f"build-{a.name}.rc")
+              if os.path.exists(rcfile):
+                  os.remove(rcfile)
+              if shutil.which("ccache"):
+                  subprocess.call(["ccache", "-z"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+              st = prune_state(a.logs)
+              cmd = ["ninja", "-C", a.builddir] + strip_dashdash(a.ninja)
+              rc, rnd, txt = 1, 0, ""
+              while rnd < a.rounds:
+                  rnd += 1
+                  log = os.path.join(a.logs, f"build-{a.name}-r{rnd}.log")
+                  with open(log, "w", encoding="utf-8") as f:
+                      f.write("$ " + " ".join(cmd) + "\n")
+                      f.flush()
+                      rc = subprocess.call(cmd, stdout=f, stderr=subprocess.STDOUT)
+                  txt = read(log)
+                  if rc == 0:
+                      ann.emit("notice", f"job={a.job} step=relink round={rnd} rc=0 linked=yes dropped_for_link={len(st['link'])}")
+                      break
+                  failed = re.findall(r"^FAILED: (?:\[code=\d+\] )?(\S+)", txt, re.M)
+                  tobjs, other, syms = link_undefined(txt, a.target)
+                  want = set(filter(None, (obj_to_src(o, a.target, a.src) for o in tobjs)))
+                  # Undefined references from a library cannot be fixed by dropping test files, and an __imp_ symbol
+                  # is a dllimport/static mismatch in the build setup, not code from a pruned file: stop and report.
+                  imp = [x for x in syms if x.startswith("__imp_")]
+                  dropped = drop_sources(a.src, a.target, want) if want and not other and not imp else []
+                  st["link"] = sorted(set(st["link"]) | set(dropped))
+                  st["rounds"].append({"round": rnd, "dropped": dropped, "first_undefined": syms[:12],
+                                       "undefined_in_libraries": other[:12]})
+                  write_prune_state(a.logs, st)
+                  names = ",".join(os.path.basename(d)[:-4] for d in dropped[:12])
+                  ann.emit("error" if not dropped else "notice",
+                           f"job={a.job} step=relink round={rnd} rc={rc} failed_edges={len(failed)} "
+                           f"first_failed={','.join(os.path.basename(x) for x in failed[:3])} undefined_symbols={len(syms)} "
+                           f"test_objects_with_undefined={len(tobjs)} undefined_outside_tests={len(other)} dllimport_misses={len(imp)} "
+                           f"objects={','.join(os.path.basename(o) for o in tobjs[:4])} dropped={len(dropped)} "
+                           f"names={names or 'none'} first_undefined={' | '.join(syms[:3])[:300]}")
+                  if not dropped:
+                      break
+              # build-summary reads this file: the last round only, so its counts are that round's
+              with open(final, "w", encoding="utf-8") as f:
+                  f.write(txt)
+              with open(rcfile, "w") as f:
+                  f.write(f"{rc} {int(time.time() - t0)}\n")
+              gh_output("relink_rounds", str(rnd))
+              gh_output("link_dropped", str(len(st["link"])))
+              tail(final, 60)
+              return rc
+
+
+          # ---------------------------------------------------------------- dlls (bundle mingw runtime DLLs)
+          def cmd_dlls(a):
+              ann = Ann()
+              dirs = []
+              for pat in a.search:
+                  dirs += [d for d in glob.glob(pat) if os.path.isdir(d)]
+              index = {}
+              for d in dirs:
+                  for fn in os.listdir(d):
+                      if fn.lower().endswith(".dll"):
+                          index.setdefault(fn.lower(), os.path.join(d, fn))
+              os.makedirs(a.dest, exist_ok=True)
+              queue = [e for e in a.exe if os.path.isfile(e)]
+              imports, bundled, system = {}, {}, set()
+              while queue:
+                  f = queue.pop()
+                  out = subprocess.run([a.objdump, "-p", f], capture_output=True, text=True, errors="replace").stdout
+                  names = re.findall(r"DLL Name: (\S+)", out)
+                  imports[os.path.basename(f)] = names
+                  for n in names:
+                      k = n.lower()
+                      if k in bundled or k in system:
+                          continue
+                      if k in index:
+                          bundled[k] = index[k]
+                          shutil.copy2(index[k], os.path.join(a.dest, os.path.basename(index[k])))
+                          queue.append(index[k])
+                      else:
+                          system.add(n)
+              with open(os.path.join(a.dest, "MANIFEST-dlls.json"), "w", encoding="utf-8") as f:
+                  json.dump({"imports": imports, "bundled": sorted(os.path.basename(v) for v in bundled.values()),
+                             "system": sorted(system)}, f, indent=1)
+              sizes = []
+              for e in a.exe:
+                  if os.path.isfile(e):
+                      sizes.append(f"{os.path.basename(e)}={os.path.getsize(e) // (1024 * 1024)}MB")
+                  else:
+                      sizes.append(f"{os.path.basename(e)}=missing")
+              ann.emit("notice", f"job={a.job} step=package {' '.join(sizes)} bundled_dlls={','.join(sorted(os.path.basename(v) for v in bundled.values())) or 'none'} "
+                                 f"system_dlls={','.join(sorted(system))}")
+              return 0
+
+
+          # ---------------------------------------------------------------- smoke (regtest btxd)
+          RE_NO_COOKIE = re.compile(r"Could not locate RPC credentials|Authorization failed")
+
+
+          def find_cookies(D):
+              """Every .cookie under the datadir, plus the default datadir (diagnostics only)."""
+              found = sorted(glob.glob(os.path.join(D, "**", ".cookie"), recursive=True))
+              for env in ("LOCALAPPDATA", "APPDATA", "HOME"):
+                  base = os.environ.get(env)
+                  if base:
+                      for sub in ("BTX", ".btx"):
+                          found += sorted(glob.glob(os.path.join(base, sub, "**", ".cookie"), recursive=True))
+              return found
+
+
+          def wait_cookie(want, proc, budget):
+              """Wait until btxd has written its RPC cookie. btx-cli reads the cookie once per attempt, before it
+              connects, and -rpcwait does not retry an HTTP 401. A cli call made while the RPC port is bound but
+              the cookie is not yet written fails for good with 'Could not locate RPC credentials'."""
+              t0 = time.time()
+              while time.time() - t0 < budget:
+                  try:
+                      if os.path.getsize(want) > 0:
+                          return True, time.time() - t0
+                  except OSError:
+                      pass
+                  if proc.poll() is not None:
+                      break
+                  time.sleep(0.25)
+              return False, time.time() - t0
+
+
+          def cmd_smoke(a):
+              ann = Ann(notices=9, errors=9)
+              D = os.path.abspath(a.datadir)
+              os.makedirs(D, exist_ok=True)
+              btxd, cli = os.path.abspath(a.btxd), os.path.abspath(a.cli)
+              extra = a.extra or []
+              tag = f"label={a.label} job={a.job}"
+              # The same datadir and the same network for btxd and btx-cli, as in the tester guide: regtest=1 in
+              # <datadir>/btx.conf (both programs read it) and -datadir/-regtest on both command lines.
+              with open(os.path.join(D, "btx.conf"), "w", encoding="ascii", newline="\n") as f:
+                  f.write("regtest=1\n")
+              common = [f"-datadir={D}", "-regtest"]
+              cookie = os.path.join(D, "regtest", ".cookie")
+              cmd = [btxd] + common + ["-server=1", "-listen=0", "-discover=0", "-dnsseed=0", "-fixedseeds=0", "-listenonion=0",
+                                       "-upnp=0", "-natpmp=0", "-connect=0", "-printtoconsole=0", "-fallbackfee=0.0002",
+                                       "-modelbind=0", f"-port={a.port}", f"-rpcport={a.rpcport}"] + extra
+              clic = [cli] + common + [f"-rpcport={a.rpcport}"]
+              done, failed, late_fail = [], [], []
+
+              def rpc(*args, timeout=120):
+                  try:
+                      p = subprocess.run(clic + list(args), capture_output=True, text=True, errors="replace", timeout=timeout)
+                      return p.returncode, p.stdout.strip(), p.stderr.strip()
+                  except subprocess.TimeoutExpired:
+                      return -999, "", f"timeout after {timeout}s"
+
+              def fail(step, why):
+                  failed.append(step)
+                  ann.emit("error", f"{tag} step={step} status=fail {why}")
+
+              try:
+                  ver = subprocess.run([btxd, "-version"], capture_output=True, text=True, errors="replace", timeout=60).stdout.splitlines()
+                  ver = ver[0] if ver else "?"
+              except Exception as e:
+                  ver = f"error:{e}"
+              logf = open(os.path.join(D, "btxd-console.txt"), "w")
+              kw = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if IS_WIN else {"start_new_session": True}
+              t0 = time.time()
+              proc = subprocess.Popen(cmd, stdout=logf, stderr=subprocess.STDOUT, **kw)
+              have, cwait = wait_cookie(cookie, proc, 240)
+              cinfo = f"cookie={cookie} cookie_found={'yes' if have else 'no'} cookie_wait={cwait:.1f}s"
+              if not have:
+                  # Not where the cli looks. Say where it is instead; if it is somewhere else, point the cli at it
+                  # so the remaining steps still run, and report the mismatch as an error.
+                  others = find_cookies(D)
+                  cinfo += f" cookies_elsewhere={','.join(others) or 'none'}"
+                  late_fail.append("cookie")
+                  if others:
+                      clic.append(f"-rpccookiefile={others[0]}")
+                      ann.emit("error", f"{tag} step=cookie status=fail expected={cookie} found={others[0]} (cli pointed at it)")
+              attempts = 0
+              while True:
+                  attempts += 1
+                  rc, out, err = rpc("-rpcwait", "-rpcwaittimeout=240", "getblockchaininfo", timeout=270)
+                  if rc == 0 or attempts >= 5 or not RE_NO_COOKIE.search(err) or proc.poll() is not None:
+                      break
+                  time.sleep(1)
+              cinfo += f" rpc_attempts={attempts}"
+              if rc != 0:
+                  fail("start", f"rc={rc} alive={proc.poll() is None} exit={proc.poll()} version={ver} {cinfo} err={err[:200]}")
+              else:
+                  info = json.loads(out)
+                  ann.emit("notice", f"{tag} step=start status=ok secs={time.time() - t0:.1f} version={ver} chain={info.get('chain')} "
+                                     f"blocks={info.get('blocks')} {cinfo} args={' '.join(extra) or 'none'}")
+                  done.append("start")
+                  if a.linger:
+                      time.sleep(a.linger)
+                      rc, out, err = rpc("getnetworkinfo")
+                      alive = proc.poll() is None
+                      if rc == 0 and alive:
+                          ni = json.loads(out)
+                          ann.emit("notice", f"{tag} step=linger status=ok secs={a.linger} alive=yes subversion={ni.get('subversion')}")
+                          done.append("linger")
+                      else:
+                          fail("linger", f"rc={rc} alive={alive} err={err[:200]}")
+                  addr = None
+                  if a.wallet and not failed:
+                      rc1, _, e1 = rpc("createwallet", "ci")
+                      rc2, addr, e2 = rpc("-rpcwallet=ci", "getnewaddress")
+                      if rc1 == 0 and rc2 == 0 and addr:
+                          ann.emit("notice", f"{tag} step=wallet status=ok address_kind={addr[:5]}... len={len(addr)}")
+                          done.append("wallet")
+                      else:
+                          addr = None
+                          fail("wallet", f"createwallet_rc={rc1} getnewaddress_rc={rc2} err={(e1 or e2)[:200]}")
+                  height = 0
+                  if addr and a.mine > 0:
+                      t1 = time.time()
+                      rc, out, err = rpc("generatetoaddress", "1", addr, timeout=min(a.mine_budget, 900))
+                      if rc != 0:
+                          fail("mine1", f"rc={rc} secs={time.time() - t1:.1f} err={err[:240]}")
+                      else:
+                          first = time.time() - t1
+                          ann.emit("notice", f"{tag} step=mine1 status=ok secs={first:.1f}")
+                          done.append("mine1")
+                          rc, out, _ = rpc("getblockcount")
+                          height = int(out) if rc == 0 and out.isdigit() else 1
+                          while height < a.mine and time.time() - t1 < a.mine_budget:
+                              n = min(10, a.mine - height)
+                              left = a.mine_budget - (time.time() - t1)
+                              rc, out, err = rpc("generatetoaddress", str(n), addr, timeout=max(30, int(left)))
+                              if rc != 0:
+                                  break
+                              rc2, out2, _ = rpc("getblockcount")
+                              height = int(out2) if rc2 == 0 and out2.isdigit() else height
+                          secs = time.time() - t1
+                          level_ok = height >= a.mine
+                          msg = f"{tag} step=mine status={'ok' if level_ok else 'short'} target={a.mine} height={height} secs={secs:.1f}"
+                          if level_ok:
+                              ann.emit("notice", msg)
+                              done.append("mine")
+                          else:
+                              fail("mine", msg.replace(tag + " step=mine ", "") + f" last_err={err[:160]}")
+                  if addr and a.send and height >= 101:
+                      rc, out, err = rpc("-rpcwallet=ci", "getbalances")
+                      trusted = json.loads(out).get("mine", {}).get("trusted") if rc == 0 else None
+                      rc, addr2, err = rpc("-rpcwallet=ci", "getnewaddress")
+                      rc, txid, err = rpc("-rpcwallet=ci", "sendtoaddress", addr2, "1.0") if rc == 0 else (rc, "", err)
+                      if rc != 0 or not txid:
+                          fail("send", f"rc={rc} trusted={trusted} err={err[:240]}")
+                      else:
+                          rc, _, err = rpc("generatetoaddress", "1", addr, timeout=600)
+                          rc2, out2, err2 = rpc("-rpcwallet=ci", "gettransaction", txid)
+                          conf = json.loads(out2).get("confirmations") if rc2 == 0 else None
+                          fee = json.loads(out2).get("fee") if rc2 == 0 else None
+                          if rc == 0 and conf and conf >= 1:
+                              ann.emit("notice", f"{tag} step=send status=ok confirmations={conf} fee={fee} trusted_before={trusted}")
+                              done.append("send")
+                          else:
+                              fail("send", f"generate_rc={rc} gettransaction_rc={rc2} confirmations={conf} err={(err or err2)[:200]}")
+              # stop
+              t2 = time.time()
+              if proc.poll() is None:
+                  rc, _, err = rpc("stop", timeout=60)
+                  try:
+                      proc.wait(timeout=180)
+                      code = proc.returncode
+                      if code == 0:
+                          ann.emit("notice", f"{tag} step=stop status=ok exit=0 stop_rc={rc} secs={time.time() - t2:.1f}")
+                          done.append("stop")
+                      else:
+                          fail("stop", f"exit={code} stop_rc={rc}")
+                  except subprocess.TimeoutExpired:
+                      fail("stop", f"still running 180s after stop (stop_rc={rc}); killed")
+                      kill_tree(proc)
+              else:
+                  fail("stop", f"btxd had already exited with {proc.returncode}")
+              logf.close()
+              failed += late_fail  # a cookie in the wrong place fails the smoke, after the other steps have run
+              dbg = os.path.join(D, "regtest", "debug.log")
+              txt = read(dbg)
+              errs = len(re.findall(r"(?i)\b(error|exception|assert)", txt))
+              modeld = len(re.findall(r"(?i)modeld", txt))
+              swarm = len(re.findall(r"(?i)swarm", txt))
+              m = re.search(r"Generated RPC authentication cookie (\S+)", txt)
+              logged_cookie = m.group(1) if m else "not-in-log"
+              if a.out:
+                  os.makedirs(a.out, exist_ok=True)
+                  for src in (dbg, os.path.join(D, "btxd-console.txt")):
+                      if os.path.isfile(src):
+                          shutil.copy2(src, os.path.join(a.out, f"{a.label}-{os.path.basename(src)}"))
+              ann.emit("error" if failed else "notice",
+                       f"{tag} summary={'fail' if failed else 'ok'} done={','.join(done) or 'none'} failed={','.join(failed) or 'none'} "
+                       f"debuglog_lines={txt.count(chr(10))} debuglog_error_words={errs} modeld_lines={modeld} swarm_lines={swarm} "
+                       f"cookie_in_debuglog={logged_cookie}")
+              return 1 if failed else 0
+
+
+          # ---------------------------------------------------------------- userns (Linux)
+          def cmd_userns(a):
+              ann = Ann()
+              res = []
+              ok_user = False
+              for name, cmd in (("user", ["unshare", "-Ur", "true"]), ("user_mount", ["unshare", "-Urm", "true"]),
+                                ("user_net", ["unshare", "-Urn", "true"]), ("user_pid", ["unshare", "-Urpf", "--mount-proc", "true"])):
+                  try:
+                      p = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+                      rc = p.returncode
+                      note = p.stderr.strip().replace(" ", "_")[:80]
+                  except Exception as e:
+                      rc, note = -1, str(e)[:80]
+                  res.append(f"{name}={'ok' if rc == 0 else 'rc' + str(rc)}" + ("" if rc == 0 else f"({note})"))
+                  if name == "user":
+                      ok_user = rc == 0
+              for path in ("/proc/sys/kernel/apparmor_restrict_unprivileged_userns", "/proc/sys/kernel/unprivileged_userns_clone",
+                           "/proc/sys/user/max_user_namespaces"):
+                  v = read(path).strip()
+                  res.append(f"{os.path.basename(path)}={v if v else 'absent'}")
+              res.append(f"uid={os.getuid()}")
+              ann.emit("notice" if ok_user else "error", f"job={a.job} step=userns " + " ".join(res))
+              return 0 if ok_user else 1
+
+
+          def cmd_selftest(a):
+              assert esc("a%b\nc") == "a%25b%0Ac"
+              Ann().emit("notice", f"job={a.job} step=tools status=ok python={sys.version.split()[0]} sha={os.environ.get('GITHUB_SHA', '?')[:12]} "
+                                   f"ref={os.environ.get('GITHUB_REF_NAME', '?')}")
+              return 0
+
+
+          def main():
+              ap = argparse.ArgumentParser(description=__doc__)
+              sp = ap.add_subparsers(dest="cmd", required=True)
+              p = sp.add_parser("ann")
+              p.add_argument("level", choices=["notice", "error", "warning"])
+              p.add_argument("msg", nargs="+")
+              p = sp.add_parser("configure")
+              p.add_argument("--name", required=True)
+              p.add_argument("--job", required=True)
+              p.add_argument("--logs", required=True)
+              p.add_argument("--builddir", required=True)
+              p.add_argument("cmake", nargs=argparse.REMAINDER)
+              p = sp.add_parser("build")
+              p.add_argument("--name", required=True)
+              p.add_argument("--logs", required=True)
+              p.add_argument("--builddir", required=True)
+              p.add_argument("ninja", nargs=argparse.REMAINDER)
+              p = sp.add_parser("build-summary")
+              p.add_argument("--name", required=True)
+              p.add_argument("--job", required=True)
+              p.add_argument("--logs", required=True)
+              p.add_argument("--exe", nargs="*", help="key=path; writes key=yes|no to GITHUB_OUTPUT")
+              p = sp.add_parser("suites")
+              p.add_argument("--bin", required=True)
+              p.add_argument("--label", required=True)
+              p.add_argument("--job", required=True)
+              p.add_argument("--out", required=True)
+              p.add_argument("--suites", help="comma list (exact names)")
+              p.add_argument("--include", default=".")
+              p.add_argument("--exclude")
+              p.add_argument("--serial", help="regex of suites run alone after the others")
+              p.add_argument("--repeat", type=int, default=1)
+              p.add_argument("--jobs", type=int, default=os.cpu_count() or 2)
+              p.add_argument("--timeout", type=int, default=900)
+              p.add_argument("--stop-at", type=int, default=0, help="unix time; later suites are not started")
+              p.add_argument("--stop-in", type=int, default=0, help="minutes from now; combined with --stop-at, the earlier wins")
+              p.add_argument("--per-suite", action="store_true")
+              p.add_argument("--keep-logs", action="store_true")
+              p.add_argument("--max-notices", type=int, default=9)
+              p.add_argument("--max-errors", type=int, default=9)
+              p.add_argument("extra", nargs=argparse.REMAINDER)
+              p = sp.add_parser("prune")
+              p.add_argument("--log", required=True)
+              p.add_argument("--src", required=True)
+              p.add_argument("--target", default="test_btx")
+              p.add_argument("--logs", required=True)
+              p.add_argument("--job", required=True)
+              p = sp.add_parser("test-defs")
+              p.add_argument("--src", required=True)
+              p.add_argument("--target", default="test_btx")
+              p.add_argument("--job", required=True)
+              p = sp.add_parser("relink")
+              p.add_argument("--name", required=True)
+              p.add_argument("--job", required=True)
+              p.add_argument("--logs", required=True)
+              p.add_argument("--builddir", required=True)
+              p.add_argument("--src", required=True)
+              p.add_argument("--target", default="test_btx")
+              p.add_argument("--rounds", type=int, default=5)
+              p.add_argument("ninja", nargs=argparse.REMAINDER)
+              p = sp.add_parser("dlls")
+              p.add_argument("--objdump", required=True)
+              p.add_argument("--dest", required=True)
+              p.add_argument("--job", required=True)
+              p.add_argument("--search", nargs="+", required=True)
+              p.add_argument("--exe", nargs="+", required=True)
+              p = sp.add_parser("smoke")
+              p.add_argument("--btxd", required=True)
+              p.add_argument("--cli", required=True)
+              p.add_argument("--datadir", required=True)
+              p.add_argument("--label", required=True)
+              p.add_argument("--job", required=True)
+              p.add_argument("--port", type=int, default=38333)
+              p.add_argument("--rpcport", type=int, default=38332)
+              p.add_argument("--wallet", action="store_true")
+              p.add_argument("--mine", type=int, default=0)
+              p.add_argument("--mine-budget", type=int, default=900)
+              p.add_argument("--send", action="store_true")
+              p.add_argument("--linger", type=int, default=0)
+              p.add_argument("--extra", action="append")
+              p.add_argument("--out")
+              p = sp.add_parser("userns")
+              p.add_argument("--job", required=True)
+              p = sp.add_parser("selftest")
+              p.add_argument("--job", default="tools")
+              a = ap.parse_args()
+              fn = {"ann": cmd_ann, "configure": cmd_configure, "build": cmd_build, "build-summary": cmd_build_summary,
+                    "suites": cmd_suites, "prune": cmd_prune, "relink": cmd_relink, "test-defs": cmd_test_defs, "dlls": cmd_dlls, "smoke": cmd_smoke, "userns": cmd_userns,
+                    "selftest": cmd_selftest}[a.cmd]
+              return fn(a)
+
+
+          if __name__ == "__main__":
+              sys.exit(main())
+          CI_PY_EOF
+          python3 -m py_compile ci-tools/ci.py
+          python3 ci-tools/ci.py selftest --job tools
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: ci-tools
+          path: ci-tools/ci.py
+          retention-days: 7
+          overwrite: true
+
+  # ------------------------------------------------------------------ Linux
+  linux-build:
+    name: linux-build
+    needs: tools
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    steps:
+      - name: Start
+        run: |
+          {
+            echo "JOB_T0=$(date +%s)"
+            echo "LOGS=$RUNNER_TEMP/logs"
+            echo "CIPY=$RUNNER_TEMP/ci-tools/ci.py"
+            echo "CCACHE_DIR=$HOME/.ccache-btx"
+            echo "CCACHE_BASEDIR=$GITHUB_WORKSPACE"
+          } >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/logs"
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: ci-tools
+          path: ${{ runner.temp }}/ci-tools
+      - name: Free disk space
+        run: |
+          df -h / | tail -n 1
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL || true
+          df -h / | tail -n 1
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends build-essential cmake ninja-build pkgconf python3 ccache \
+            libevent-dev libboost-dev libsqlite3-dev libzmq3-dev
+      - name: Restore OpenSSL
+        id: ossl-cache
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ~/ossl35
+          key: openssl-${{ env.OSSL_VER }}-ubuntu24-x64-v1
+      - name: Build static OpenSSL
+        id: ossl-build
+        if: steps.ossl-cache.outputs.cache-hit != 'true'
+        run: |
+          cd "$RUNNER_TEMP"
+          u="https://github.com/openssl/openssl/releases/download/openssl-$OSSL_VER/openssl-$OSSL_VER.tar.gz"
+          curl -fsSL --retry 3 -o ossl.tar.gz "$u"
+          curl -fsSL --retry 3 -o ossl.tar.gz.sha256 "$u.sha256"
+          got=$(sha256sum ossl.tar.gz | cut -d' ' -f1)
+          want=$(awk '{print $1}' ossl.tar.gz.sha256)
+          if [ "$got" != "$OSSL_SHA256" ] || [ "$got" != "$want" ]; then
+            python3 "$CIPY" ann error "job=$GITHUB_JOB step=openssl sha256-mismatch got=$got"
+            exit 1
+          fi
+          tar xzf ossl.tar.gz
+          cd "openssl-$OSSL_VER"
+          ./Configure --prefix="$HOME/ossl35" --libdir=lib no-shared no-tests no-docs -fPIC > "$LOGS/ossl-configure.log" 2>&1
+          make -j"$(nproc)" > "$LOGS/ossl-make.log" 2>&1
+          make install_sw > "$LOGS/ossl-install.log" 2>&1
+          python3 "$CIPY" ann notice "job=$GITHUB_JOB step=openssl built=$OSSL_VER sha256=pinned-match"
+      - name: Save OpenSSL
+        if: steps.ossl-build.outcome == 'success'
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ~/ossl35
+          key: openssl-${{ env.OSSL_VER }}-ubuntu24-x64-v1
+      - name: Restore ccache
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ~/.ccache-btx
+          key: ccache-linux-${{ github.run_id }}-${{ github.run_attempt }}-build
+          restore-keys: |
+            ccache-linux-${{ github.run_id }}-
+            ccache-linux-
+      - name: Configure
+        id: configure
+        run: |
+          python3 "$CIPY" configure --name linux --job "$GITHUB_JOB" --logs "$LOGS" --builddir build -- \
+            -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DWITH_MODELNET=ON -DBUILD_GUI=OFF -DBUILD_BENCH=OFF \
+            -DWITH_ZMQ=ON -DWITH_CCACHE=ON -DOPENSSL_ROOT_DIR="$HOME/ossl35" -DOPENSSL_USE_STATIC_LIBS=ON
+      - name: Build btxd and btx-cli
+        timeout-minutes: 310
+        run: python3 "$CIPY" build --name daemon --logs "$LOGS" --builddir build -- -k 0 -j"$(nproc)" btxd btx-cli
+      - name: Build summary
+        if: ${{ !cancelled() && steps.configure.outcome == 'success' }}
+        run: python3 "$CIPY" build-summary --name daemon --job "$GITHUB_JOB" --logs "$LOGS" --exe btxd=build/bin/btxd btx_cli=build/bin/btx-cli
+      - name: Save ccache
+        if: ${{ !cancelled() && steps.configure.outcome == 'success' }}
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ~/.ccache-btx
+          key: ccache-linux-${{ github.run_id }}-${{ github.run_attempt }}-build
+      - name: Upload logs
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: logs-linux-build
+          path: ${{ runner.temp }}/logs
+          retention-days: 7
+          overwrite: true
+          if-no-files-found: ignore
+
+  linux-userns:
+    name: linux-userns
+    needs: [tools, linux-build]
+    if: ${{ !cancelled() && needs.tools.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 355
+    steps:
+      - name: Start
+        run: |
+          {
+            echo "JOB_T0=$(date +%s)"
+            echo "LOGS=$RUNNER_TEMP/logs"
+            echo "CIPY=$RUNNER_TEMP/ci-tools/ci.py"
+            echo "CCACHE_DIR=$HOME/.ccache-btx"
+            echo "CCACHE_BASEDIR=$GITHUB_WORKSPACE"
+          } >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/logs"
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: ci-tools
+          path: ${{ runner.temp }}/ci-tools
+      - name: Enable unprivileged user namespaces and check them with unshare -Ur true
+        continue-on-error: true
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          if [ -e /proc/sys/kernel/unprivileged_userns_clone ]; then
+            sudo sysctl -w kernel.unprivileged_userns_clone=1
+          fi
+          python3 "$CIPY" userns --job "$GITHUB_JOB"
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL || true
+          df -h / | tail -n 1
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends build-essential cmake ninja-build pkgconf python3 ccache \
+            libevent-dev libboost-dev libsqlite3-dev libzmq3-dev
+      - name: Restore OpenSSL
+        id: ossl-cache
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ~/ossl35
+          key: openssl-${{ env.OSSL_VER }}-ubuntu24-x64-v1
+      - name: Build static OpenSSL
+        id: ossl-build
+        if: steps.ossl-cache.outputs.cache-hit != 'true'
+        run: |
+          cd "$RUNNER_TEMP"
+          u="https://github.com/openssl/openssl/releases/download/openssl-$OSSL_VER/openssl-$OSSL_VER.tar.gz"
+          curl -fsSL --retry 3 -o ossl.tar.gz "$u"
+          curl -fsSL --retry 3 -o ossl.tar.gz.sha256 "$u.sha256"
+          got=$(sha256sum ossl.tar.gz | cut -d' ' -f1)
+          want=$(awk '{print $1}' ossl.tar.gz.sha256)
+          if [ "$got" != "$OSSL_SHA256" ] || [ "$got" != "$want" ]; then
+            python3 "$CIPY" ann error "job=$GITHUB_JOB step=openssl sha256-mismatch got=$got"
+            exit 1
+          fi
+          tar xzf ossl.tar.gz
+          cd "openssl-$OSSL_VER"
+          ./Configure --prefix="$HOME/ossl35" --libdir=lib no-shared no-tests no-docs -fPIC > "$LOGS/ossl-configure.log" 2>&1
+          make -j"$(nproc)" > "$LOGS/ossl-make.log" 2>&1
+          make install_sw > "$LOGS/ossl-install.log" 2>&1
+      - name: Restore ccache
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ~/.ccache-btx
+          key: ccache-linux-${{ github.run_id }}-${{ github.run_attempt }}-test
+          restore-keys: |
+            ccache-linux-${{ github.run_id }}-
+            ccache-linux-
+      - name: Configure
+        id: configure
+        run: |
+          python3 "$CIPY" configure --name linux --job "$GITHUB_JOB" --logs "$LOGS" --builddir build -- \
+            -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DWITH_MODELNET=ON -DBUILD_GUI=OFF -DBUILD_BENCH=OFF \
+            -DWITH_ZMQ=ON -DWITH_CCACHE=ON -DOPENSSL_ROOT_DIR="$HOME/ossl35" -DOPENSSL_USE_STATIC_LIBS=ON
+      - name: Build test_btx and the helpers it runs, pass 1 (keep going)
+        timeout-minutes: 240
+        run: |
+          read -r -a targets <<< "$LINUX_TEST_TARGETS"
+          python3 "$CIPY" build --name tests1 --logs "$LOGS" --builddir build -- -k 0 -j"$(nproc)" "${targets[@]}"
+      - name: Pass 1 summary
+        id: p1sum
+        if: ${{ !cancelled() && steps.configure.outcome == 'success' }}
+        run: python3 "$CIPY" build-summary --name tests1 --job "$GITHUB_JOB" --logs "$LOGS" --exe test_btx_pass1=build/bin/test_btx
+      - name: Drop test files that do not compile here, if any (CI-only edit of the test list)
+        id: prune
+        if: ${{ !cancelled() && steps.configure.outcome == 'success' && steps.p1sum.outputs.test_btx_pass1 != 'yes' }}
+        run: python3 "$CIPY" prune --log "$LOGS/build-tests1.log" --src . --target test_btx --logs "$LOGS" --job "$GITHUB_JOB"
+      - name: Build test_btx, pass 2
+        if: ${{ !cancelled() && steps.prune.outcome == 'success' && steps.prune.outputs.pruned != '0' }}
+        timeout-minutes: 40
+        run: python3 "$CIPY" build --name tests2 --logs "$LOGS" --builddir build -- -k 0 -j"$(nproc)" test_btx
+      - name: Build summary
+        id: bsum
+        if: ${{ !cancelled() && steps.configure.outcome == 'success' }}
+        run: |
+          name=tests1
+          [ -f "$LOGS/build-tests2.t0" ] && name=tests2
+          python3 "$CIPY" build-summary --name "$name" --job "$GITHUB_JOB" --logs "$LOGS" \
+            --exe test_btx=build/bin/test_btx btxd=build/bin/btxd linux_probe=build/bin/test_swarm_linux_probe
+      - name: Save ccache
+        if: ${{ !cancelled() && steps.configure.outcome == 'success' }}
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ~/.ccache-btx
+          key: ccache-linux-${{ github.run_id }}-${{ github.run_attempt }}-test
+      - name: swarm_confine_tests and swarm_fsjail_tests, real user namespaces, no shim, n=3
+        if: ${{ !cancelled() && steps.bsum.outputs.test_btx == 'yes' }}
+        timeout-minutes: 20
+        run: |
+          python3 "$CIPY" suites --bin build/bin/test_btx --label linux-confine-fsjail --job "$GITHUB_JOB" \
+            --out "$LOGS/t-confine" --suites swarm_confine_tests,swarm_fsjail_tests --repeat 3 --jobs 1 \
+            --timeout 900 --per-suite --keep-logs --stop-in 18
+      - name: guard_permit, native_discovery and the jail callers
+        if: ${{ !cancelled() && steps.bsum.outputs.test_btx == 'yes' }}
+        timeout-minutes: 15
+        run: |
+          python3 "$CIPY" suites --bin build/bin/test_btx --label linux-guard --job "$GITHUB_JOB" \
+            --out "$LOGS/t-guard" --suites "$GUARD_SUITES" --jobs 4 --timeout 600 --per-suite --stop-in 13
+      - name: All swarm_* suites
+        if: ${{ !cancelled() && steps.bsum.outputs.test_btx == 'yes' }}
+        timeout-minutes: 60
+        run: |
+          python3 "$CIPY" suites --bin build/bin/test_btx --label linux-swarm --job "$GITHUB_JOB" \
+            --out "$LOGS/t-swarm" --include '^swarm_' --exclude '^swarm_(confine|fsjail)_tests$' \
+            --jobs 4 --timeout 900 --stop-at $((JOB_T0 + 343 * 60)) --stop-in 58
+      - name: Upload logs
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: logs-linux-userns
+          path: ${{ runner.temp }}/logs
+          retention-days: 7
+          overwrite: true
+          if-no-files-found: ignore
+
+  # ------------------------------------------------------------------ mingw-w64 (cross, on Linux)
+  mingw-cross:
+    name: mingw-cross
+    needs: tools
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    outputs:
+      btxd: ${{ steps.bsum.outputs.btxd }}
+    env:
+      HOSTW: x86_64-w64-mingw32
+    steps:
+      - name: Start
+        run: |
+          {
+            echo "JOB_T0=$(date +%s)"
+            echo "LOGS=$RUNNER_TEMP/logs"
+            echo "CIPY=$RUNNER_TEMP/ci-tools/ci.py"
+            echo "CCACHE_DIR=$HOME/.ccache-btx"
+            echo "CCACHE_BASEDIR=$GITHUB_WORKSPACE"
+          } >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/logs"
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: ci-tools
+          path: ${{ runner.temp }}/ci-tools
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL || true
+          df -h / | tail -n 1
+      - name: Install the mingw-w64 toolchain (posix threads)
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends g++-mingw-w64-x86-64-posix gcc-mingw-w64-x86-64-posix \
+            binutils-mingw-w64-x86-64 mingw-w64-x86-64-dev make cmake ninja-build curl patch pkgconf python3 ccache \
+            xz-utils autoconf automake libtool
+          for t in gcc g++; do
+            if [ -e "/usr/bin/$HOSTW-$t-posix" ]; then
+              sudo update-alternatives --set "$HOSTW-$t" "/usr/bin/$HOSTW-$t-posix" || true
+            fi
+          done
+          tm=$("$HOSTW-g++" -v 2>&1 | grep -i 'thread model' | tr ' ' '-')
+          python3 "$CIPY" ann notice "job=$GITHUB_JOB step=toolchain $("$HOSTW-g++" --version | head -n 1 | tr ' ' '-') $tm"
+      - name: Restore depends prefix
+        id: dep-cache
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: depends/x86_64-w64-mingw32
+          key: depends-mingw-v1-${{ hashFiles('depends/**') }}-ossl-${{ env.OSSL_VER }}
+      - name: Build depends and static OpenSSL for mingw
+        id: dep-build
+        if: steps.dep-cache.outputs.cache-hit != 'true'
+        timeout-minutes: 60
+        run: |
+          t0=$(date +%s)
+          make -C depends HOST="$HOSTW" NO_QT=1 NO_QR=1 NO_UPNP=1 NO_USDT=1 NO_BDB=1 -j"$(nproc)" > "$LOGS/depends.log" 2>&1 || {
+            tail -n 60 "$LOGS/depends.log"
+            python3 "$CIPY" ann error "job=$GITHUB_JOB step=depends status=fail"
+            exit 1
+          }
+          PFX="$GITHUB_WORKSPACE/depends/$HOSTW"
+          cd "$RUNNER_TEMP"
+          u="https://github.com/openssl/openssl/releases/download/openssl-$OSSL_VER/openssl-$OSSL_VER.tar.gz"
+          curl -fsSL --retry 3 -o ossl.tar.gz "$u"
+          got=$(sha256sum ossl.tar.gz | cut -d' ' -f1)
+          if [ "$got" != "$OSSL_SHA256" ]; then
+            python3 "$CIPY" ann error "job=$GITHUB_JOB step=openssl-mingw sha256-mismatch got=$got"
+            exit 1
+          fi
+          tar xzf ossl.tar.gz
+          cd "openssl-$OSSL_VER"
+          perl Configure mingw64 --cross-compile-prefix="$HOSTW-" --prefix="$PFX" --libdir=lib \
+            no-shared no-tests no-docs no-apps > "$LOGS/ossl-w-configure.log" 2>&1
+          make -j"$(nproc)" > "$LOGS/ossl-w-make.log" 2>&1
+          make install_sw > "$LOGS/ossl-w-install.log" 2>&1
+          built=$(cd "$GITHUB_WORKSPACE/depends/built/$HOSTW" 2>/dev/null && printf '%s,' *)
+          python3 "$CIPY" ann notice "job=$GITHUB_JOB step=depends status=ok secs=$(( $(date +%s) - t0 )) openssl=$OSSL_VER sha256=pinned-match built=$built"
+      - name: Save depends prefix
+        if: steps.dep-build.outcome == 'success'
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: depends/x86_64-w64-mingw32
+          key: ${{ steps.dep-cache.outputs.cache-primary-key }}
+      - name: Restore ccache
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ~/.ccache-btx
+          key: ccache-mingw-${{ github.run_id }}-${{ github.run_attempt }}-build
+          restore-keys: |
+            ccache-mingw-${{ github.run_id }}-
+            ccache-mingw-
+      - name: Configure (Modelnet ON)
+        id: configure
+        run: |
+          PFX="$GITHUB_WORKSPACE/depends/$HOSTW"
+          python3 "$CIPY" configure --name mingw --job "$GITHUB_JOB" --logs "$LOGS" --builddir build-win -- \
+            -S . -B build-win -G Ninja --toolchain "$PFX/toolchain.cmake" -DCMAKE_BUILD_TYPE=Release \
+            -DWITH_MODELNET=ON -DOPENSSL_ROOT_DIR="$PFX" -DOPENSSL_USE_STATIC_LIBS=ON -DBUILD_TESTS=ON -DBUILD_GUI=OFF \
+            -DBUILD_BENCH=OFF -DWITH_ZMQ=ON -DWITH_CCACHE=ON -DREDUCE_EXPORTS=ON -DBUILD_GUI_TESTS=OFF \
+            "-DCMAKE_CXX_FLAGS=-Wno-error=maybe-uninitialized -Wno-error=array-bounds"
+      - name: Build btxd.exe and btx-cli.exe
+        timeout-minutes: 260
+        run: python3 "$CIPY" build --name daemon --logs "$LOGS" --builddir build-win -- -k 0 -j"$(nproc)" btxd btx-cli
+      - name: Build summary
+        id: bsum
+        if: ${{ !cancelled() && steps.configure.outcome == 'success' }}
+        run: |
+          python3 "$CIPY" build-summary --name daemon --job "$GITHUB_JOB" --logs "$LOGS" \
+            --exe btxd=build-win/bin/btxd.exe btx_cli=build-win/bin/btx-cli.exe
+      - name: Save ccache
+        if: ${{ !cancelled() && steps.configure.outcome == 'success' }}
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ~/.ccache-btx
+          key: ccache-mingw-${{ github.run_id }}-${{ github.run_attempt }}-build
+      - name: Package the daemon and its DLLs
+        if: ${{ !cancelled() && steps.bsum.outputs.btxd == 'yes' }}
+        run: |
+          mkdir -p dist-daemon
+          cp build-win/bin/btxd.exe dist-daemon/
+          [ -f build-win/bin/btx-cli.exe ] && cp build-win/bin/btx-cli.exe dist-daemon/
+          "$HOSTW-strip" dist-daemon/*.exe
+          python3 "$CIPY" dlls --job "$GITHUB_JOB" --objdump "$HOSTW-objdump" --dest dist-daemon \
+            --search "/usr/lib/gcc/$HOSTW/*-posix" "/usr/$HOSTW/lib" "/usr/$HOSTW/bin" \
+            --exe dist-daemon/btxd.exe dist-daemon/btx-cli.exe
+          (cd dist-daemon && sha256sum ./* > SHA256SUMS.txt)
+      - name: Upload the daemon
+        if: ${{ !cancelled() && steps.bsum.outputs.btxd == 'yes' }}
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: win-daemon
+          path: dist-daemon/
+          retention-days: 7
+          overwrite: true
+      - name: Upload logs
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: logs-mingw-cross
+          path: ${{ runner.temp }}/logs
+          retention-days: 7
+          overwrite: true
+          if-no-files-found: ignore
+
+  mingw-tests:
+    name: mingw-tests
+    needs: [tools, mingw-cross]
+    if: ${{ !cancelled() && needs.tools.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 355
+    outputs:
+      test_btx: ${{ steps.bsum.outputs.test_btx }}
+    env:
+      HOSTW: x86_64-w64-mingw32
+    steps:
+      - name: Start
+        run: |
+          {
+            echo "JOB_T0=$(date +%s)"
+            echo "LOGS=$RUNNER_TEMP/logs"
+            echo "CIPY=$RUNNER_TEMP/ci-tools/ci.py"
+            echo "CCACHE_DIR=$HOME/.ccache-btx"
+            echo "CCACHE_BASEDIR=$GITHUB_WORKSPACE"
+          } >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/logs"
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: ci-tools
+          path: ${{ runner.temp }}/ci-tools
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL || true
+          df -h / | tail -n 1
+      - name: Install the mingw-w64 toolchain (posix threads)
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends g++-mingw-w64-x86-64-posix gcc-mingw-w64-x86-64-posix \
+            binutils-mingw-w64-x86-64 mingw-w64-x86-64-dev make cmake ninja-build curl patch pkgconf python3 ccache \
+            xz-utils autoconf automake libtool
+          for t in gcc g++; do
+            if [ -e "/usr/bin/$HOSTW-$t-posix" ]; then
+              sudo update-alternatives --set "$HOSTW-$t" "/usr/bin/$HOSTW-$t-posix" || true
+            fi
+          done
+      - name: Restore depends prefix
+        id: dep-cache
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: depends/x86_64-w64-mingw32
+          key: depends-mingw-v1-${{ hashFiles('depends/**') }}-ossl-${{ env.OSSL_VER }}
+      - name: Build depends and static OpenSSL for mingw
+        if: steps.dep-cache.outputs.cache-hit != 'true'
+        timeout-minutes: 60
+        run: |
+          make -C depends HOST="$HOSTW" NO_QT=1 NO_QR=1 NO_UPNP=1 NO_USDT=1 NO_BDB=1 -j"$(nproc)" > "$LOGS/depends.log" 2>&1
+          PFX="$GITHUB_WORKSPACE/depends/$HOSTW"
+          cd "$RUNNER_TEMP"
+          curl -fsSL --retry 3 -o ossl.tar.gz "https://github.com/openssl/openssl/releases/download/openssl-$OSSL_VER/openssl-$OSSL_VER.tar.gz"
+          got=$(sha256sum ossl.tar.gz | cut -d' ' -f1)
+          [ "$got" = "$OSSL_SHA256" ] || { python3 "$CIPY" ann error "job=$GITHUB_JOB step=openssl-mingw sha256-mismatch got=$got"; exit 1; }
+          tar xzf ossl.tar.gz
+          cd "openssl-$OSSL_VER"
+          perl Configure mingw64 --cross-compile-prefix="$HOSTW-" --prefix="$PFX" --libdir=lib \
+            no-shared no-tests no-docs no-apps > "$LOGS/ossl-w-configure.log" 2>&1
+          make -j"$(nproc)" > "$LOGS/ossl-w-make.log" 2>&1
+          make install_sw > "$LOGS/ossl-w-install.log" 2>&1
+      - name: Restore ccache
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ~/.ccache-btx
+          key: ccache-mingw-${{ github.run_id }}-${{ github.run_attempt }}-test
+          restore-keys: |
+            ccache-mingw-${{ github.run_id }}-
+            ccache-mingw-
+      # Run 1's link failure was not caused by the prune: key_tests.cpp includes <secp256k1.h>, and
+      # test_btx takes secp256k1's include directories but not its SECP256K1_STATIC definition, so on
+      # Windows the calls become __imp_secp256k1_* imports that the static library does not provide.
+      # CI-only edit, before configure, so pass 1 already compiles with it.
+      - name: CI-only edit - give test_btx secp256k1's interface definitions (SECP256K1_STATIC)
+        run: python3 "$CIPY" test-defs --src . --target test_btx --job "$GITHUB_JOB"
+      - name: Configure (Modelnet ON)
+        id: configure
+        run: |
+          PFX="$GITHUB_WORKSPACE/depends/$HOSTW"
+          python3 "$CIPY" configure --name mingw --job "$GITHUB_JOB" --logs "$LOGS" --builddir build-win -- \
+            -S . -B build-win -G Ninja --toolchain "$PFX/toolchain.cmake" -DCMAKE_BUILD_TYPE=Release \
+            -DWITH_MODELNET=ON -DOPENSSL_ROOT_DIR="$PFX" -DOPENSSL_USE_STATIC_LIBS=ON -DBUILD_TESTS=ON -DBUILD_GUI=OFF \
+            -DBUILD_BENCH=OFF -DWITH_ZMQ=ON -DWITH_CCACHE=ON -DREDUCE_EXPORTS=ON -DBUILD_GUI_TESTS=OFF \
+            "-DCMAKE_CXX_FLAGS=-Wno-error=maybe-uninitialized -Wno-error=array-bounds"
+      - name: Build test_btx.exe, pass 1 (keep going)
+        timeout-minutes: 230
+        run: python3 "$CIPY" build --name tests1 --logs "$LOGS" --builddir build-win -- -k 0 -j"$(nproc)" test_btx btxd btx-cli
+      - name: Pass 1 summary
+        id: p1sum
+        if: ${{ !cancelled() && steps.configure.outcome == 'success' }}
+        run: python3 "$CIPY" build-summary --name tests1 --job "$GITHUB_JOB" --logs "$LOGS" --exe test_btx_pass1=build-win/bin/test_btx.exe
+      - name: Drop the test files that do not compile with mingw (CI-only edit of the test list)
+        id: prune
+        if: ${{ !cancelled() && steps.configure.outcome == 'success' && steps.p1sum.outputs.test_btx_pass1 != 'yes' }}
+        run: python3 "$CIPY" prune --log "$LOGS/build-tests1.log" --src . --target test_btx --logs "$LOGS" --job "$GITHUB_JOB"
+      # relink links again. If the link fails because kept test files use code that lives only in pruned
+      # ones, it drops those test files too and links again (up to 5 rounds). It drops nothing, and
+      # reports, if a library or an __imp_ (dllimport) symbol is undefined.
+      - name: Build test_btx.exe, pass 2 (relink; also drop the test files that use code from pruned ones)
+        id: relink
+        if: ${{ !cancelled() && steps.prune.outcome == 'success' && steps.prune.outputs.pruned != '0' }}
+        timeout-minutes: 40
+        run: |
+          python3 "$CIPY" relink --name tests2 --job "$GITHUB_JOB" --logs "$LOGS" --builddir build-win --src . \
+            --target test_btx --rounds 5 -- -k 0 -j"$(nproc)" test_btx
+      - name: Build summary
+        id: bsum
+        if: ${{ !cancelled() && steps.configure.outcome == 'success' }}
+        run: |
+          name=tests1
+          [ -f "$LOGS/build-tests2.t0" ] && name=tests2
+          python3 "$CIPY" build-summary --name "$name" --job "$GITHUB_JOB" --logs "$LOGS" \
+            --exe test_btx=build-win/bin/test_btx.exe btxd_tests_job=build-win/bin/btxd.exe
+      - name: Save ccache
+        if: ${{ !cancelled() && steps.configure.outcome == 'success' }}
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ~/.ccache-btx
+          key: ccache-mingw-${{ github.run_id }}-${{ github.run_attempt }}-test
+      - name: Package test_btx.exe and its DLLs
+        if: ${{ !cancelled() && steps.bsum.outputs.test_btx == 'yes' }}
+        run: |
+          mkdir -p dist-tests
+          cp build-win/bin/test_btx.exe dist-tests/
+          "$HOSTW-strip" dist-tests/test_btx.exe
+          python3 "$CIPY" dlls --job "$GITHUB_JOB" --objdump "$HOSTW-objdump" --dest dist-tests \
+            --search "/usr/lib/gcc/$HOSTW/*-posix" "/usr/$HOSTW/lib" "/usr/$HOSTW/bin" --exe dist-tests/test_btx.exe
+          [ -f "$LOGS/pruned.txt" ] && cp "$LOGS/pruned.txt" dist-tests/
+          (cd dist-tests && sha256sum ./* > SHA256SUMS.txt)
+      - name: Upload test_btx.exe
+        if: ${{ !cancelled() && steps.bsum.outputs.test_btx == 'yes' }}
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: win-tests
+          path: dist-tests/
+          retention-days: 7
+          overwrite: true
+      - name: Upload logs
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: logs-mingw-tests
+          path: ${{ runner.temp }}/logs
+          retention-days: 7
+          overwrite: true
+          if-no-files-found: ignore
+
+  # ------------------------------------------------------------------ Windows (native run of the mingw binaries)
+  windows-smoke:
+    name: windows-smoke
+    needs: [tools, mingw-cross]
+    if: ${{ !cancelled() && needs.mingw-cross.outputs.btxd == 'yes' }}
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - name: Start
+        run: |
+          {
+            echo "JOB_T0=$(date +%s)"
+            echo "LOGS=$RUNNER_TEMP/logs"
+            echo "CIPY=$RUNNER_TEMP/ci-tools/ci.py"
+          } >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/logs"
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: ci-tools
+          path: ${{ runner.temp }}/ci-tools
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: win-daemon
+          path: bin
+      # ci.py smoke writes regtest=1 to <datadir>/btx.conf, passes the same -datadir and -regtest to btxd
+      # and btx-cli, and waits for <datadir>\regtest\.cookie before the first RPC (run 1 lost that race).
+      # The four -regtestmatmul* flags keep MatMul v4 off on this regtest chain, as the tester guide does:
+      # without them block 100 is the first v4 block and a CPU did not find it in 6.5 minutes.
+      - name: Regtest smoke with -modelnet=0 -matmulvalidation=economic (start, wallet, 101 blocks, send to self, stop)
+        timeout-minutes: 30
+        run: |
+          ls -la bin
+          python "$CIPY" smoke --btxd bin/btxd.exe --cli bin/btx-cli.exe --datadir "$RUNNER_TEMP/smoke-mende" \
+            --label win-mende --job "$GITHUB_JOB" --port 38333 --rpcport 38332 --wallet --mine 101 --mine-budget 900 \
+            --send --extra=-modelnet=0 --extra=-matmulvalidation=economic \
+            --extra=-regtestmatmulbindingheight=2147483647 --extra=-regtestmatmulproductdigestheight=2147483647 \
+            --extra=-regtestmatmulv4height=2147483647 --extra=-regtestmatmulrequireproductpayload=0 --out "$LOGS"
+      - name: Regtest start with the default Modelnet (in-process swarm on, no btx-modeld.exe), 60 s, stop
+        if: ${{ !cancelled() }}
+        timeout-minutes: 10
+        run: |
+          python "$CIPY" smoke --btxd bin/btxd.exe --cli bin/btx-cli.exe --datadir "$RUNNER_TEMP/smoke-default" \
+            --label win-default --job "$GITHUB_JOB" --port 38343 --rpcport 38342 --linger 60 --out "$LOGS"
+      - name: Upload logs
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: logs-windows-smoke
+          path: ${{ runner.temp }}/logs
+          retention-days: 7
+          overwrite: true
+          if-no-files-found: ignore
+
+  windows-tests:
+    name: windows-tests
+    needs: [tools, mingw-tests]
+    if: ${{ !cancelled() && needs.mingw-tests.outputs.test_btx == 'yes' }}
+    runs-on: windows-latest
+    timeout-minutes: 100
+    steps:
+      - name: Start
+        run: |
+          {
+            echo "JOB_T0=$(date +%s)"
+            echo "LOGS=$RUNNER_TEMP/logs"
+            echo "CIPY=$RUNNER_TEMP/ci-tools/ci.py"
+          } >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/logs"
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: ci-tools
+          path: ${{ runner.temp }}/ci-tools
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: win-tests
+          path: bin
+      - name: Test files left out of the mingw build
+        run: |
+          ls -la bin
+          if [ -f bin/pruned.txt ]; then
+            cl=$(awk '/^# test sources removed because they use/{s=1} /^# failed edges outside/{exit} /^src\//{if(s)l++; else c++} END{print c+0, l+0}' bin/pruned.txt)
+            c=${cl% *}
+            l=${cl#* }
+            python "$CIPY" ann notice "job=$GITHUB_JOB step=pruned-count test_sources_not_built=$((c + l)) do_not_compile=$c use_pruned_code=$l (list in win-tests/pruned.txt and the mingw-tests annotations)"
+          fi
+      - name: swarm_confine_tests and swarm_fsjail_tests on Windows, n=3
+        timeout-minutes: 15
+        run: |
+          python "$CIPY" suites --bin bin/test_btx.exe --label win-confine-fsjail --job "$GITHUB_JOB" \
+            --out "$LOGS/t-confine" --suites swarm_confine_tests,swarm_fsjail_tests --repeat 3 --jobs 1 \
+            --timeout 600 --per-suite --keep-logs --stop-in 13
+      - name: All swarm_* suites on Windows (incl. the Windows sandbox and windowslife ones)
+        if: ${{ !cancelled() }}
+        timeout-minutes: 65
+        run: |
+          python "$CIPY" suites --bin bin/test_btx.exe --label win-swarm --job "$GITHUB_JOB" \
+            --out "$LOGS/t-swarm" --include '^swarm_' --exclude '^swarm_(confine|fsjail)_tests$' \
+            --jobs 4 --timeout 600 --stop-at $((JOB_T0 + 75 * 60)) --stop-in 63
+      - name: Core and node suites on Windows
+        if: ${{ !cancelled() }}
+        timeout-minutes: 20
+        run: |
+          python "$CIPY" suites --bin bin/test_btx.exe --label win-core --job "$GITHUB_JOB" \
+            --out "$LOGS/t-core" --suites "$CORE_SUITES" --jobs 4 --timeout 600 --stop-at $((JOB_T0 + 95 * 60)) --stop-in 18
+      - name: Upload logs
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: logs-windows-tests
+          path: ${{ runner.temp }}/logs
+          retention-days: 7
+          overwrite: true
+          if-no-files-found: ignore
+
+  # ------------------------------------------------------------------ macOS arm64
+  macos-build:
+    name: macos-build
+    needs: tools
+    runs-on: macos-15
+    timeout-minutes: 350
+    steps:
+      - name: Start
+        run: |
+          {
+            echo "JOB_T0=$(date +%s)"
+            echo "LOGS=$RUNNER_TEMP/logs"
+            echo "CIPY=$RUNNER_TEMP/ci-tools/ci.py"
+            echo "CCACHE_DIR=$HOME/.ccache-btx"
+            echo "CCACHE_BASEDIR=$GITHUB_WORKSPACE"
+          } >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/logs"
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: ci-tools
+          path: ${{ runner.temp }}/ci-tools
+      - name: Install Homebrew dependencies
+        run: |
+          brew install ninja pkgconf libevent zeromq libomp openssl@3 ccache
+          command -v cmake >/dev/null || brew install cmake
+      - name: Pick Boost (the tree's depends pin unless the Boost >= 1.91 fix is in)
+        id: boost
+        run: |
+          if grep -q 'struct CTxMemPoolEntry_Indices final : boost::multi_index::indexed_by' src/txmempool.h; then
+            echo "mode=pinned" >> "$GITHUB_OUTPUT"
+            if brew list --formula boost >/dev/null 2>&1; then brew uninstall --ignore-dependencies boost; fi
+          else
+            echo "mode=brew" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Restore pinned Boost headers
+        id: boost-cache
+        if: steps.boost.outputs.mode == 'pinned'
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ~/boost-pin
+          key: boost-headers-${{ env.BOOST_PIN_VER }}-v1
+      - name: Fetch pinned Boost headers
+        id: boost-fetch
+        if: steps.boost.outputs.mode == 'pinned' && steps.boost-cache.outputs.cache-hit != 'true'
+        run: |
+          v="$BOOST_PIN_VER"; d="boost_${v//./_}"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/$d.tar.gz" "https://archives.boost.io/release/$v/source/$d.tar.gz"
+          got=$(shasum -a 256 "$RUNNER_TEMP/$d.tar.gz" | cut -d' ' -f1)
+          if [ "$got" != "$BOOST_PIN_SHA256" ]; then
+            python3 "$CIPY" ann error "job=$GITHUB_JOB step=boost sha256-mismatch got=$got"
+            exit 1
+          fi
+          tar -xzf "$RUNNER_TEMP/$d.tar.gz" -C "$RUNNER_TEMP" "$d/boost"
+          mkdir -p "$HOME/boost-pin/include"
+          mv "$RUNNER_TEMP/$d/boost" "$HOME/boost-pin/include/boost"
+      - name: Save pinned Boost headers
+        if: steps.boost-fetch.outcome == 'success'
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ~/boost-pin
+          key: boost-headers-${{ env.BOOST_PIN_VER }}-v1
+      - name: Install Homebrew Boost
+        if: steps.boost.outputs.mode == 'brew'
+        run: brew install boost
+      - name: Restore ccache
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ~/.ccache-btx
+          key: ccache-macos-${{ github.run_id }}-${{ github.run_attempt }}-build
+          restore-keys: |
+            ccache-macos-${{ github.run_id }}-
+            ccache-macos-
+      - name: Configure (Modelnet ON)
+        id: configure
+        env:
+          BOOST_MODE: ${{ steps.boost.outputs.mode }}
+        run: |
+          prefix=$(brew --prefix)
+          export PKG_CONFIG_PATH="$prefix/lib/pkgconfig"
+          args=(-S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$prefix" -DWITH_MODELNET=ON
+                -DWITH_ZMQ=ON -DBUILD_GUI=OFF -DBUILD_BENCH=OFF -DWITH_CCACHE=ON)
+          if [ "$BOOST_MODE" = pinned ]; then args+=(-DBoost_INCLUDE_DIR="$HOME/boost-pin/include"); fi
+          if ! xcrun -sdk macosx metal -v >/dev/null 2>&1; then args+=(-DBTX_MATMUL_METAL_PRECOMPILE_KERNELS=OFF); fi
+          python3 "$CIPY" configure --name macos --job "$GITHUB_JOB" --logs "$LOGS" --builddir build -- "${args[@]}"
+          python3 "$CIPY" ann notice "job=$GITHUB_JOB step=boost-mode mode=$BOOST_MODE xcode=$(xcodebuild -version | head -n 1 | tr ' ' '-') macos=$(sw_vers -productVersion)"
+      - name: Build btxd and btx-cli
+        timeout-minutes: 310
+        run: python3 "$CIPY" build --name daemon --logs "$LOGS" --builddir build -- -k 0 -j"$(sysctl -n hw.ncpu)" btxd btx-cli
+      - name: Build summary
+        if: ${{ !cancelled() && steps.configure.outcome == 'success' }}
+        run: python3 "$CIPY" build-summary --name daemon --job "$GITHUB_JOB" --logs "$LOGS" --exe btxd=build/bin/btxd btx_cli=build/bin/btx-cli
+      - name: Save ccache
+        if: ${{ !cancelled() && steps.configure.outcome == 'success' }}
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ~/.ccache-btx
+          key: ccache-macos-${{ github.run_id }}-${{ github.run_attempt }}-build
+      - name: Upload logs
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: logs-macos-build
+          path: ${{ runner.temp }}/logs
+          retention-days: 7
+          overwrite: true
+          if-no-files-found: ignore
+
+  macos-arm64:
+    name: macos-arm64
+    needs: [tools, macos-build]
+    if: ${{ !cancelled() && needs.tools.result == 'success' }}
+    runs-on: macos-15
+    timeout-minutes: 355
+    steps:
+      - name: Start
+        run: |
+          {
+            echo "JOB_T0=$(date +%s)"
+            echo "LOGS=$RUNNER_TEMP/logs"
+            echo "CIPY=$RUNNER_TEMP/ci-tools/ci.py"
+            echo "CCACHE_DIR=$HOME/.ccache-btx"
+            echo "CCACHE_BASEDIR=$GITHUB_WORKSPACE"
+          } >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/logs"
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
+        with:
+          name: ci-tools
+          path: ${{ runner.temp }}/ci-tools
+      - name: Install Homebrew dependencies
+        run: |
+          brew install ninja pkgconf libevent zeromq libomp openssl@3 ccache
+          command -v cmake >/dev/null || brew install cmake
+      - name: Pick Boost (the tree's depends pin unless the Boost >= 1.91 fix is in)
+        id: boost
+        run: |
+          if grep -q 'struct CTxMemPoolEntry_Indices final : boost::multi_index::indexed_by' src/txmempool.h; then
+            echo "mode=pinned" >> "$GITHUB_OUTPUT"
+            if brew list --formula boost >/dev/null 2>&1; then brew uninstall --ignore-dependencies boost; fi
+          else
+            echo "mode=brew" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Restore pinned Boost headers
+        id: boost-cache
+        if: steps.boost.outputs.mode == 'pinned'
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ~/boost-pin
+          key: boost-headers-${{ env.BOOST_PIN_VER }}-v1
+      - name: Fetch pinned Boost headers
+        if: steps.boost.outputs.mode == 'pinned' && steps.boost-cache.outputs.cache-hit != 'true'
+        run: |
+          v="$BOOST_PIN_VER"; d="boost_${v//./_}"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/$d.tar.gz" "https://archives.boost.io/release/$v/source/$d.tar.gz"
+          got=$(shasum -a 256 "$RUNNER_TEMP/$d.tar.gz" | cut -d' ' -f1)
+          if [ "$got" != "$BOOST_PIN_SHA256" ]; then
+            python3 "$CIPY" ann error "job=$GITHUB_JOB step=boost sha256-mismatch got=$got"
+            exit 1
+          fi
+          tar -xzf "$RUNNER_TEMP/$d.tar.gz" -C "$RUNNER_TEMP" "$d/boost"
+          mkdir -p "$HOME/boost-pin/include"
+          mv "$RUNNER_TEMP/$d/boost" "$HOME/boost-pin/include/boost"
+      - name: Install Homebrew Boost
+        if: steps.boost.outputs.mode == 'brew'
+        run: brew install boost
+      - name: Restore ccache
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ~/.ccache-btx
+          key: ccache-macos-${{ github.run_id }}-${{ github.run_attempt }}-test
+          restore-keys: |
+            ccache-macos-${{ github.run_id }}-
+            ccache-macos-
+      - name: Configure (Modelnet ON)
+        id: configure
+        env:
+          BOOST_MODE: ${{ steps.boost.outputs.mode }}
+        run: |
+          prefix=$(brew --prefix)
+          export PKG_CONFIG_PATH="$prefix/lib/pkgconfig"
+          args=(-S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$prefix" -DWITH_MODELNET=ON
+                -DWITH_ZMQ=ON -DBUILD_GUI=OFF -DBUILD_BENCH=OFF -DWITH_CCACHE=ON)
+          if [ "$BOOST_MODE" = pinned ]; then args+=(-DBoost_INCLUDE_DIR="$HOME/boost-pin/include"); fi
+          if ! xcrun -sdk macosx metal -v >/dev/null 2>&1; then args+=(-DBTX_MATMUL_METAL_PRECOMPILE_KERNELS=OFF); fi
+          python3 "$CIPY" configure --name macos --job "$GITHUB_JOB" --logs "$LOGS" --builddir build -- "${args[@]}"
+      - name: Build test_btx and the helpers it runs, pass 1 (keep going)
+        timeout-minutes: 240
+        run: |
+          read -r -a targets <<< "$LINUX_TEST_TARGETS"
+          python3 "$CIPY" build --name tests1 --logs "$LOGS" --builddir build -- -k 0 -j"$(sysctl -n hw.ncpu)" "${targets[@]}"
+      - name: Pass 1 summary
+        id: p1sum
+        if: ${{ !cancelled() && steps.configure.outcome == 'success' }}
+        run: python3 "$CIPY" build-summary --name tests1 --job "$GITHUB_JOB" --logs "$LOGS" --exe test_btx_pass1=build/bin/test_btx
+      - name: Drop test files that do not compile here, if any (CI-only edit of the test list)
+        id: prune
+        if: ${{ !cancelled() && steps.configure.outcome == 'success' && steps.p1sum.outputs.test_btx_pass1 != 'yes' }}
+        run: python3 "$CIPY" prune --log "$LOGS/build-tests1.log" --src . --target test_btx --logs "$LOGS" --job "$GITHUB_JOB"
+      - name: Build test_btx, pass 2
+        if: ${{ !cancelled() && steps.prune.outcome == 'success' && steps.prune.outputs.pruned != '0' }}
+        timeout-minutes: 40
+        run: python3 "$CIPY" build --name tests2 --logs "$LOGS" --builddir build -- -k 0 -j"$(sysctl -n hw.ncpu)" test_btx
+      - name: Build summary
+        id: bsum
+        if: ${{ !cancelled() && steps.configure.outcome == 'success' }}
+        run: |
+          name=tests1
+          [ -f "$LOGS/build-tests2.t0" ] && name=tests2
+          python3 "$CIPY" build-summary --name "$name" --job "$GITHUB_JOB" --logs "$LOGS" \
+            --exe test_btx=build/bin/test_btx btxd=build/bin/btxd jail_probe=build/bin/test_swarm_jail_probe
+      - name: Save ccache
+        if: ${{ !cancelled() && steps.configure.outcome == 'success' }}
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: ~/.ccache-btx
+          key: ccache-macos-${{ github.run_id }}-${{ github.run_attempt }}-test
+      - name: swarm_confine_tests and swarm_fsjail_tests, Seatbelt, n=3
+        if: ${{ !cancelled() && steps.bsum.outputs.test_btx == 'yes' }}
+        timeout-minutes: 20
+        run: |
+          python3 "$CIPY" suites --bin build/bin/test_btx --label mac-confine-fsjail --job "$GITHUB_JOB" \
+            --out "$LOGS/t-confine" --suites swarm_confine_tests,swarm_fsjail_tests --repeat 3 --jobs 1 \
+            --timeout 900 --per-suite --keep-logs --stop-in 18
+      - name: All swarm_* suites
+        if: ${{ !cancelled() && steps.bsum.outputs.test_btx == 'yes' }}
+        timeout-minutes: 60
+        run: |
+          python3 "$CIPY" suites --bin build/bin/test_btx --label mac-swarm --job "$GITHUB_JOB" \
+            --out "$LOGS/t-swarm" --include '^swarm_' --exclude '^swarm_(confine|fsjail)_tests$' \
+            --jobs 3 --timeout 900 --stop-at $((JOB_T0 + 300 * 60)) --stop-in 58
+      - name: The rest of test_btx, until the job's time runs out
+        if: ${{ !cancelled() && steps.bsum.outputs.test_btx == 'yes' }}
+        timeout-minutes: 300
+        run: |
+          python3 "$CIPY" suites --bin build/bin/test_btx --label mac-rest --job "$GITHUB_JOB" \
+            --out "$LOGS/t-rest" --include '.' --exclude '^swarm_' --serial '^pq_timing_tests$' \
+            --jobs 3 --timeout 900 --stop-at $((JOB_T0 + 343 * 60)) --stop-in 298
+      - name: Upload logs
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: logs-macos-arm64
+          path: ${{ runner.temp }}/logs
+          retention-days: 7
+          overwrite: true
+          if-no-files-found: ignore
