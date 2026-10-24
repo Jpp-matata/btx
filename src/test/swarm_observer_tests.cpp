@@ -471,4 +471,56 @@ BOOST_AUTO_TEST_CASE(fifos_at_derived_files_do_not_block_the_pass)
 }
 #endif
 
+#ifndef WIN32
+BOOST_AUTO_TEST_CASE(fifo_at_a_temp_file_does_not_block_the_write)
+{
+    const fs::path dir = m_path_root / "catalog_fifo_tmp";
+    const fs::path swarm = dir / "swarm";
+    fs::create_directories(swarm);
+    WriteFile(dir / "catalog.json",
+              "{\"models\":[{\"artifact_id\":\"" + kArtifact + "\",\"model_id\":\"" + kModel +
+                  "\",\"bytes_verified\":true,\"incomplete\":false}]}");
+    std::string err;
+    BOOST_REQUIRE(modelnet::SwarmObserveCatalog(dir, err));
+    BOOST_REQUIRE(modelnet::SwarmIntegrateCatalog(dir, err));
+    const fs::path contribution = swarm / "contribution.json";
+    const fs::path tmp = swarm / "contribution.json.tmp";
+    const auto bytes = [](const fs::path& path) {
+        if (!fs::is_regular_file(fs::symlink_status(path))) return std::string{"not a regular file"};
+        std::ifstream in(path);
+        return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    };
+    const std::string written = bytes(contribution);
+    // contribution.json is written again only when it changed: remove it and
+    // put a FIFO at its temp path. Opening a FIFO for writing waits for a
+    // reader, so open the read end and drain it until the step returns, so
+    // the case can fail instead of hanging.
+    fs::remove(contribution);
+    BOOST_REQUIRE_EQUAL(mkfifo(tmp.c_str(), 0600), 0);
+    std::string join_err;
+    auto done = std::async(std::launch::async, [&] { return modelnet::SwarmIntegrateCatalog(dir, join_err); });
+    const bool returned = done.wait_for(std::chrono::seconds{5}) == std::future_status::ready;
+    int fd = -1;
+    while (done.wait_for(std::chrono::milliseconds{100}) != std::future_status::ready) {
+        if (fd < 0) fd = open(tmp.c_str(), O_RDONLY | O_NONBLOCK);
+        char buf[4096];
+        while (fd >= 0 && read(fd, buf, sizeof(buf)) > 0) {
+        }
+    }
+    if (fd >= 0) close(fd);
+    BOOST_CHECK_MESSAGE(returned, "a FIFO at contribution.json.tmp blocks the swarm write");
+    BOOST_CHECK(done.get());
+    BOOST_CHECK_EQUAL(join_err, "");
+    BOOST_CHECK_EQUAL(bytes(contribution), written);
+    BOOST_CHECK(!fs::exists(fs::symlink_status(tmp)));
+    // The temp file of an interrupted write is replaced too.
+    fs::remove(contribution);
+    fs::remove(tmp);
+    WriteFile(tmp, "partial");
+    BOOST_CHECK(modelnet::SwarmIntegrateCatalog(dir, err));
+    BOOST_CHECK_EQUAL(bytes(contribution), written);
+    BOOST_CHECK(!fs::exists(fs::symlink_status(tmp)));
+}
+#endif
+
 BOOST_AUTO_TEST_SUITE_END()
