@@ -17,8 +17,16 @@
 
 #include <chrono>
 #include <fstream>
+#include <functional>
+#include <future>
 #include <string>
 #include <vector>
+
+#ifndef WIN32
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
 
 BOOST_FIXTURE_TEST_SUITE(swarm_observer_tests, BasicTestingSetup)
 
@@ -278,5 +286,48 @@ BOOST_AUTO_TEST_CASE(unchanged_generation_does_not_rewrite_derived_files)
     BOOST_CHECK(ReadJson(contribution)["models"].empty());
     BOOST_CHECK(ReadJson(networks)["family"]["member_artifact_ids"].empty());
 }
+
+#ifndef WIN32
+BOOST_AUTO_TEST_CASE(fifos_at_derived_files_do_not_block_the_pass)
+{
+    const fs::path dir = m_path_root / "catalog_fifo";
+    const fs::path swarm = dir / "swarm";
+    fs::create_directories(swarm);
+    WriteFile(dir / "catalog.json",
+              "{\"models\":[{\"artifact_id\":\"" + kArtifact + "\",\"model_id\":\"" + kModel +
+                  "\",\"bytes_verified\":true,\"incomplete\":false}]}");
+    std::string err;
+    BOOST_REQUIRE(modelnet::SwarmObserveCatalog(dir, err));
+    BOOST_REQUIRE(modelnet::SwarmIntegrateCatalog(dir, err));
+    BOOST_REQUIRE(modelnet::SwarmRefreshLocalMesh(dir, err));
+    BOOST_REQUIRE(modelnet::SwarmPublishLive(dir, err));
+    BOOST_REQUIRE(modelnet::SwarmFormPlane(dir, err));
+    // Put a FIFO where a derived file was and run the step that reads it.
+    // Opening a FIFO for reading waits for a writer, so a reader that opens
+    // it does not return. Release such a reader so the case can fail instead
+    // of hanging.
+    const auto returns = [&](const std::string& name, const std::function<bool()>& step) {
+        const fs::path file = swarm / fs::u8path(name);
+        fs::remove(file);
+        BOOST_REQUIRE_EQUAL(mkfifo(file.c_str(), 0600), 0);
+        auto done = std::async(std::launch::async, step);
+        const bool returned = done.wait_for(std::chrono::seconds{5}) == std::future_status::ready;
+        while (done.wait_for(std::chrono::milliseconds{100}) != std::future_status::ready) {
+            const int fd = open(file.c_str(), O_WRONLY | O_NONBLOCK);
+            if (fd >= 0) close(fd);
+        }
+        done.get();
+        if (fs::is_fifo(fs::symlink_status(file))) fs::remove(file);
+        return returned;
+    };
+    BOOST_CHECK(returns("contribution.json", [&] { return modelnet::SwarmIntegrateCatalog(dir, err); }));
+    BOOST_CHECK(fs::is_regular_file(swarm / "contribution.json"));
+    BOOST_CHECK(returns("contribution.json", [&] { return modelnet::SwarmPublishLive(dir, err); }));
+    BOOST_REQUIRE(modelnet::SwarmIntegrateCatalog(dir, err));
+    BOOST_CHECK(returns("networks.json", [&] { return modelnet::SwarmPublishLive(dir, err); }));
+    BOOST_CHECK(fs::is_regular_file(swarm / "networks.json"));
+    BOOST_CHECK(returns(modelnet::kMembershipFile, [&] { return modelnet::SwarmFormPlane(dir, err); }));
+}
+#endif
 
 BOOST_AUTO_TEST_SUITE_END()

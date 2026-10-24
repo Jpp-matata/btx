@@ -20,6 +20,8 @@ namespace {
 
 bool ReadRaw(const fs::path& path, std::string& raw)
 {
+    std::error_code ec;
+    if (!fs::is_regular_file(path, ec)) return false;
     std::ifstream in(path, std::ios::binary);
     if (!in) return false;
     raw.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());

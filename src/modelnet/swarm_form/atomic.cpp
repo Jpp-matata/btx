@@ -23,6 +23,10 @@ bool SwarmFormRead(const fs::path& path, std::string& raw, std::string& err)
         err = "MISSING";
         return false;
     }
+    if (!fs::is_regular_file(path, ec)) {
+        err = "READ";
+        return false;
+    }
     std::ifstream in(path, std::ios::binary);
     if (!in) {
         err = "READ";
