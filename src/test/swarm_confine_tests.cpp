@@ -759,4 +759,41 @@ BOOST_AUTO_TEST_CASE(linux_tree_limit_refuses_result_after_run)
 #endif // BTX_SWARM_LINUX_PROBE
 #endif // __linux__
 
+#if (defined(__APPLE__) && defined(BTX_SWARM_JAIL_PROBE)) || (defined(__linux__) && defined(BTX_SWARM_LINUX_PROBE))
+// A root that is already over max_tree_bytes is refused before launch: the
+// probe never writes spread.started, its first file. The limit is one byte
+// below the tree and each of the 8,000 files has a byte, so a walk finds the
+// tree over only at the last file it reads, in any order. Without the check
+// before launch, a probe that can start (macOS, or Linux with user
+// namespaces) writes its marker before the walk while it runs has failed
+// twice. A Seatbelt helper takes a few hundred ms to start, so on macOS the
+// files sit 24 directories down: the walk checks every directory on a path
+// for a symlink, and each walk takes longer.
+BOOST_AUTO_TEST_CASE(tree_limit_refuses_root_before_probe_starts)
+{
+    const fs::path root = FreshRoot("btx-swarm-confine-tree-before-probe");
+    modelnet::SwarmConfineRequest request = BaseRequest(CopyProbe(root, "spread.mode"), root);
+    fs::path dir = root;
+#ifdef __APPLE__
+    for (int i = 0; i < 24; ++i) dir /= "d";
+    fs::create_directories(dir);
+#endif
+    bool written = true;
+    for (int i = 0; i < 8000; ++i) {
+        std::ofstream out{dir / fs::PathFromString("f" + std::to_string(i))};
+        written = (out << 'x') && written;
+    }
+    BOOST_REQUIRE(written);
+    uint64_t total = 0;
+    for (const auto& entry : fs::recursive_directory_iterator(root)) {
+        if (entry.is_regular_file()) total += entry.file_size();
+    }
+    request.max_tree_bytes = total - 1;
+    BOOST_CHECK_EQUAL(ChildSignalsDuring([&] { ExpectRefusal(request, "TREE_LIMIT"); }), 0);
+    const bool started = fs::exists(root / "spread.started");
+    fs::remove_all(root);
+    BOOST_CHECK(!started);
+}
+#endif
+
 BOOST_AUTO_TEST_SUITE_END()
