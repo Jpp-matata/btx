@@ -9,16 +9,50 @@
 #include <cerrno>
 #include <cstdio>
 #include <filesystem>
-#include <fstream>
-#include <iterator>
 #include <system_error>
 
 #ifndef WIN32
 #include <fcntl.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #endif
 
 namespace modelnet {
+
+bool SwarmReadRegularFile(const fs::path& path, std::string& raw)
+{
+    std::error_code ec;
+    if (!fs::is_regular_file(path, ec)) return false;
+#ifndef WIN32
+    // The path can change after that check, and opening a FIFO for reading
+    // waits for a writer. Open without waiting and check the file that was
+    // opened.
+    const int fd = ::open(path.c_str(), O_RDONLY | O_NONBLOCK);
+    if (fd < 0) return false;
+    struct stat st {};
+    if (::fstat(fd, &st) != 0 || !S_ISREG(st.st_mode)) {
+        ::close(fd);
+        return false;
+    }
+    FILE* file = ::fdopen(fd, "rb");
+    if (!file) {
+        ::close(fd);
+        return false;
+    }
+#else
+    FILE* file = fsbridge::fopen(path, "rb");
+    if (!file) return false;
+#endif
+    std::string loaded;
+    char buf[4096];
+    size_t got;
+    while ((got = fread(buf, 1, sizeof(buf), file)) > 0) loaded.append(buf, got);
+    const bool read_ok = !ferror(file);
+    fclose(file);
+    if (!read_ok) return false;
+    raw = std::move(loaded);
+    return true;
+}
 
 bool SwarmFormRead(const fs::path& path, std::string& raw, std::string& err)
 {
@@ -32,21 +66,10 @@ bool SwarmFormRead(const fs::path& path, std::string& raw, std::string& err)
         err = "MISSING";
         return false;
     }
-    if (!fs::is_regular_file(path, ec)) {
+    if (!SwarmReadRegularFile(path, raw)) {
         err = "READ";
         return false;
     }
-    std::ifstream in(path, std::ios::binary);
-    if (!in) {
-        err = "READ";
-        return false;
-    }
-    std::string loaded((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-    if (!in && !in.eof()) {
-        err = "READ";
-        return false;
-    }
-    raw = std::move(loaded);
     err.clear();
     return true;
 }

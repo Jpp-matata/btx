@@ -4,6 +4,7 @@
 
 #include <modelnet/swarm_observer.h>
 #include <modelnet/swarm_close.h>
+#include <modelnet/swarm_form/atomic.h>
 #include <modelnet/swarm_form/plane.h>
 #include <modelnet/swarm_lifecycle.h>
 #include <modelnet/swarm_live.h>
@@ -19,12 +20,14 @@
 #include <sys/resource.h>
 #endif
 
+#include <atomic>
 #include <chrono>
 #include <csignal>
 #include <fstream>
 #include <functional>
 #include <future>
 #include <string>
+#include <thread>
 #include <vector>
 
 #ifndef WIN32
@@ -520,6 +523,103 @@ BOOST_AUTO_TEST_CASE(fifo_at_a_temp_file_does_not_block_the_write)
     BOOST_CHECK(modelnet::SwarmIntegrateCatalog(dir, err));
     BOOST_CHECK_EQUAL(bytes(contribution), written);
     BOOST_CHECK(!fs::exists(fs::symlink_status(tmp)));
+}
+#endif
+
+#ifndef WIN32
+BOOST_AUTO_TEST_CASE(readers_do_not_wait_on_a_fifo)
+{
+    const fs::path dir = m_path_root / "read_fifo";
+    fs::create_directories(dir);
+    const fs::path fifo = dir / "fifo.json";
+    const fs::path fifo_link = dir / "fifo-link.json";
+    const fs::path regular = dir / "regular.json";
+    const fs::path regular_link = dir / "regular-link.json";
+    BOOST_REQUIRE_EQUAL(mkfifo(fifo.c_str(), 0600), 0);
+    fs::create_symlink(fifo, fifo_link);
+    WriteFile(regular, "{}");
+    fs::create_symlink(regular, regular_link);
+    // Opening a FIFO for reading waits for a writer. Open the write end and
+    // close it until the reads return, so the case can fail instead of hanging.
+    std::string raw{"kept"}, link_raw{"kept"}, form_raw{"kept"}, form_err;
+    auto done = std::async(std::launch::async, [&] {
+        return std::vector<bool>{modelnet::SwarmReadRegularFile(fifo, raw),
+                                 modelnet::SwarmReadRegularFile(fifo_link, link_raw),
+                                 modelnet::SwarmFormRead(fifo, form_raw, form_err)};
+    });
+    const bool returned = done.wait_for(std::chrono::seconds{5}) == std::future_status::ready;
+    while (done.wait_for(std::chrono::milliseconds{100}) != std::future_status::ready) {
+        const int fd = open(fifo.c_str(), O_WRONLY | O_NONBLOCK);
+        if (fd >= 0) close(fd);
+    }
+    const std::vector<bool> results = done.get();
+    BOOST_CHECK_MESSAGE(returned, "a swarm reader waits on a FIFO");
+    BOOST_CHECK(!results[0]);
+    BOOST_CHECK_EQUAL(raw, "kept");
+    BOOST_CHECK(!results[1]);
+    BOOST_CHECK_EQUAL(link_raw, "kept");
+    BOOST_CHECK(!results[2]);
+    BOOST_CHECK_EQUAL(form_err, "READ");
+    BOOST_CHECK_EQUAL(form_raw, "kept");
+    // A directory is not read either. Regular files, and links to them, read as before.
+    std::string got{"kept"};
+    BOOST_CHECK(!modelnet::SwarmReadRegularFile(dir, got));
+    BOOST_CHECK_EQUAL(got, "kept");
+    BOOST_CHECK(modelnet::SwarmReadRegularFile(regular, got));
+    BOOST_CHECK_EQUAL(got, "{}");
+    got.clear();
+    BOOST_CHECK(modelnet::SwarmReadRegularFile(regular_link, got));
+    BOOST_CHECK_EQUAL(got, "{}");
+}
+
+BOOST_AUTO_TEST_CASE(a_fifo_swapped_in_after_the_check_does_not_block_a_read)
+{
+    // A reader that checks the path and then opens it can open a FIFO that
+    // replaced the file in between. Swap hard links to one FIFO and one
+    // regular file in at the path while SwarmFormRead runs. The FIFO stays
+    // reachable at its own name, so a blocked reader can be released. A read
+    // that succeeds must have read the regular file.
+    const fs::path dir = m_path_root / "read_fifo_swap";
+    fs::create_directories(dir);
+    const fs::path file = dir / fs::u8path(modelnet::kMembershipFile);
+    const fs::path fifo = dir / "fifo";
+    const fs::path regular = dir / "regular";
+    const fs::path staged = dir / "staged";
+    BOOST_REQUIRE_EQUAL(mkfifo(fifo.c_str(), 0600), 0);
+    WriteFile(regular, "{}");
+    fs::create_hard_link(regular, file);
+    std::atomic<bool> stop{false};
+    std::thread swapper([&] {
+        while (!stop) {
+            for (const fs::path* from : {&fifo, &regular}) {
+                unlink(staged.c_str());
+                if (link(from->c_str(), staged.c_str()) == 0) rename(staged.c_str(), file.c_str());
+            }
+        }
+    });
+    auto done = std::async(std::launch::async, [&] {
+        std::vector<int> counts(3, 0); // read, refused, read but not the regular file
+        for (int i = 0; i < 20000; ++i) {
+            std::string raw, read_err;
+            if (!modelnet::SwarmFormRead(file, raw, read_err)) {
+                ++counts[1];
+            } else {
+                ++counts[raw == "{}" ? 0 : 2];
+            }
+        }
+        return counts;
+    });
+    const bool returned = done.wait_for(std::chrono::seconds{10}) == std::future_status::ready;
+    stop = true;
+    swapper.join();
+    while (done.wait_for(std::chrono::milliseconds{100}) != std::future_status::ready) {
+        const int fd = open(fifo.c_str(), O_WRONLY | O_NONBLOCK);
+        if (fd >= 0) close(fd);
+    }
+    const std::vector<int> counts = done.get();
+    BOOST_TEST_MESSAGE("read " << counts[0] << ", refused " << counts[1] << ", not the regular file " << counts[2]);
+    BOOST_CHECK_MESSAGE(returned, "a FIFO swapped in after the check blocks the read");
+    BOOST_CHECK_EQUAL(counts[2], 0);
 }
 #endif
 

@@ -12,6 +12,13 @@
 namespace modelnet {
 
 /**
+ * Read path into raw if it is a regular file, following a symlink to one. raw is left
+ * unchanged on failure. Outside Windows the file is also opened with O_NONBLOCK and checked
+ * with fstat on that descriptor, so a FIFO swapped in after the path check is not waited on.
+ */
+bool SwarmReadRegularFile(const fs::path& path, std::string& raw);
+
+/**
  * Read a regular file. A symlink is SYMLINK and is not followed.
  * A missing path is MISSING. raw is left unchanged on failure.
  */
