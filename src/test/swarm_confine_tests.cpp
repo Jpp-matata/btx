@@ -18,11 +18,16 @@
 #include <time.h>
 #include <unistd.h>
 #endif
+#ifdef __linux__
+#include <sys/prctl.h>
+#endif
 
+#include <cerrno>
 #include <chrono>
 #include <fstream>
 #include <iterator>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -480,6 +485,33 @@ BOOST_AUTO_TEST_CASE(tree_within_limit_calls_back_during_walk)
     BOOST_CHECK_EQUAL(calls, 4);
 }
 
+// A directory that is gone after the walk read its entry, before the walk
+// checks it and opens it, is skipped while the helper runs: not walked into,
+// not an error. The strict walk (before launch, after exit) still refuses
+// it. The callback after 256 entries removes every directory at that point.
+BOOST_AUTO_TEST_CASE(tree_within_limit_skips_directory_removed_during_walk)
+{
+    const fs::path root = FreshRoot("btx-swarm-tree-within-vanish");
+    const auto make_dirs = [&] {
+        for (int i = 0; i < 300; ++i) fs::create_directory(root / fs::PathFromString("d" + std::to_string(i)));
+    };
+    const auto remove_dirs = [&] {
+        std::error_code ec;
+        for (int i = 0; i < 300; ++i) fs::remove(root / fs::PathFromString("d" + std::to_string(i)), ec);
+    };
+    int calls = 0;
+    make_dirs();
+    const bool running = process_guard::TreeWithinLimit(root, 1, true, [&] { ++calls; remove_dirs(); });
+    const bool emptied = fs::is_empty(root);
+    make_dirs();
+    const bool strict = process_guard::TreeWithinLimit(root, 1, false, remove_dirs);
+    fs::remove_all(root);
+    BOOST_CHECK_EQUAL(calls, 1);
+    BOOST_CHECK(emptied);
+    BOOST_CHECK(running);
+    BOOST_CHECK(!strict);
+}
+
 // Wait kills the child's process group once the tree is over the limit.
 BOOST_AUTO_TEST_CASE(wait_kills_child_over_tree_limit)
 {
@@ -505,6 +537,82 @@ BOOST_AUTO_TEST_CASE(wait_kills_child_over_tree_limit)
     BOOST_CHECK(!finished);
     BOOST_CHECK_GT(files, 8);
     BOOST_CHECK_LT(files, 64);
+}
+
+// The kill goes to the whole process group: a grandchild that keeps writing
+// is gone too, not only the child. The grandchild sends its pid before its
+// first write. On Linux this process is its subreaper, so waitpid shows how
+// it ended; on macOS it is gone once kill(pid, 0) finds no process.
+BOOST_AUTO_TEST_CASE(wait_kills_process_group_over_tree_limit)
+{
+    const fs::path root = FreshRoot("btx-swarm-wait-tree-group");
+    const std::string block(1 << 20, 'x');
+    std::vector<std::string> names;
+    for (int i = 0; i < 64; ++i) names.push_back(fs::PathToString(root / fs::PathFromString("g" + std::to_string(i) + ".bin")));
+    int pid_pipe[2];
+    BOOST_REQUIRE(pipe(pid_pipe) == 0);
+#ifdef __linux__
+    BOOST_REQUIRE(prctl(PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0) == 0);
+#endif
+    const auto waited = WaitOnChild(root, 8 << 20, [&] {
+        const pid_t grandchild = fork();
+        if (grandchild < 0) _exit(5);
+        if (grandchild == 0) {
+            const pid_t self = getpid();
+            if (write(pid_pipe[1], &self, sizeof(self)) != static_cast<ssize_t>(sizeof(self))) _exit(6);
+            // Without the error pipe, so only the kill can end it before Wait returns.
+            for (int fd = 3; fd < 1024; ++fd) close(fd);
+            const timespec pause{0, 20 * 1000 * 1000};
+            timespec start{}, now{};
+            clock_gettime(CLOCK_MONOTONIC, &start);
+            for (size_t i = 0;; ++i) {
+                ChildWrite(names[i % names.size()].c_str(), block.data(), block.size());
+                nanosleep(&pause, nullptr);
+                clock_gettime(CLOCK_MONOTONIC, &now);
+                if (now.tv_sec - start.tv_sec >= 60) _exit(0);
+            }
+        }
+        close(pid_pipe[1]);
+        const timespec pause{1, 0};
+        for (int i = 0; i < 60; ++i) nanosleep(&pause, nullptr);
+    });
+    close(pid_pipe[1]);
+    pid_t grandchild = -1;
+    const bool got = read(pid_pipe[0], &grandchild, sizeof(grandchild)) == static_cast<ssize_t>(sizeof(grandchild));
+    close(pid_pipe[0]);
+    // SIGKILL is sent before Wait returns; the kernel ends the process soon after.
+    bool gone = false;
+#ifdef __linux__
+    int status = 0;
+#endif
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (got && !gone && std::chrono::steady_clock::now() < deadline) {
+#ifdef __linux__
+        gone = waitpid(grandchild, &status, WNOHANG) == grandchild;
+#else
+        gone = kill(grandchild, 0) != 0 && errno == ESRCH;
+#endif
+        if (!gone) std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    if (got && !gone) {
+        kill(grandchild, SIGKILL);
+#ifdef __linux__
+        waitpid(grandchild, &status, 0);
+#endif
+    }
+#ifdef __linux__
+    BOOST_REQUIRE(prctl(PR_SET_CHILD_SUBREAPER, 0, 0, 0, 0) == 0);
+#endif
+    const int files = CountFiles(root, "g");
+    fs::remove_all(root);
+    BOOST_REQUIRE(got);
+    BOOST_CHECK(waited.over_tree);
+    BOOST_CHECK(!waited.executed);
+    BOOST_CHECK(gone);
+#ifdef __linux__
+    BOOST_CHECK(gone && WIFSIGNALED(status) && WTERMSIG(status) == SIGKILL);
+#endif
+    BOOST_CHECK_GT(files, 8);
 }
 
 // The same child under a limit it never reaches runs to the end.
