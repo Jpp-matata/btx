@@ -266,9 +266,18 @@ inline int btx_setpgid(int, int)
     return -1;
 }
 
+// getenv reads the C runtime's copy of the environment, which
+// SetEnvironmentVariableA does not change. _putenv_s changes that copy and
+// the process environment together, and an empty value removes the name.
+inline int setenv(const char* name, const char* value, int overwrite)
+{
+    if (overwrite == 0 && getenv(name) != nullptr) return 0;
+    return _putenv_s(name, value) == 0 ? 0 : -1;
+}
+
 inline int unsetenv(const char* name)
 {
-    return SetEnvironmentVariableA(name, nullptr) ? 0 : -1;
+    return _putenv_s(name, "") == 0 ? 0 : -1;
 }
 
 inline struct tm* btx_gmtime_r(const time_t* t, struct tm* out)
