@@ -24,6 +24,7 @@
 #include <map>
 #include <mutex>
 #include <thread>
+#include <utility>
 
 namespace modelnet {
 namespace {
@@ -363,6 +364,24 @@ void StartSwarmObserver(const fs::path& modeldir)
         int64_t guard_written_at = 0;
         std::string last_observer_err;
         int observer_failures = 0;
+        // A step that keeps failing is logged on its 1st, 8th and every 64th
+        // pass, as a failed pass is below, instead of on every poll.
+        std::map<std::string, std::pair<std::string, int>> step_failures;
+        const auto report = [&](const std::string& step, bool step_ok, const std::string& error) {
+            if (step_ok) {
+                step_failures.erase(step);
+                return;
+            }
+            auto& [last, count] = step_failures[step];
+            if (error != last) {
+                last = error;
+                count = 0;
+            }
+            ++count;
+            if (count == 1 || count == 8 || count % 64 == 0) {
+                LogPrintf("%s: %s (monetary node continues, repeated %d)\n", step, error, count);
+            }
+        };
         auto publish_guard_status = [&](std::string& error) {
             const auto status = guard.Snapshot();
             const std::string phase = !status.enabled ? "STOPPED" : status.ready ? "READY" : "RESTARTING";
@@ -403,10 +422,9 @@ void StartSwarmObserver(const fs::path& modeldir)
             bool ok = true;
             try {
                 guard.Tick();
-                if (!publish_guard_status(err)) {
-                    ok = false;
-                    LogPrintf("swarm guard status: %s (monetary node continues)\n", err);
-                }
+                const bool guard_ok = publish_guard_status(err);
+                report("swarm guard status", guard_ok, err);
+                if (!guard_ok) ok = false;
                 std::lock_guard<std::mutex> lock(g_mu);
                 InputGeneration now;
                 if (!Fingerprint(modeldir / "catalog.json", now.catalog, err) ||
@@ -429,28 +447,26 @@ void StartSwarmObserver(const fs::path& modeldir)
                     }
                     if (ok && (catalog_changed || mesh_changed)) {
                         std::string mesh_err;
-                        if (!SwarmRefreshLocalMesh(modeldir, mesh_err)) {
-                            LogPrintf("swarm mesh: %s (monetary node continues)\n", mesh_err);
-                            retain = false;
-                        }
+                        const bool mesh_ok = SwarmRefreshLocalMesh(modeldir, mesh_err);
+                        report("swarm mesh", mesh_ok, mesh_err);
+                        if (!mesh_ok) retain = false;
                         std::string join_err;
-                        if (!SwarmIntegrateCatalog(modeldir, join_err)) {
-                            LogPrintf("swarm join: %s (monetary node continues)\n", join_err);
+                        const bool join_ok = SwarmIntegrateCatalog(modeldir, join_err);
+                        report("swarm join", join_ok, join_err);
+                        if (!join_ok) {
                             retain = false;
                         } else {
                             const fs::path membership = modeldir / "swarm" / kMembershipFile;
                             if (catalog_changed || !fs::exists(membership)) {
                                 std::string form_err;
-                                if (!SwarmFormPlane(modeldir, form_err)) {
-                                    LogPrintf("swarm form: %s (monetary node continues)\n", form_err);
-                                    retain = false;
-                                }
+                                const bool form_ok = SwarmFormPlane(modeldir, form_err);
+                                report("swarm form", form_ok, form_err);
+                                if (!form_ok) retain = false;
                             }
                             std::string live_err;
-                            if (!SwarmPublishLive(modeldir, live_err)) {
-                                LogPrintf("swarm live: %s (monetary node continues)\n", live_err);
-                                retain = false;
-                            }
+                            const bool live_ok = SwarmPublishLive(modeldir, live_err);
+                            report("swarm live", live_ok, live_err);
+                            if (!live_ok) retain = false;
                         }
                     }
                     if (ok && retain) {
