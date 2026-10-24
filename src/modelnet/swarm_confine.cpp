@@ -26,7 +26,9 @@ SwarmConfineResult SwarmRunConfined(const SwarmConfineRequest& request, std::str
     if (!process_guard::InsideRoot(request.helper, request.root)) return Refuse("PATH", err);
 #if defined(__linux__) || defined(__APPLE__)
     // max_tree_bytes: RLIMIT_FSIZE caps each file during the run, and the
-    // whole tree below root is checked before launch and after exit.
+    // whole tree below root is checked before launch, every 10 ms while the
+    // helper runs (process_guard::Wait, in this unconfined parent) and after
+    // exit.
     if (request.max_tree_bytes == 0) return Refuse("LIMIT", err);
     if (!process_guard::TreeWithinLimit(request.root, request.max_tree_bytes)) return Refuse("TREE_LIMIT", err);
 #ifdef __APPLE__
@@ -80,9 +82,12 @@ SwarmConfineResult SwarmRunConfined(const SwarmConfineRequest& request, std::str
         process_guard::ChildFailure(error_fd);
     }
     close(pipefd[1]);
-    const auto waited =
-        process_guard::Wait(pid, pipefd[0], request.max_wall_seconds, max_footprint_bytes, max_cpu_seconds);
-    if (!waited.executed) return Refuse(waited.timed_out ? "CONFINEMENT_TIMEOUT" : "CONFINEMENT_ABSENT", err);
+    const auto waited = process_guard::Wait(pid, pipefd[0], request.max_wall_seconds, max_footprint_bytes,
+                                            max_cpu_seconds, request.root, request.max_tree_bytes);
+    if (!waited.executed) {
+        return Refuse(waited.timed_out ? "CONFINEMENT_TIMEOUT" :
+                      waited.over_tree ? "TREE_LIMIT" : "CONFINEMENT_ABSENT", err);
+    }
     if (!process_guard::TreeWithinLimit(request.root, request.max_tree_bytes)) return Refuse("TREE_LIMIT", err);
     SwarmConfineResult result;
     result.launched = true; result.limits_applied = true;

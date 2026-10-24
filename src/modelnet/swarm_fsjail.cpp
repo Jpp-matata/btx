@@ -234,7 +234,7 @@ SwarmFilesystemJailResult SwarmRunFilesystemJail(const SwarmFilesystemJailReques
     const int gid_len = snprintf(gid_map, sizeof(gid_map), "0 %lu 1\n", static_cast<unsigned long>(getegid()));
 
     // max_tree_bytes: RLIMIT_FSIZE caps each file, and the tree below root is
-    // checked before launch and after exit.
+    // checked before launch, every 10 ms while the helper runs and after exit.
     if (!process_guard::TreeWithinLimit(root, request.max_tree_bytes)) return Refuse("TREE_LIMIT", err);
     if (witness.empty()) return Refuse("JAIL_ABSENT", err);
     int pipefd[2];
@@ -268,8 +268,11 @@ SwarmFilesystemJailResult SwarmRunFilesystemJail(const SwarmFilesystemJailReques
         process_guard::ChildFailure(error_fd);
     }
     close(pipefd[1]);
-    const auto waited = process_guard::Wait(pid, pipefd[0], request.max_wall_seconds);
-    if (!waited.executed) return Refuse(waited.timed_out ? "JAIL_TIMEOUT" : "JAIL_ABSENT", err);
+    const auto waited =
+        process_guard::Wait(pid, pipefd[0], request.max_wall_seconds, 0, 0, root, request.max_tree_bytes);
+    if (!waited.executed) {
+        return Refuse(waited.timed_out ? "JAIL_TIMEOUT" : waited.over_tree ? "TREE_LIMIT" : "JAIL_ABSENT", err);
+    }
     if (!process_guard::TreeWithinLimit(root, request.max_tree_bytes)) return Refuse("TREE_LIMIT", err);
     SwarmFilesystemJailResult result;
     result.launched = true; result.jailed = true; result.code = "JAILED";

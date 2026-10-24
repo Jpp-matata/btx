@@ -25,9 +25,13 @@ namespace modelnet {
  * (plus 250 ms) on CPU time, sampled every 10 ms (SIGKILL; one interval of
  * overshoot). On Linux and macOS, RLIMIT_FSIZE caps each file at
  * max_tree_bytes during the run, and the regular files below root must total
- * at most max_tree_bytes before launch and after exit (TREE_LIMIT otherwise;
- * the same check as the Linux filesystem jail). Linux confinement does not
- * restrict the filesystem, so a file written outside root is bounded only by
+ * at most max_tree_bytes before launch, every 10 ms while the helper runs
+ * (SIGKILL to its process group; one interval of overshoot) and after exit
+ * (TREE_LIMIT otherwise; the same check as the Linux filesystem jail). The
+ * parent walks the tree, outside the sandbox. On macOS the walk shares the
+ * 10 ms loop with the footprint and CPU checks, so a large tree lengthens the
+ * interval for all three. Linux confinement does not restrict the
+ * filesystem, so a file written outside root is bounded only by
  * RLIMIT_FSIZE. Windows uses a
  * zero-capability AppContainer, private staged files, a one-process Job with
  * memory/CPU/wall limits and an explicit stdio handle allowlist. max_nofile

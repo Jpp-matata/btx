@@ -6,14 +6,16 @@
 // because the filesystem jail has no dynamic loader below its root. The tests
 // copy it into a root and run it through SwarmRunConfined or
 // SwarmRunFilesystemJail with no arguments; it works in its own directory
-// (/ inside the jail). A marker file there selects a mode: burst.mode writes
-// one file of 1 MiB and burst.done, then extends a second file to 2 MiB with
-// a single ftruncate and exits, so its tree goes over a limit only in its
-// last step. Each mode writes <mode>.started first. Without a mode it
-// records its RLIMIT_FSIZE in probe.out.
+// (/ inside the jail). A marker file there selects a mode: spread.mode writes
+// up to 64 files of 1 MiB, 20 ms apart, and writes spread.done at the end;
+// burst.mode writes one file of 1 MiB and burst.done, then extends a second
+// file to 2 MiB with a single ftruncate and exits, so its tree goes over a
+// limit only in its last step. Each mode writes <mode>.started first. Without
+// a mode it records its RLIMIT_FSIZE in probe.out.
 
 #include <fcntl.h>
 #include <sys/resource.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <cstdio>
@@ -59,6 +61,18 @@ int main(int argc, char** argv)
     if (slash == nullptr || static_cast<size_t>(slash - self) >= sizeof(g_dir)) return 2;
     std::memcpy(g_dir, self, static_cast<size_t>(slash - self));
     std::memset(g_block, 'x', sizeof(g_block));
+    if (Exists("spread.mode")) {
+        Mark("spread.started");
+        const timespec pause{0, 20 * 1000 * 1000};
+        char name[32];
+        for (int i = 0; i < 64; ++i) {
+            std::snprintf(name, sizeof(name), "spread%d.bin", i);
+            if (!WriteBlock(name)) return 3;
+            nanosleep(&pause, nullptr);
+        }
+        Mark("spread.done");
+        return 0;
+    }
     if (Exists("burst.mode")) {
         Mark("burst.started");
         if (!WriteBlock("burst0.bin")) return 4;

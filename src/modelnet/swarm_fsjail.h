@@ -26,7 +26,8 @@ namespace modelnet {
  * with failure to install the sandbox. Paths reject symlinks and traversal.
  * Limits and a wall timeout apply. On Linux and macOS, RLIMIT_FSIZE caps
  * each file at max_tree_bytes, and the regular files below root must total at
- * most max_tree_bytes before launch and after exit (TREE_LIMIT otherwise).
+ * most max_tree_bytes before launch, every 10 ms while the helper runs and
+ * after exit (TREE_LIMIT otherwise), as in SwarmRunConfined.
  * Neither success nor compile qualifies a platform release; native escape and
  * workload tests must run on that OS.
  */

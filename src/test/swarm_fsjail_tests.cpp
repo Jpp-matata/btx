@@ -10,6 +10,10 @@
 
 #include <sys/stat.h>
 
+#ifndef _WIN32
+#include <signal.h>
+#endif
+
 #include <fstream>
 #include <iterator>
 #include <string>
@@ -46,6 +50,36 @@ fs::path WriteRegularFile(const fs::path& path)
 }
 
 } // namespace
+
+#ifndef _WIN32
+namespace {
+
+volatile sig_atomic_t g_child_signals{0};
+
+void CountChildSignal(int)
+{
+    g_child_signals = g_child_signals + 1;
+}
+
+// Every child that ends sends SIGCHLD, so 0 shows that call started no
+// helper. A refusal before launch has to hold on its own: the tree check
+// while the helper runs would refuse the same root, but only after fork.
+template <typename Call>
+int ChildSignalsDuring(Call call)
+{
+    struct sigaction action{}, previous{};
+    action.sa_handler = CountChildSignal;
+    action.sa_flags = SA_RESTART;
+    sigemptyset(&action.sa_mask);
+    g_child_signals = 0;
+    BOOST_REQUIRE(sigaction(SIGCHLD, &action, &previous) == 0);
+    call();
+    BOOST_REQUIRE(sigaction(SIGCHLD, &previous, nullptr) == 0);
+    return g_child_signals;
+}
+
+} // namespace
+#endif
 
 BOOST_FIXTURE_TEST_SUITE(swarm_fsjail_tests, BasicTestingSetup)
 
@@ -229,10 +263,28 @@ BOOST_AUTO_TEST_CASE(macos_tree_limit_refused)
         std::ofstream extra{root / "input.bin", std::ios::binary};
         extra << std::string(4096, 'x');
     }
-    ExpectRefusal(request, "TREE_LIMIT");
+    BOOST_CHECK_EQUAL(ChildSignalsDuring([&] { ExpectRefusal(request, "TREE_LIMIT"); }), 0);
     const bool ran = fs::exists(root / "probe.out");
     fs::remove_all(root);
     BOOST_CHECK(!ran);
+}
+
+// A jailed helper that keeps writing files is killed while it runs, once the
+// tree passes max_tree_bytes.
+BOOST_AUTO_TEST_CASE(macos_jail_tree_limit_enforced_during_run)
+{
+    const fs::path root = MacRoot("btx-swarm-fsjail-macos-spread");
+    modelnet::SwarmFilesystemJailRequest request = BaseRequest(CopyProbe(root), root);
+    WriteRegularFile(root / "spread.mode");
+    request.max_tree_bytes = fs::file_size(request.helper) + (8 << 20);
+    ExpectRefusal(request, "TREE_LIMIT");
+    const bool started = fs::exists(root / "spread.started");
+    const bool done = fs::exists(root / "spread.done");
+    const bool last = fs::exists(root / "spread63.bin");
+    fs::remove_all(root);
+    BOOST_CHECK(started);
+    BOOST_CHECK(!done);
+    BOOST_CHECK(!last);
 }
 #endif
 
@@ -261,7 +313,7 @@ BOOST_AUTO_TEST_CASE(linux_tree_limit_refused)
     }
     modelnet::SwarmFilesystemJailRequest request = BaseRequest(helper, root);
     request.max_tree_bytes = fs::file_size(helper) + 1024;
-    ExpectRefusal(request, "TREE_LIMIT");
+    BOOST_CHECK_EQUAL(ChildSignalsDuring([&] { ExpectRefusal(request, "TREE_LIMIT"); }), 0);
     fs::remove_all(root);
 }
 
@@ -275,6 +327,15 @@ fs::path CopyProbe(const fs::path& root, const char* marker)
     BOOST_REQUIRE(chmod(helper.c_str(), S_IRUSR | S_IWUSR | S_IXUSR) == 0);
     if (marker != nullptr) WriteRegularFile(root / marker);
     return helper;
+}
+
+int CountFiles(const fs::path& root, const std::string& prefix)
+{
+    int count = 0;
+    for (const auto& entry : fs::directory_iterator(root)) {
+        if (entry.path().filename().native().rfind(prefix, 0) == 0) ++count;
+    }
+    return count;
 }
 
 // The cases below need the helper to run. Without user namespaces the jail
@@ -307,8 +368,27 @@ BOOST_AUTO_TEST_CASE(linux_jail_file_size_limit_applied)
     BOOST_CHECK_EQUAL(out, "fsize=67108864\n");
 }
 
-// Files that are each below RLIMIT_FSIZE but together above max_tree_bytes:
-// the probe runs to the end, and the tree check after exit refuses the result.
+// A jailed helper that keeps writing files is killed while it runs, once the
+// tree passes max_tree_bytes.
+BOOST_AUTO_TEST_CASE(linux_jail_tree_limit_enforced_during_run)
+{
+    if (!JailAvailable()) return;
+    const fs::path root = FreshRoot("btx-swarm-fsjail-linux-spread");
+    modelnet::SwarmFilesystemJailRequest request = BaseRequest(CopyProbe(root, "spread.mode"), root);
+    request.max_tree_bytes = fs::file_size(request.helper) + (8 << 20);
+    ExpectRefusal(request, "TREE_LIMIT");
+    const bool started = fs::exists(root / "spread.started");
+    const bool done = fs::exists(root / "spread.done");
+    const int files = CountFiles(root, "spread");
+    fs::remove_all(root);
+    BOOST_CHECK(started);
+    BOOST_CHECK(!done);
+    BOOST_CHECK_LT(files, 64);
+}
+
+// A jailed helper whose tree goes past max_tree_bytes only in its last step
+// before exit, too late for a walk while it runs, is refused by the check
+// after exit.
 BOOST_AUTO_TEST_CASE(linux_jail_tree_limit_refuses_result_after_run)
 {
     if (!JailAvailable()) return;
