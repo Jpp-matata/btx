@@ -170,6 +170,7 @@ inline bool TreeWithinLimit(const fs::path& root, uint64_t limit, bool running =
     std::error_code ec;
     uint64_t total = 0;
     size_t entries = 0;
+    size_t vanished_steps = 0;
     fs::recursive_directory_iterator current(root, fs::directory_options::none, ec), end;
     if (ec) return false;
     const auto vanished = [&] {
@@ -177,17 +178,54 @@ inline bool TreeWithinLimit(const fs::path& root, uint64_t limit, bool running =
         return running && fs::symlink_status(current->path(), missing).type() == fs::file_type::not_found;
     };
     for (; current != end; current.increment(ec)) {
-        if (ec || ++entries > 8192 || current.depth() > 64) return false;
+        if (ec) {
+            // readdir can report an entry the helper already removed. Cap the
+            // skips so an iterator that does not advance cannot spin.
+            if (running && ec == std::errc::no_such_file_or_directory && ++vanished_steps < 64) {
+                ec.clear();
+                continue;
+            }
+            return false;
+        }
+        vanished_steps = 0;
+        if (++entries > 8192 || current.depth() > 64) return false;
         if (during && entries % 256 == 0) during();
         if (!NoSymlinkPath(current->path())) {
-            if (!vanished()) return false;
-            current.disable_recursion_pending();
+            std::error_code leaf;
+            const auto kind = fs::symlink_status(current->path(), leaf);
+            const bool missing = leaf == std::errc::no_such_file_or_directory || kind.type() == fs::file_type::not_found;
+            if (running && missing) {
+                current.disable_recursion_pending();
+                continue;
+            }
+            if (!(running && !leaf && (kind.type() == fs::file_type::regular || kind.type() == fs::file_type::directory))) {
+                return false;
+            }
+        }
+        if (current->is_directory(ec)) {
+            if (!ec) continue;
+            if (running && (ec == std::errc::no_such_file_or_directory || vanished())) {
+                ec.clear();
+                current.disable_recursion_pending();
+                continue;
+            }
+            return false;
+        }
+        // A rename or unlink between the directory read and this stat is not
+        // growth. ENOENT stays a skip even if the helper recreates the name
+        // before a second stat. Only a live non-file counts as over the limit.
+        if (!current->is_regular_file(ec) || ec) {
+            if (running && (ec == std::errc::no_such_file_or_directory || vanished())) {
+                ec.clear();
+                continue;
+            }
+            return false;
+        }
+        const auto size = current->file_size(ec);
+        if (ec && running && (ec == std::errc::no_such_file_or_directory || vanished())) {
+            ec.clear();
             continue;
         }
-        if (current->is_directory(ec) && !ec) continue;
-        if (ec || !current->is_regular_file(ec) || ec) return false;
-        const auto size = current->file_size(ec);
-        if (ec && vanished()) continue;
         if (ec) return false;
         const auto bytes = static_cast<uint64_t>(size);
         if (bytes > limit || total > limit - bytes) return false;
