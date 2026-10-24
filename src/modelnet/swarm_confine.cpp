@@ -25,11 +25,11 @@ SwarmConfineResult SwarmRunConfined(const SwarmConfineRequest& request, std::str
         request.max_wall_seconds <= 0 || request.max_wall_seconds > 86400) return Refuse("LIMIT", err);
     if (!process_guard::InsideRoot(request.helper, request.root)) return Refuse("PATH", err);
 #if defined(__linux__) || defined(__APPLE__)
-#ifdef __APPLE__
     // max_tree_bytes: RLIMIT_FSIZE caps each file during the run, and the
     // whole tree below root is checked before launch and after exit.
     if (request.max_tree_bytes == 0) return Refuse("LIMIT", err);
     if (!process_guard::TreeWithinLimit(request.root, request.max_tree_bytes)) return Refuse("TREE_LIMIT", err);
+#ifdef __APPLE__
     const process_guard::Seatbelt seatbelt;
     if (!seatbelt.Available()) return Refuse("CONFINEMENT_ABSENT", err);
     // Opens before the profile and must not open after it (checked in the child).
@@ -59,9 +59,8 @@ SwarmConfineResult SwarmRunConfined(const SwarmConfineRequest& request, std::str
         if (
 #ifndef __APPLE__
             !process_guard::Limit(RLIMIT_AS, static_cast<rlim_t>(request.max_address_bytes)) ||
-#else
-            !process_guard::Limit(RLIMIT_FSIZE, static_cast<rlim_t>(request.max_tree_bytes)) ||
 #endif
+            !process_guard::Limit(RLIMIT_FSIZE, static_cast<rlim_t>(request.max_tree_bytes)) ||
             !process_guard::Limit(RLIMIT_CPU, static_cast<rlim_t>(request.max_cpu_seconds)) ||
             !process_guard::Limit(RLIMIT_NOFILE, static_cast<rlim_t>(request.max_nofile)) ||
             chdir(request.root.c_str()) != 0) process_guard::ChildFailure(error_fd);
@@ -84,9 +83,7 @@ SwarmConfineResult SwarmRunConfined(const SwarmConfineRequest& request, std::str
     const auto waited =
         process_guard::Wait(pid, pipefd[0], request.max_wall_seconds, max_footprint_bytes, max_cpu_seconds);
     if (!waited.executed) return Refuse(waited.timed_out ? "CONFINEMENT_TIMEOUT" : "CONFINEMENT_ABSENT", err);
-#ifdef __APPLE__
     if (!process_guard::TreeWithinLimit(request.root, request.max_tree_bytes)) return Refuse("TREE_LIMIT", err);
-#endif
     SwarmConfineResult result;
     result.launched = true; result.limits_applied = true;
     result.child_status = waited.status; result.code = "CONFINED";

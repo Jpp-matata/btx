@@ -53,6 +53,21 @@ fs::path WriteRegularFile(const fs::path& path)
 
 } // namespace
 
+#ifndef _WIN32
+namespace {
+
+// Resolved: InsideRoot refuses symlinks, and macOS TMPDIR is below /var.
+fs::path FreshRoot(const char* name)
+{
+    const fs::path root = fs::canonical(fs::temp_directory_path()) / name;
+    fs::remove_all(root);
+    fs::create_directories(root);
+    return root;
+}
+
+} // namespace
+#endif
+
 BOOST_FIXTURE_TEST_SUITE(swarm_confine_tests, BasicTestingSetup)
 
 BOOST_AUTO_TEST_CASE(empty_helper_or_root)
@@ -98,6 +113,18 @@ BOOST_AUTO_TEST_CASE(non_positive_limits)
     ExpectRefusal(nofile, "LIMIT");
     fs::remove_all(root);
 }
+
+#if defined(__linux__) || defined(__APPLE__)
+// Windows refuses a zero max_tree_bytes in its own sandbox (WINDOWS_SANDBOX_POLICY).
+BOOST_AUTO_TEST_CASE(zero_tree_limit)
+{
+    const fs::path root = FreshRoot("btx-swarm-confine-zero-tree");
+    modelnet::SwarmConfineRequest request = BaseRequest(WriteRegularFile(root / "helper.sh"), root);
+    request.max_tree_bytes = 0;
+    ExpectRefusal(request, "LIMIT");
+    fs::remove_all(root);
+}
+#endif
 
 BOOST_AUTO_TEST_CASE(path_outside_or_dotdot)
 {
@@ -342,5 +369,86 @@ BOOST_AUTO_TEST_CASE(macos_tree_limit_refuses_result_after_run)
     BOOST_CHECK(done);
 }
 #endif
+
+#ifdef __linux__
+// A root that is already over max_tree_bytes is refused before launch.
+BOOST_AUTO_TEST_CASE(linux_tree_limit_refuses_root_before_launch)
+{
+    const fs::path root = FreshRoot("btx-swarm-confine-linux-tree-before");
+    const fs::path helper = root / "helper.sh";
+    {
+        std::ofstream out{helper};
+        out << "#!/bin/sh\ntouch ran\n";
+        BOOST_REQUIRE(out);
+        std::ofstream extra{root / "input.bin", std::ios::binary};
+        extra << std::string(4096, 'x');
+        BOOST_REQUIRE(extra);
+    }
+    BOOST_REQUIRE(chmod(helper.c_str(), S_IRUSR | S_IWUSR | S_IXUSR) == 0);
+    modelnet::SwarmConfineRequest request = BaseRequest(helper, root);
+    request.max_tree_bytes = fs::file_size(helper) + 1024;
+    ExpectRefusal(request, "TREE_LIMIT");
+    const bool ran = fs::exists(root / "ran");
+    fs::remove_all(root);
+    BOOST_CHECK(!ran);
+}
+
+#ifdef BTX_SWARM_LINUX_PROBE
+namespace {
+
+fs::path CopyProbe(const fs::path& root, const char* marker)
+{
+    const fs::path helper = root / "probe";
+    fs::copy_file(fs::path{BTX_SWARM_LINUX_PROBE}, helper, fs::copy_options::overwrite_existing);
+    BOOST_REQUIRE(chmod(helper.c_str(), S_IRUSR | S_IWUSR | S_IXUSR) == 0);
+    if (marker != nullptr) WriteRegularFile(root / marker);
+    return helper;
+}
+
+// The cases below need the helper to run. Without user namespaces it never
+// starts, and they have nothing to measure.
+bool ConfinementAvailable()
+{
+    const fs::path root = FreshRoot("btx-swarm-confine-linux-available");
+    std::string err;
+    const auto result = modelnet::SwarmRunConfined(BaseRequest(CopyProbe(root, nullptr), root), err);
+    fs::remove_all(root);
+    if (result.code != "CONFINED") BOOST_TEST_MESSAGE("Linux confinement absent here: " << result.code);
+    return result.code == "CONFINED";
+}
+
+} // namespace
+
+// The child sets RLIMIT_FSIZE to max_tree_bytes before exec.
+BOOST_AUTO_TEST_CASE(linux_file_size_limit_applied)
+{
+    if (!ConfinementAvailable()) return;
+    const fs::path root = FreshRoot("btx-swarm-confine-linux-fsize");
+    modelnet::SwarmConfineRequest request = BaseRequest(CopyProbe(root, nullptr), root);
+    request.max_tree_bytes = 64 << 20;
+    std::string err;
+    const auto result = modelnet::SwarmRunConfined(request, err);
+    std::ifstream in{root / "probe.out"};
+    const std::string out{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+    fs::remove_all(root);
+    BOOST_CHECK_EQUAL(result.code, "CONFINED");
+    BOOST_CHECK_EQUAL(out, "fsize=67108864\n");
+}
+
+// Files that are each below RLIMIT_FSIZE but together above max_tree_bytes:
+// the probe runs to the end, and the tree check after exit refuses the result.
+BOOST_AUTO_TEST_CASE(linux_tree_limit_refuses_result_after_run)
+{
+    if (!ConfinementAvailable()) return;
+    const fs::path root = FreshRoot("btx-swarm-confine-linux-burst");
+    modelnet::SwarmConfineRequest request = BaseRequest(CopyProbe(root, "burst.mode"), root);
+    request.max_tree_bytes = fs::file_size(request.helper) + (2 << 20);
+    ExpectRefusal(request, "TREE_LIMIT");
+    const bool done = fs::exists(root / "burst.done");
+    fs::remove_all(root);
+    BOOST_CHECK(done);
+}
+#endif // BTX_SWARM_LINUX_PROBE
+#endif // __linux__
 
 BOOST_AUTO_TEST_SUITE_END()

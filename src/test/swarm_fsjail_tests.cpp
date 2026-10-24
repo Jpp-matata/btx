@@ -120,6 +120,16 @@ BOOST_AUTO_TEST_CASE(jailed_helper_or_namespace_absent)
     BOOST_CHECK(!(result.jailed && result.code == "JAIL_ABSENT"));
 }
 
+BOOST_AUTO_TEST_CASE(zero_tree_limit)
+{
+    // canonical: InsideRoot refuses symlinks, and macOS TMPDIR is below /var.
+    const fs::path root = fs::canonical(fs::temp_directory_path()) / "btx-swarm-fsjail-zero-tree";
+    modelnet::SwarmFilesystemJailRequest request = BaseRequest(WriteRegularFile(root / "helper.sh"), root);
+    request.max_tree_bytes = 0;
+    ExpectRefusal(request, "LIMIT");
+    fs::remove_all(root);
+}
+
 #if defined(__APPLE__) && defined(BTX_SWARM_JAIL_PROBE)
 namespace {
 
@@ -225,5 +235,92 @@ BOOST_AUTO_TEST_CASE(macos_tree_limit_refused)
     BOOST_CHECK(!ran);
 }
 #endif
+
+#ifdef __linux__
+namespace {
+
+fs::path FreshRoot(const char* name)
+{
+    const fs::path root = fs::canonical(fs::temp_directory_path()) / name;
+    fs::remove_all(root);
+    fs::create_directories(root);
+    return root;
+}
+
+} // namespace
+
+// A root that is already over max_tree_bytes is refused before launch.
+BOOST_AUTO_TEST_CASE(linux_tree_limit_refused)
+{
+    const fs::path root = FreshRoot("btx-swarm-fsjail-linux-tree");
+    const fs::path helper = WriteRegularFile(root / "helper");
+    BOOST_REQUIRE(chmod(helper.c_str(), S_IRUSR | S_IWUSR | S_IXUSR) == 0);
+    {
+        std::ofstream extra{root / "input.bin", std::ios::binary};
+        extra << std::string(4096, 'x');
+    }
+    modelnet::SwarmFilesystemJailRequest request = BaseRequest(helper, root);
+    request.max_tree_bytes = fs::file_size(helper) + 1024;
+    ExpectRefusal(request, "TREE_LIMIT");
+    fs::remove_all(root);
+}
+
+#ifdef BTX_SWARM_LINUX_PROBE
+namespace {
+
+fs::path CopyProbe(const fs::path& root, const char* marker)
+{
+    const fs::path helper = root / "probe";
+    fs::copy_file(fs::path{BTX_SWARM_LINUX_PROBE}, helper, fs::copy_options::overwrite_existing);
+    BOOST_REQUIRE(chmod(helper.c_str(), S_IRUSR | S_IWUSR | S_IXUSR) == 0);
+    if (marker != nullptr) WriteRegularFile(root / marker);
+    return helper;
+}
+
+// The cases below need the helper to run. Without user namespaces the jail
+// is absent, and they have nothing to measure.
+bool JailAvailable()
+{
+    const fs::path root = FreshRoot("btx-swarm-fsjail-linux-available");
+    std::string err;
+    const auto result = modelnet::SwarmRunFilesystemJail(BaseRequest(CopyProbe(root, nullptr), root), err);
+    fs::remove_all(root);
+    if (result.code != "JAILED") BOOST_TEST_MESSAGE("Linux filesystem jail absent here: " << result.code);
+    return result.code == "JAILED";
+}
+
+} // namespace
+
+// The jailed child sets RLIMIT_FSIZE to max_tree_bytes before exec.
+BOOST_AUTO_TEST_CASE(linux_jail_file_size_limit_applied)
+{
+    if (!JailAvailable()) return;
+    const fs::path root = FreshRoot("btx-swarm-fsjail-linux-fsize");
+    modelnet::SwarmFilesystemJailRequest request = BaseRequest(CopyProbe(root, nullptr), root);
+    request.max_tree_bytes = 64 << 20;
+    std::string err;
+    const auto result = modelnet::SwarmRunFilesystemJail(request, err);
+    std::ifstream in{root / "probe.out"};
+    const std::string out{std::istreambuf_iterator<char>{in}, std::istreambuf_iterator<char>{}};
+    fs::remove_all(root);
+    BOOST_CHECK_EQUAL(result.code, "JAILED");
+    BOOST_CHECK_EQUAL(out, "fsize=67108864\n");
+}
+
+// Files that are each below RLIMIT_FSIZE but together above max_tree_bytes:
+// the probe runs to the end, and the tree check after exit refuses the result.
+BOOST_AUTO_TEST_CASE(linux_jail_tree_limit_refuses_result_after_run)
+{
+    if (!JailAvailable()) return;
+    const fs::path root = FreshRoot("btx-swarm-fsjail-linux-burst");
+    modelnet::SwarmFilesystemJailRequest request = BaseRequest(CopyProbe(root, "burst.mode"), root);
+    request.max_tree_bytes = fs::file_size(request.helper) + (2 << 20);
+    ExpectRefusal(request, "TREE_LIMIT");
+    const bool done = fs::exists(root / "burst.done");
+    fs::remove_all(root);
+    BOOST_CHECK(done);
+}
+#endif // BTX_SWARM_LINUX_PROBE
+#endif // __linux__
 
 BOOST_AUTO_TEST_SUITE_END()
