@@ -107,6 +107,12 @@ bool LoadStored(const fs::path& path, std::map<std::string, Row>& rows, std::str
             err = "OBSERVER_SCHEMA";
             return false;
         }
+        for (const char* field : {"artifact_id", "model_id", "lineage_id", "lineage_assurance", "visibility"}) {
+            if (!item[field].isStr()) {
+                err = "OBSERVER_SCHEMA";
+                return false;
+            }
+        }
         Row row;
         row.artifact_id = item["artifact_id"].get_str();
         row.model_id = item["model_id"].get_str();
@@ -328,8 +334,18 @@ bool SwarmObserveCatalog(const fs::path& modeldir, std::string& err)
     const fs::path swarm_dir = modeldir / "swarm";
     const fs::path stored_path = swarm_dir / "observers.json";
     std::map<std::string, Row> rows;
-    if (fs::exists(stored_path)) {
-        if (!LoadStored(stored_path, rows, err)) return false;
+    if (fs::exists(stored_path) && !LoadStored(stored_path, rows, err)) {
+        // observers.json is derived from the catalog. Set a damaged copy aside
+        // and write it again, instead of failing on every observer pass.
+        if (err != "OBSERVER_SCHEMA" && err != "ID") return false;
+        std::error_code ec;
+        fs::rename(stored_path, fs::u8path(stored_path.utf8string() + ".bad"), ec);
+        if (ec) {
+            err = "OBSERVER_RENAME";
+            return false;
+        }
+        rows.clear();
+        err.clear();
     }
     bool changed = rows.size() != fresh.size();
     for (const auto& [id, row] : fresh) {

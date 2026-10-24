@@ -105,6 +105,48 @@ BOOST_AUTO_TEST_CASE(incomplete_or_unverified_models_do_not_subscribe)
     BOOST_CHECK(!fs::exists(dir / "swarm" / "observers.json"));
 }
 
+BOOST_AUTO_TEST_CASE(damaged_observers_file_is_set_aside_and_written_again)
+{
+    const fs::path dir = m_path_root / "catalog_bad_observers";
+    const fs::path swarm = dir / "swarm";
+    fs::create_directories(swarm);
+    WriteFile(dir / "catalog.json",
+              "{\"models\":[{\"artifact_id\":\"" + kArtifact + "\",\"model_id\":\"" + kModel +
+                  "\",\"bytes_verified\":true,\"incomplete\":false}]}");
+    std::string err;
+    BOOST_REQUIRE(modelnet::SwarmObserveCatalog(dir, err));
+    const fs::path observers = swarm / "observers.json";
+    const fs::path aside = swarm / "observers.json.bad";
+    const auto read = [](const fs::path& path) {
+        std::ifstream in(path);
+        return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    };
+    const std::string good = read(observers);
+    // Cut short, a field that is not a string, and an id that is not an id.
+    for (const std::string& damaged : {good.substr(0, good.size() / 2), std::string("{\"subscriptions\":[{\"artifact_id\":7}]}"),
+                                       std::string("{\"subscriptions\":[{\"artifact_id\":\"x\",\"model_id\":\"x\","
+                                                   "\"lineage_id\":\"x\",\"lineage_assurance\":\"x\",\"visibility\":\"x\"}]}")}) {
+        WriteFile(observers, damaged);
+        err = "stale";
+        bool ok = false;
+        BOOST_REQUIRE_NO_THROW(ok = modelnet::SwarmObserveCatalog(dir, err));
+        BOOST_CHECK(ok);
+        BOOST_CHECK(err.empty());
+        BOOST_CHECK_EQUAL(read(observers), good);
+        BOOST_CHECK_EQUAL(read(aside), damaged);
+        BOOST_REQUIRE(modelnet::SwarmObserveCatalog(dir, err));
+        BOOST_CHECK_EQUAL(read(observers), good);
+    }
+    fs::remove(observers);
+    fs::remove(aside);
+    WriteFile(m_path_root / "catalog_bad_observers_target", "{}");
+    fs::create_symlink(m_path_root / "catalog_bad_observers_target", observers);
+    BOOST_CHECK(!modelnet::SwarmObserveCatalog(dir, err));
+    BOOST_CHECK_EQUAL(err, "CATALOG_SYMLINK");
+    BOOST_CHECK(fs::is_symlink(fs::symlink_status(observers)));
+    BOOST_CHECK(!fs::exists(fs::symlink_status(aside)));
+}
+
 BOOST_AUTO_TEST_CASE(a_local_mapping_publishes_only_that_lineage)
 {
     const fs::path dir = m_args.GetDataDirBase() / "swarm_observer_map";
