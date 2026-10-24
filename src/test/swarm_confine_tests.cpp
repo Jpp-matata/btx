@@ -467,6 +467,19 @@ void ChildWrite(const char* path, const char* data, size_t bytes)
 
 } // namespace
 
+// A walk calls back after every 256 entries, so a caller's other checks keep
+// running while it walks a large tree (Wait's footprint and CPU limits on macOS).
+BOOST_AUTO_TEST_CASE(tree_within_limit_calls_back_during_walk)
+{
+    const fs::path root = FreshRoot("btx-swarm-tree-within-during");
+    for (int i = 0; i < 1024; ++i) std::ofstream{root / fs::PathFromString("f" + std::to_string(i))};
+    int calls = 0;
+    const bool within = process_guard::TreeWithinLimit(root, 1, false, [&] { ++calls; });
+    fs::remove_all(root);
+    BOOST_CHECK(within);
+    BOOST_CHECK_EQUAL(calls, 4);
+}
+
 // Wait kills the child's process group once the tree is over the limit.
 BOOST_AUTO_TEST_CASE(wait_kills_child_over_tree_limit)
 {
