@@ -16,6 +16,14 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
+// The other Windows headers model plane files include. They use macros
+// removed below (VOID, CALLBACK, interface), so they are read first.
+#include <aclapi.h>
+#include <bcrypt.h>
+#include <iphlpapi.h>
+#include <objbase.h>
+#include <sddl.h>
+#include <userenv.h>
 
 // Windows headers macro-define identifiers the node and the lab use as enums.
 #ifdef STRICT
