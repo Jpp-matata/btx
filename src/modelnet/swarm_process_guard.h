@@ -8,6 +8,7 @@
 #include <cerrno>
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <thread>
 
@@ -156,23 +157,37 @@ inline bool NullStandardDescriptors()
 /**
  * True while the regular files below root total at most limit. Symbolic
  * links, other file types, more than 8192 entries, a depth above 64 or any
- * error reading the tree count as over the limit. Shared by the Linux
- * filesystem jail (after exit) and the macOS confinement (before launch and
- * after exit).
+ * error reading the tree count as over the limit. Shared by the filesystem
+ * jail and the confinement (before launch, while the helper runs, and after
+ * exit). With running set, an entry that is gone by the time it is read is
+ * skipped: a helper that is still running may rename or delete its files.
+ * during, if set, is called after every 256 entries, so a caller can keep
+ * its other checks going while a large tree is walked.
  */
-inline bool TreeWithinLimit(const fs::path& root, uint64_t limit)
+inline bool TreeWithinLimit(const fs::path& root, uint64_t limit, bool running = false,
+                            const std::function<void()>& during = {})
 {
     std::error_code ec;
     uint64_t total = 0;
     size_t entries = 0;
     fs::recursive_directory_iterator current(root, fs::directory_options::none, ec), end;
     if (ec) return false;
+    const auto vanished = [&] {
+        std::error_code missing;
+        return running && fs::symlink_status(current->path(), missing).type() == fs::file_type::not_found;
+    };
     for (; current != end; current.increment(ec)) {
         if (ec || ++entries > 8192 || current.depth() > 64) return false;
-        if (!NoSymlinkPath(current->path())) return false;
+        if (during && entries % 256 == 0) during();
+        if (!NoSymlinkPath(current->path())) {
+            if (!vanished()) return false;
+            current.disable_recursion_pending();
+            continue;
+        }
         if (current->is_directory(ec) && !ec) continue;
         if (ec || !current->is_regular_file(ec) || ec) return false;
         const auto size = current->file_size(ec);
+        if (ec && vanished()) continue;
         if (ec) return false;
         const auto bytes = static_cast<uint64_t>(size);
         if (bytes > limit || total > limit - bytes) return false;
@@ -244,6 +259,7 @@ inline bool OverLimits(pid_t pid, uint64_t max_footprint_bytes, int max_cpu_seco
 struct WaitResult {
     bool executed{false};
     bool timed_out{false};
+    bool over_tree{false};
     int status{-1};
     int setup_errno{0};
 };
@@ -253,16 +269,42 @@ struct WaitResult {
  * OverLimits. Both are sampled every 10 ms; a child can overshoot by what it
  * touches or computes within one interval. The SIGKILL to its process group
  * reads as a signal, i.e. not executed.
+ * max_tree_bytes (0 = off): the tree below tree_root is checked with
+ * TreeWithinLimit at the same interval, and the process group gets SIGKILL
+ * once it is over (over_tree). A failed walk is repeated once before the
+ * kill, since a directory removed during a walk ends it early. A walk reads
+ * every entry below tree_root, so a large tree lengthens the interval. On
+ * macOS the walk also checks the footprint and CPU limits every 256 entries,
+ * so a large tree does not delay them.
  */
 inline WaitResult Wait(pid_t child, int error_fd, int wall_seconds, uint64_t max_footprint_bytes = 0,
-                       int max_cpu_seconds = 0)
+                       int max_cpu_seconds = 0, const fs::path& tree_root = {}, uint64_t max_tree_bytes = 0)
 {
     WaitResult result;
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(wall_seconds);
+#ifdef __APPLE__
+    // Every 10 ms, and every 256 entries of a tree walk.
+    const std::function<void()> limits = [&] {
+        if (OverLimits(child, max_footprint_bytes, max_cpu_seconds)) {
+            kill(-child, SIGKILL);
+            kill(child, SIGKILL);
+        }
+    };
+#else
+    (void)max_footprint_bytes;
+    (void)max_cpu_seconds;
+    const std::function<void()> limits;
+#endif
     while (true) {
         const pid_t done = waitpid(child, &result.status, WNOHANG);
         if (done == child) break;
         if (done < 0 && errno != EINTR) { close(error_fd); return result; }
+        if (max_tree_bytes != 0 && !TreeWithinLimit(tree_root, max_tree_bytes, true, limits) &&
+            !TreeWithinLimit(tree_root, max_tree_bytes, true, limits)) {
+            result.over_tree = true;
+            kill(-child, SIGKILL);
+            kill(child, SIGKILL);
+        }
         if (std::chrono::steady_clock::now() >= deadline) {
             result.timed_out = true;
             // Only the dedicated process group created by this invocation.
@@ -271,15 +313,7 @@ inline WaitResult Wait(pid_t child, int error_fd, int wall_seconds, uint64_t max
             while (waitpid(child, &result.status, 0) < 0 && errno == EINTR) {}
             break;
         }
-#ifdef __APPLE__
-        if (OverLimits(child, max_footprint_bytes, max_cpu_seconds)) {
-            kill(-child, SIGKILL);
-            kill(child, SIGKILL);
-        }
-#else
-        (void)max_footprint_bytes;
-        (void)max_cpu_seconds;
-#endif
+        if (limits) limits();
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
     int messages[2]{-1, -1};
