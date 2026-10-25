@@ -11868,7 +11868,7 @@ int RunModelDaemon(HelperConfig cfg, std::atomic<bool>* stop)
     StartRetrieveWorkers(cat);
     g_swarm.pex.NoteSelf(cfg.bind);
     if (tcp_fd >= 0) {
-        g_swarm.nat = AttemptModelPortMap(cfg.bind, true);
+        g_swarm.nat = AttemptModelPortMap(cfg.bind, cfg.natpmp);
         const bool mapped = g_swarm.nat.status == ModelNatStatus::MAPPED;
         cfg.public_host_reachable = mapped;
         g_runtime.public_host_reachable = mapped;
