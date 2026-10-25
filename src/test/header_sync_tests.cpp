@@ -231,6 +231,26 @@ BOOST_AUTO_TEST_CASE(probe_interval_and_suffix_failover_helpers)
         /*best_known=*/199340, /*extends_tip=*/true));
 }
 
+BOOST_AUTO_TEST_CASE(early_parallel_block_owners_only_for_the_hole)
+{
+    constexpr size_t catch_up{3};
+    constexpr int ahead{32};
+    constexpr int tip{141181};
+    // Within `ahead` of the tip, or below it (a fork root): early owners.
+    BOOST_CHECK_EQUAL(node::EarlyParallelBlockOwners(catch_up, false, tip + 1, tip, ahead), catch_up);
+    BOOST_CHECK_EQUAL(node::EarlyParallelBlockOwners(catch_up, false, tip + ahead, tip, ahead), catch_up);
+    BOOST_CHECK_EQUAL(node::EarlyParallelBlockOwners(catch_up, false, tip - 81, tip, ahead), catch_up);
+    // Deeper in a wide window: another owner only once stale.
+    BOOST_CHECK_EQUAL(node::EarlyParallelBlockOwners(catch_up, false, tip + ahead + 1, tip, ahead), size_t{1});
+    BOOST_CHECK_EQUAL(node::EarlyParallelBlockOwners(catch_up, false, tip + 1024, tip, ahead), size_t{1});
+    // The hole (first in-flight block of the walk, or a 1-wide walk) keeps them anywhere,
+    // e.g. a tower root far above a stale tip.
+    BOOST_CHECK_EQUAL(node::EarlyParallelBlockOwners(catch_up, true, tip + 2000, tip, ahead), catch_up);
+    // Outside catch-up nothing changes, and with no tip the caller's value stands.
+    BOOST_CHECK_EQUAL(node::EarlyParallelBlockOwners(1, false, tip + 1, tip, ahead), size_t{1});
+    BOOST_CHECK_EQUAL(node::EarlyParallelBlockOwners(catch_up, false, 5000, -1, ahead), catch_up);
+}
+
 BOOST_AUTO_TEST_CASE(initial_sync_prefers_checkpoint_anchor_and_skips_low_work_failures)
 {
     // MendeMatthias / v0.34.4: mainnet checkpoint 186000 is the
