@@ -12,6 +12,9 @@
 # yourself, set modelrpcsocket=<path>; btxd then connects to that socket and
 # does not spawn or kill the helper.
 #
+# With the model network on, btxd also starts the swarm observer in this
+# process. There is no separate swarm program to launch.
+#
 # The helper btxd starts listens on port 29447 on all interfaces unless
 # modelbind (below) or modelnet=0 says otherwise.
 #

@@ -98,7 +98,9 @@ need them. If the `btx-modeld` binary is present (next to `btxd`, in
 `libexec/`, or at `modelhelper=<path>`), `btxd` **does** start it by default
 (`modelnet=1`); without it, `btxd` logs that and runs without the helper.
 Disable with `modelnet=0`. If the helper dies, model RPCs
-fail closed and the chain continues. Set `modelrpcsocket=` to attach to an
+fail closed and the chain continues. With the model network on, `btxd` also
+starts the swarm observer in this process. There is no separate swarm program
+to launch. Set `modelrpcsocket=` to attach to an
 already-running helper instead of spawning.
 
 Copy and edit the dedicated example (not the generated `share/examples/btx.conf`):
