@@ -10,6 +10,14 @@ This candidate is not release-qualified. A passing in-process suite is not a sec
 
 The published 0.35.0rc1 file set does not yet include a CUDA Linux archive. v0.34.15 shipped `btx-0.34.15-x86_64-linux-gnu-cuda13.tar.gz`. A GPU consensus node that starts the rc1 Linux `btxd` without that CUDA build reports a CPU provider and can stall at the next MatMul block. A CUDA Linux archive has to ship with 0.35 before those operators can move.
 
+## Published Linux archive
+
+The published 0.35.0rc1 Linux `btxd` imports OpenSSL 3.2. The `lib/` directory in that archive supplies it. Ubuntu 24.04's OpenSSL 3.0 does not. Point only that `btxd` process at `lib/`. Do not put that directory on a library path for every program.
+
+In that same published set, `btxd` was reported at the existing `GLIBC_2.38` floor. `btx-qt` and the bundled GnuTLS were reported to need `GLIBC_2.43`, so the GUI does not start on Ubuntu 24.04. A consensus-mode CPU node that stops at the first MatMul block is the ExactReplay rule, not a fault in that archive.
+
+A 0.34.15 binary built without the model plane rejects `-modelnet=0` as an unknown parameter. Drop that flag when starting such a binary.
+
 ## Auto-update and -proxy
 
 An auto-update check is a direct HTTPS connection from this host to the manifest origin (`https://btx.dev` by default). It does not use `-proxy`, `-onion` or `-onlynet`. On mainnet `-autoupdate` now defaults to 0 when `-proxy` is set or `-onlynet` excludes ipv4 and ipv6, the same tests that already turn off `-listen`, `-discover` and `-dnsseed` by default. `-onion` or `-listenonion` alone do not change the default, because ipv4 and ipv6 peers still connect directly. `-autoupdate=1` keeps it on, and the check still connects directly.

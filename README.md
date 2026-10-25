@@ -1356,6 +1356,11 @@ showing no missing `.so` names covers neither. Build from source on the older
 LTS, or see [doc/linux-release-builds.md](doc/linux-release-builds.md) and
 [doc/btx-download-and-go.md](doc/btx-download-and-go.md).
 
+The published 0.35.0rc1 Linux archive is a separate set from those 0.34.8
+assets. In the rc1 report, `btxd` still loads at `GLIBC_2.38`, while `btx-qt`
+and the bundled GnuTLS need `GLIBC_2.43`. That `btxd` imports OpenSSL 3.2
+from the archive's `lib/` directory. Point only that process at `lib/`.
+
 ### Linux (Ubuntu/Debian)
 
 The commands below are the supported source-build path on Ubuntu 22.04/Debian
