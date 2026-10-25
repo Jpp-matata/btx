@@ -332,6 +332,9 @@ static constexpr unsigned int CATCHUP_BLOCKS_IN_TRANSIT_PER_PEER = 1;
  *  it (assumeutxo-189307 + 517 headers, IBD already latched false on chainwork
  *  + tip age) the IBD window is required; 1-slot/15s is a near-tip policy. */
 static constexpr int CATCHUP_NARROW_MAX_AHEAD = 32;
+/** In a wide catch-up window, blocks this close to the tip may get extra
+ *  owners before their request is stale (see node::EarlyParallelBlockOwners). */
+static constexpr int CATCHUP_EARLY_OWNERS_AHEAD = 32;
 /** Catch-up / IBD getdata failover. Used as a *duplicate-owner* clamp only:
  *  a hash that already has a fresh copy in flight elsewhere may be failed
  *  over at 15s. The unique-owner deadline is the spacing formula
@@ -7550,6 +7553,7 @@ void PeerManagerImpl::FindNextBlocks(std::vector<const CBlockIndex*>& vBlocks, c
     int nMaxHeight = std::min<int>(state->pindexBestKnownBlock->nHeight, window_end_plus_one);
     bool is_limited_peer = IsLimitedPeer(peer);
     NodeId waitingfor = -1;
+    bool hole_pending{true};
     while (pindexWalk->nHeight < nMaxHeight) {
         // Read up to 128 (or more, if more blocks than that are needed) successors of pindexWalk (towards
         // pindexBestKnownBlock) into vToFetch. We fetch 128, because CBlockIndex::GetAncestor may be as expensive
@@ -7718,10 +7722,19 @@ void PeerManagerImpl::FindNextBlocks(std::vector<const CBlockIndex*>& vBlocks, c
                 // outstanding request for this block is stale, let another peer
                 // fetch it in parallel (bounded by MAX_CMPCTBLOCKS_INFLIGHT_PER_BLOCK).
                 // The redundant copy is discarded cheaply if both arrive.
+                // Early extra owners only for the hole: deeper in a wide
+                // window, only once the request is stale.
+                const size_t parallel_owners{node::EarlyParallelBlockOwners(
+                    min_parallel_owners,
+                    /*hole=*/hole_pending || count <= CATCHUP_BLOCKS_IN_TRANSIT_PER_PEER,
+                    pindex->nHeight,
+                    tip != nullptr ? tip->nHeight : -1,
+                    CATCHUP_EARLY_OWNERS_AHEAD)};
+                hole_pending = false;
                 if (!MayDuplicateStaleBlockRequest(pindex->GetBlockHash(),
                                                    GetTime<std::chrono::microseconds>(),
                                                    rerequest_stale_after,
-                                                   min_parallel_owners)) {
+                                                   parallel_owners)) {
                     if (waitingfor == -1) {
                         // This is the first already-in-flight block.
                         waitingfor = mapBlocksInFlight.lower_bound(pindex->GetBlockHash())->second.first;
