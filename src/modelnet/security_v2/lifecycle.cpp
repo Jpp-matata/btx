@@ -1,5 +1,6 @@
 // Copyright (c) 2026 The BTX developers. MIT license.
 #include <modelnet/security_v2/lifecycle.h>
+#include <modelnet/security_v2/mesh.h>
 #include <algorithm>
 namespace modelnet::security {
     namespace {
@@ -26,6 +27,7 @@ namespace modelnet::security {
         if(capsule.empty())return false;
         try {
             (void)AdmitCapsule(m_db,p,capsule,now);
+            if(m_db.Meta("mesh_required","0")=="1")MeshRequireLive(m_db,p,capsule,now);
             return true;
         }
         catch(...) {
@@ -131,6 +133,7 @@ namespace modelnet::security {
         Require(rows.size()==1&&rows[0][3]=="canary","SEC_NO_CANARY");
         const auto& row=rows[0];
         auto a=AdmitCapsule(m_db,p,row[0],now);
+        if(m_db.Meta("mesh_required","0")=="1")MeshRequireLive(m_db,p,row[0],now);
         CheckMandate(p,m_db.Get(row[4]),a,now);
         Require(DigestField(r,"composition")==a.composition_id&&DigestField(r,"runtime")==a.runtime&&
         DigestField(r,"request")==row[1],"SEC_CANARY_GENERATION");
@@ -162,6 +165,7 @@ namespace modelnet::security {
         const auto& row=rows[0];
         Require(ParseUInt(row[2])<=static_cast<uint64_t>(now),"SEC_CANARY_DURATION");
         auto a=AdmitCapsule(m_db,p,row[0],now);
+        if(m_db.Meta("mesh_required","0")=="1")MeshRequireLive(m_db,p,row[0],now);
         CheckMandate(p,m_db.Get(row[4]),a,now);
         auto update=m_db.Get(row[1]);
         p.Check(update,"release",m_db,now,p.release_threshold);

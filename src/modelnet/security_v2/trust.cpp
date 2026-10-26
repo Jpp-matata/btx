@@ -295,8 +295,18 @@ namespace modelnet::security {
                 "realm","policy_epoch","operation","nonce","issued_ms","expires_ms"
             });
             Fresh(b,now,60000);
-            Require(Text(b,"operation")=="resume","SEC_CONTROL");
+            Require(Text(b,"operation")=="resume"||Text(b,"operation")=="mesh-enroll","SEC_CONTROL");
             Require(Unhex(Text(b,"nonce",64),32).size()==32,"SEC_NONCE");
+        }
+        else if(kind=="campaign") {
+            p.Check(e,"owner",db,now);
+            Fields(b,{"realm","policy_epoch","composition","package","suite","sample_commitment","gate",
+                      "interval_ms","max_rounds","issued_ms","expires_ms"});
+            Fresh(b,now,366ull*86400000);
+            for(auto field:{"composition","package","suite","sample_commitment"})DigestField(b,field);
+            Require(std::find(p.gates.begin(),p.gates.end(),Text(b,"gate"))!=p.gates.end(),"SEC_GATE");
+            Require(UInt(b,"interval_ms",86400000)>=2000,"SEC_CAMPAIGN_INTERVAL");
+            Require(UInt(b,"max_rounds",100000)>0,"SEC_CAMPAIGN_ROUNDS");
         }
         else if(kind=="challenge") {
             p.Check(e,"coordinator",db,now);
@@ -310,6 +320,29 @@ namespace modelnet::security {
             })DigestField(b,n);
             Require(std::find(p.gates.begin(),p.gates.end(),Text(b,"gate"))!=p.gates.end(),"SEC_GATE");
             Require(UInt(b,"trial_limit",p.trial_limit)>0,"SEC_TRIAL_LIMIT");
+        }
+        else if(kind=="work") {
+            p.Check(e,"coordinator",db,now);
+            Fields(b,{"realm","policy_epoch","composition","capsule","package","purpose","input_sha384",
+                      "expected_output_sha384","target_host","nonce","max_output_bytes","issued_ms","expires_ms"});
+            Fresh(b,now,p.evidence_ttl_ms);
+            for(auto f:{"composition","capsule","package","input_sha384","expected_output_sha384"})DigestField(b,f);
+            const auto purpose=Text(b,"purpose",32);
+            Require(purpose=="inference"||purpose=="training"||purpose=="verification","SEC_WORK_PURPOSE");
+            Text(b,"target_host",128);
+            Require(Unhex(Text(b,"nonce",64),32).size()==32,"SEC_WORK_NONCE");
+            Require(UInt(b,"max_output_bytes",16384)>0,"SEC_WORK_OUTPUT_BOUND");
+        }
+        else if(kind=="result") {
+            p.Check(e,"worker",db,now);
+            Fields(b,{"realm","policy_epoch","work","purpose","composition","package","receipt","host",
+                      "outcome","output_sha384","output_bytes","issued_ms","expires_ms"});
+            Fresh(b,now,p.evidence_ttl_ms);
+            for(auto f:{"work","composition","package","receipt","output_sha384"})DigestField(b,f);
+            Text(b,"host",128);Text(b,"purpose",32);
+            const auto outcome=Text(b,"outcome",32);
+            Require(outcome=="PASS"||outcome=="FAIL"||outcome=="BLOCKED","SEC_WORK_RESULT_OUTCOME");
+            UInt(b,"output_bytes",16384);
         }
         else if(kind=="lease") {
             p.Check(e,"coordinator",db,now);

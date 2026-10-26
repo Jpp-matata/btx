@@ -8,7 +8,7 @@ namespace modelnet::security {
             "schema","workspaces","packages","host"
         },
         {
-            "evaluation_plans","runtimes","identity","peer_identity","execution_policy"
+            "evaluation_plans","runtimes","identity","peer_identity","execution_policy","continuous_security","remote_work"
         });
         Require(Text(c,"schema")=="BTX/SecurityLocal/v1","SEC_LOCAL_VERSION");
         return c;

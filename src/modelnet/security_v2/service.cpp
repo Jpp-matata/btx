@@ -1,6 +1,9 @@
 // Copyright (c) 2026 The BTX developers. MIT license.
 #include <modelnet/security_v2/service.h>
+#include <modelnet/security_v2/mesh.h>
+#include <modelnet/security_v2/work.h>
 #include <chrono>
+#include <algorithm>
 #include <map>
 #include <set>
 #include <sstream>
@@ -154,6 +157,10 @@ namespace modelnet::security {
                 });
                 return broker.Execute(Text(request,"secret",64),request["context"],request["request"],now);
             }
+            if(op=="work") {
+                Fields(request,{"op","id"});
+                return ExecuteMeshWork(db,DigestField(request,"id"),now);
+            }
             if(op=="evaluate") {
                 Fields(request, {
                     "op","challenge"
@@ -234,6 +241,7 @@ namespace modelnet::security {
                     const auto now=NowMs();
                     if(!db.Meta("active_policy").empty()) {
                         const auto p=Policy::Load(db,now);
+                        MeshTick(db,now);
                         Lifecycle lifecycle(db);
                         lifecycle.Tick(now);
                         auto local=ReadLocalConfig(db);
@@ -281,6 +289,27 @@ namespace modelnet::security {
                                         Submit(r,true,name);
                                     }
                                 }
+                            }
+                        }
+                        if(local["remote_work"].isObject()&&
+                           local["remote_work"]["enabled"].isBool()&&
+                           local["remote_work"]["enabled"].get_bool()&&
+                           db.Meta("paused","0")=="0"){
+                            const auto me=LoadLocalIdentity(db,p,"worker",now);
+                            const auto worker=KeyId(me.public_key);
+                            for(const auto& row:db.Query("SELECT id FROM objects WHERE kind='work' ORDER BY id LIMIT 64")){
+                                MeshTables(db);
+                                const auto work=db.Get(row[0]);
+                                const auto& body=work["body"];
+                                const auto target=Text(body,"target_host",128);
+                                if(target!="any"&&target!=Text(local,"host",128))continue;
+                                if(!db.Query("SELECT work FROM mesh_work_runs WHERE work=? AND worker=?",{row[0],worker}).empty())continue;
+                                auto pkgs=StringArray(local["remote_work"]["packages"],128);
+                                if(std::find(pkgs.begin(),pkgs.end(),DigestField(body,"package"))==pkgs.end())continue;
+                                const auto name="work:"+row[0];
+                                bool running;
+                                {std::lock_guard lock(mutex);running=internal_running.contains(name);}
+                                if(!running){Json r=Object();r.pushKV("op","work");r.pushKV("id",row[0]);Submit(r,true,name);}
                             }
                         }
                         Database::Transaction tx(db);
@@ -359,7 +388,7 @@ namespace modelnet::security {
             const auto op=Text(r,"op",64);
             Database db(m->root);
             const auto now=NowMs();
-            if(op=="execute"||op=="evaluate"||op=="canary"||op=="resident-import"||op=="stage")return m->Submit(r);
+            if(op=="execute"||op=="evaluate"||op=="canary"||op=="resident-import"||op=="stage"||op=="work")return m->Submit(r);
             if(op=="status") {
                 Fields(r, {
                     "op"
@@ -375,6 +404,8 @@ namespace modelnet::security {
                 out.pushKV("maintenance_error",db.Meta("maintenance_error"));
                 out.pushKV("release_qualification","NOT_ESTABLISHED_BY_COMPONENT_SERVICE");
                 out.pushKV("model_safety_proven",false);
+                out.pushKV("multi_host_security",MeshStatus(db,now));
+                out.pushKV("continuous_protection_required",db.Meta("mesh_required","0")=="1");
                 out.pushKV("protected_execution_scope","SECURITY_V2_BROKER_AND_LINUX_STATIC_FD_ONLY");
                 out.pushKV("legacy_generatemodel_mediated",false);
                 out.pushKV("general_gpu_runtime_qualified",false);
@@ -458,6 +489,38 @@ namespace modelnet::security {
                     "op","job"
                 });
                 return m->Take(db,DigestField(r,"job"),op=="take");
+            }
+            if(op=="work-quorum"){
+                Fields(r,{"op","id"});
+                auto out=VerifyMeshWorkQuorum(db,DigestField(r,"id"),now);
+                out.pushKV("ok",true);return out;
+            }
+            if(op=="mesh-enroll") {
+                Fields(r,{"op","record"});
+                const auto p=Policy::Load(db,now);
+                const auto& record=r["record"];
+                Require(Text(record,"kind")=="control"&&Text(record["body"],"operation")=="mesh-enroll",
+                        "SEC_MESH_ENROLL_CONTROL");
+                Require(MeshEnabled(db),"SEC_MESH_OWNER_CONFIG_ABSENT");
+                ImportRecord(db,p,record,now);
+                Database::Transaction tx(db);
+                const auto id=RecordId(record);
+                Require(db.Query("SELECT id FROM consumed_controls WHERE id=?",{id}).empty(),"SEC_MESH_ENROLL_REPLAY");
+                db.Exec("INSERT INTO consumed_controls(id,at_ms) VALUES(?,?)",{id,std::to_string(now)});
+                db.SetMeta("mesh_required","1");
+                db.Exec("UPDATE permits SET phase='revoked' WHERE phase='prepared'");
+                db.Event("mesh-enrolled",id,Object());tx.Commit();return Ok();
+            }
+            if(op=="mesh-export") {
+                Fields(r,{"op","id"});
+                MeshExport(db,DigestField(r,"id"),now);
+                return Ok();
+            }
+            if(op=="mesh-status") {
+                Fields(r,{"op"});
+                auto status=MeshStatus(db,now);
+                status.pushKV("ok",true);
+                return status;
             }
             if(op=="publish") {
                 Fields(r, {

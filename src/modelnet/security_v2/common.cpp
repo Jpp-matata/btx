@@ -384,7 +384,7 @@ namespace modelnet::security {
         const auto kind=Text(e,"kind",32);
         static const std::set<std::string> kinds {
             "policy","composition","capsule","evaluation","challenge","channel","grant","revocation","peer","receipt",
-            "lease","work","result","mandate","control","anchor"
+            "lease","work","result","mandate","control","anchor","mesh","campaign"
         };
         Require(kinds.contains(kind),"SEC_RECORD_KIND");
         Require(e["body"].isObject()&&e["signatures"].isArray()&&e["signatures"].size()<=MAX_SIGNATURES,"SEC_ENVELOPE");

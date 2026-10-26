@@ -1,5 +1,6 @@
 // Copyright (c) 2026 The BTX developers. MIT license.
 #include <modelnet/security_v2/broker.h>
+#include <modelnet/security_v2/mesh.h>
 #include <algorithm>
 #include <array>
 #include <set>
@@ -281,7 +282,7 @@ namespace modelnet::security {
         Fields(c, {
             "schema","workspaces","packages","host"
         }, {
-            "evaluation_plans","runtimes","identity","peer_identity","execution_policy"
+            "evaluation_plans","runtimes","identity","peer_identity","execution_policy","continuous_security"
         });
         Require(Text(c,"schema")=="BTX/SecurityLocal/v1"&&c["workspaces"].isObject()&&c["packages"].isObject(),
         "SEC_LOCAL_CONFIG");
@@ -312,6 +313,7 @@ namespace modelnet::security {
             capsule=rows[0][0];
         }
         auto admission=AdmitCapsule(m_db,p,capsule,now);
+        if(m_db.Meta("mesh_required","0")=="1")MeshRequireLive(m_db,p,capsule,now);
         Require(admission.composition_id==composition&&admission.profile=="restricted-tools","SEC_PROFILE_DENIED");
         Require(DigestField(context,"runtime")==DigestField(g,"runtime")&&admission.runtime==DigestField(g,"runtime")&&DigestField(context,
         "tool_schema")==DigestField(g,"tool_schema")&&admission.tool_schema==DigestField(g,"tool_schema")&&Text(context,

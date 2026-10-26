@@ -4,6 +4,7 @@
 
 #include <modelnet/helper.h>
 #include <modelnet/security_v2/peer.h>
+#include <modelnet/security_v2/mesh.h>
 
 #include <modelnet/admission_routes.h>
 
@@ -2707,6 +2708,24 @@ bool HandleNativeRequest(ModelCatalog& cat, const NativeRequest& req, NativeResp
     EnsureSafetyBound(HelperDir(cat));
     const std::string root{MODEL_HTTP_ROOT};
 
+    if (req.path == root + "security/mesh") {
+        // Existing PQ1 transport owns req.transport_pin. Never use a claimed pin
+        // from user-provided headers or the signed application body itself.
+        resp.status = 403;
+        resp.body = "{\"ok\":false,\"error\":\"SEC_MESH_DENIED\"}";
+        if (req.method != "POST" || req.body.size() > security::MAX_MESH_PACKET || req.transport_pin.empty()) return true;
+        try {
+            const auto directory = security::NativePath((HelperDir(cat) / "security").utf8string());
+            if (!security::fs::exists(directory / "root-pins.json")) return true;
+            security::Database db(directory);
+            const auto message = security::Parse(req.body, security::MAX_MESH_PACKET);
+            resp.body = security::Canonical(security::MeshHandle(db, message, req.transport_pin, security::NowMs()));
+            resp.status = 200;
+        } catch (...) {
+            // Indistinguishable absent, unenrolled, wrong-pin and malformed.
+        }
+        return true;
+    }
     if (req.path == root + "security/evidence") {
         // Only signed public evidence crosses the peer boundary. The PQ1 pin
         // is populated by HandlePq1Fd, never accepted from a body/header.
@@ -9026,6 +9045,23 @@ bool DispatchHelperRpc(ModelCatalog& cat, const UniValue& request, UniValue& res
         return true;
     }
     if (method == "loadmodel") {
+#ifdef BTX_MODEL_SECURITY_V2
+        try {
+            const auto security_root = security::NativePath((HelperDir(cat) / "security").utf8string());
+            if (security::fs::exists(security_root / "root-pins.json")) {
+                security::Database security_db(security_root);
+                if (security_db.Meta("mesh_required", "0") == "1") {
+                    err_code = "SEC_UNPROTECTED_RUNTIME_DENIED";
+                    err = "Continuous protection requires a qualified mediated model runtime; legacy load/generate is not mediated";
+                    return false;
+                }
+            }
+        } catch (...) {
+            err_code = "SEC_PROTECTION_STATE_UNAVAILABLE";
+            err = "Unable to verify continuous model-runtime protection";
+            return false;
+        }
+#endif
         const Digest48 id = ResolveUserId(Arg(0).get_str(), err);
         CatalogEntry e;
         if (id.IsNull() || !cat.Find(id, e)) {
@@ -9173,6 +9209,23 @@ bool DispatchHelperRpc(ModelCatalog& cat, const UniValue& request, UniValue& res
         return true;
     }
     if (method == "generatemodel") {
+#ifdef BTX_MODEL_SECURITY_V2
+        try {
+            const auto security_root = security::NativePath((HelperDir(cat) / "security").utf8string());
+            if (security::fs::exists(security_root / "root-pins.json")) {
+                security::Database security_db(security_root);
+                if (security_db.Meta("mesh_required", "0") == "1") {
+                    err_code = "SEC_UNPROTECTED_RUNTIME_DENIED";
+                    err = "Continuous protection requires a qualified mediated model runtime; legacy load/generate is not mediated";
+                    return false;
+                }
+            }
+        } catch (...) {
+            err_code = "SEC_PROTECTION_STATE_UNAVAILABLE";
+            err = "Unable to verify continuous model-runtime protection";
+            return false;
+        }
+#endif
         const Digest48 id = ResolveUserId(Arg(0).get_str(), err);
         CatalogEntry e;
         if (id.IsNull() || !cat.Find(id, e)) {
@@ -11698,10 +11751,28 @@ static void GossipSecurityOnSession(Pq1Session& sess, ModelCatalog& cat)
         request.body = security::Canonical(security::MakePeerRequest(db, recipient, security::NowMs()));
         NativeResponse response;
         std::string error;
-        if (!sess.Request(request, response, error) || response.status != 200 ||
-            response.body.size() > security::MAX_PEER_BYTES) return;
-        security::AcceptPeerResponse(db, security::Parse(response.body, security::MAX_PEER_BYTES),
+        // Public registry evidence is optional. Realm-scoped protective work
+        // MUST still synchronize if the public evidence request fails.
+        if (sess.Request(request, response, error) && response.status == 200 &&
+            response.body.size() <= security::MAX_PEER_BYTES) {
+            try { security::AcceptPeerResponse(db, security::Parse(response.body, security::MAX_PEER_BYTES),
+                                               sess.transport_pin, security::NowMs()); }
+            catch (...) { /* independent mesh attempt still follows */ }
+        }
+        // Signed, enrolled per-realm work/evidence overlay on the same PQ1 session.
+        // No new socket or daemon; no private prompt or wallet data is sent.
+        try {
+            NativeRequest mesh;
+            mesh.method = "POST";
+            mesh.path = std::string(MODEL_HTTP_ROOT) + "security/mesh";
+            mesh.body = security::Canonical(security::MeshRequest(db, recipient, security::NowMs()));
+            NativeResponse reply;
+            std::string why;
+            if (sess.Request(mesh, reply, why) && reply.status == 200 &&
+                reply.body.size() <= security::MAX_MESH_PACKET)
+                security::MeshAccept(db, security::Parse(reply.body, security::MAX_MESH_PACKET),
                                      sess.transport_pin, security::NowMs());
+        } catch (...) { /* policy and signed errors fail closed without stopping money */ }
     } catch (...) {
         // No trust-on-first-use, no policy download, no spend, no node failure.
     }
