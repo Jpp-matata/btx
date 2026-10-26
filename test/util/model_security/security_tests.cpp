@@ -316,8 +316,12 @@ int main(int argc,char** argv) {
         }
         stage="live-quorum";
         MeshRequireLive(f.db,Policy::Load(f.db,NowMs()),f.capsule,NowMs());
-        Check(MeshStatus(f.db,NowMs())["authenticated_recent_peer_sessions"].getInt<uint64_t>()==2,
+        const auto live=MeshStatus(f.db,NowMs());
+        Check(live["authenticated_recent_peer_sessions"].getInt<uint64_t>()==2,
               "signed evaluator liveness missing");
+        // Two databases in one process are not a second organization or a release.
+        Check(!live["qualified_production"].get_bool(),"one process must not qualify production");
+        Check(!live["physical_host_independence_proven"].get_bool(),"enrollment is not physical-host evidence");
         f.db.Exec("UPDATE mesh_live SET seen_ms=1 WHERE peer=?",{b.peer});
         Reject([&]{MeshRequireLive(f.db,Policy::Load(f.db,NowMs()),f.capsule,NowMs());},
                "SEC_MESH_PEER_OFFLINE");

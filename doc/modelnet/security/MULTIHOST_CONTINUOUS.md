@@ -47,6 +47,11 @@ or new public security socket. Existing monetary consensus is not changed.
       tool/activation denied if peer evidence stale   <--signed--+-- sandboxed report
 ```
 
+The node-owned guard's first handshake waits up to five seconds while the
+private directory and database open. Later health checks keep the short
+exchange budget. A guard that does not answer fails closed and does not stop
+money.
+
 The mesh transmits signed `campaign`, `challenge`, `evaluation`, `receipt`,
 `composition`, `capsule`, `work`, `result`, `channel`, `revocation` and `anchor`
 records only under strict per-realm identities and explicit export rules.
@@ -142,7 +147,12 @@ when peer leases expire. It also checks peer replay and wrong PQ1 pins.
 All these fixture identities ran **on one physical Linux host**. They establish
 component execution and inter-node protocol logic, **not** live WAN, distinct
 machine hardware, separate independent operators, useful LLM inference or
-production security qualification.
+production security qualification. A Release build of `btxd`, `btx-modeld`, and
+`btx-guardd` on that same host also ran `feature_model_security_v2.py`: the
+default owner status has no policy, no automatic spend, continuous protection
+off, and both production and physical-host qualification flags false. The
+private guard IPC checks completed their handshake. Neither run is a second
+physical host, a GPU pass, or a Windows or macOS result.
 
 ## Real deployment qualification that must still be performed
 

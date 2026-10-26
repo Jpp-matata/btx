@@ -151,10 +151,10 @@ public:
         failures=std::min(failures+1,7U);
         next_attempt=Clock::now()+std::chrono::milliseconds(std::min(60000U,500U<<failures));
     }
-    bool Transport(const std::string& line, std::string& reply)
+    bool Transport(const std::string& line, std::string& reply, std::chrono::milliseconds budget=EXCHANGE_TIMEOUT)
     {
         if (line.empty() || line.size()>GuardTable::kMaxLine || line.find_first_of("\r\n\0",0,3)!=std::string::npos) return false;
-        const auto deadline=Clock::now()+EXCHANGE_TIMEOUT;
+        const auto deadline=Clock::now()+budget;
         const std::string bytes=line+"\n";
         size_t sent=0; reply.clear();
 #ifdef _WIN32
@@ -323,7 +323,9 @@ public:
         status.pid=child;
 #endif
         std::string reply;
-        if(!Transport("PING",reply) || reply!="READY BTX_GUARD/1"){Failed("GUARD_NOT_READY");return false;}
+        // The first reply waits out private-directory and database setup.
+        // Later health checks keep the short exchange budget.
+        if(!Transport("PING",reply,std::chrono::seconds(5)) || reply!="READY BTX_GUARD/1"){Failed("GUARD_NOT_READY");return false;}
         status.ready=true;status.error.clear();last_ping=Clock::now();ready_since=last_ping;return true;
     }
 };

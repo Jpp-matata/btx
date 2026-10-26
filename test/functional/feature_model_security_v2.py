@@ -31,6 +31,12 @@ class ModelSecurityV2Test(BitcoinTestFramework):
         assert_equal(first["automatic_spend_atoms"], "0")
         assert_equal(first["model_safety_proven"], False)
         assert_equal(first["legacy_generatemodel_mediated"], False)
+        assert_equal(first["general_gpu_runtime_qualified"], False)
+        assert_equal(first["continuous_protection_required"], False)
+        mesh = first["multi_host_security"]
+        assert_equal(mesh["enabled"], False)
+        assert_equal(mesh["qualified_production"], False)
+        assert_equal(mesh["physical_host_independence_proven"], False)
         assert_equal(first["journal_valid"], True)
         assert_equal(node.modelsecurity({"op": "arbitrary-shell", "command": "not executed"})["ok"], False)
         assert_equal(node.modelsecurity({"op": "pause"})["ok"], True)
