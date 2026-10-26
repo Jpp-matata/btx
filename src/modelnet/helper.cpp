@@ -3,6 +3,7 @@
 // file COPYING or https://opensource.org/license/mit/.
 
 #include <modelnet/helper.h>
+#include <modelnet/security_v2/peer.h>
 
 #include <modelnet/admission_routes.h>
 
@@ -2705,6 +2706,27 @@ bool HandleNativeRequest(ModelCatalog& cat, const NativeRequest& req, NativeResp
     resp.content_type = "application/json";
     EnsureSafetyBound(HelperDir(cat));
     const std::string root{MODEL_HTTP_ROOT};
+
+    if (req.path == root + "security/evidence") {
+        // Only signed public evidence crosses the peer boundary. The PQ1 pin
+        // is populated by HandlePq1Fd, never accepted from a body/header.
+        resp.status = 403;
+        resp.body = "{\"ok\":false,\"error\":\"SEC_PEER_DENIED\"}";
+        if (req.method != "POST" || req.body.size() > security::MAX_PEER_BYTES || req.transport_pin.empty()) return true;
+        try {
+            const auto directory = security::NativePath((HelperDir(cat) / "security").utf8string());
+            if (!security::fs::exists(directory / "root-pins.json")) return true;
+            security::Database db(directory);
+            const auto request = security::Parse(req.body, security::MAX_PEER_BYTES);
+            resp.body = security::Canonical(security::HandlePeerRequest(db, request, req.transport_pin, security::NowMs()));
+            resp.status = 200;
+        } catch (...) {
+            // Unknown subject, private record, bad signature and missing local
+            // policy are deliberately indistinguishable to remote callers.
+        }
+        return true;
+    }
+
     if (req.path.find("btxcapability") != std::string::npos || req.path.find("capability") != std::string::npos ||
         req.path.find("btxlock") != std::string::npos || req.path.find("tensormap") != std::string::npos ||
         req.path.find("hcp") != std::string::npos) {
@@ -11652,6 +11674,39 @@ static void RefreshAutoStorage(HelperConfig& cfg, ModelCatalog* cat)
     RefreshAdvertisedHost(cat);
 }
 
+
+static void GossipSecurityOnSession(Pq1Session& sess, ModelCatalog& cat)
+{
+    try {
+        const auto directory = security::NativePath((HelperDir(cat) / "security").utf8string());
+        if (!security::fs::exists(directory / "root-pins.json")) return;
+        security::Database db(directory);
+        const auto policy = security::Policy::Load(db, security::NowMs());
+        std::string recipient;
+        for (const auto& [id, principal] : policy.principals) {
+            if (principal.roles.contains("peer") && !principal.transport_pin.empty() &&
+                principal.transport_pin == sess.transport_pin) {
+                // An ambiguous enrollment is not resolved by map order.
+                if (!recipient.empty()) return;
+                recipient = id;
+            }
+        }
+        if (recipient.empty()) return;
+        NativeRequest request;
+        request.method = "POST";
+        request.path = std::string(MODEL_HTTP_ROOT) + "security/evidence";
+        request.body = security::Canonical(security::MakePeerRequest(db, recipient, security::NowMs()));
+        NativeResponse response;
+        std::string error;
+        if (!sess.Request(request, response, error) || response.status != 200 ||
+            response.body.size() > security::MAX_PEER_BYTES) return;
+        security::AcceptPeerResponse(db, security::Parse(response.body, security::MAX_PEER_BYTES),
+                                     sess.transport_pin, security::NowMs());
+    } catch (...) {
+        // No trust-on-first-use, no policy download, no spend, no node failure.
+    }
+}
+
 static void GossipPexOnSession(Pq1Session& sess, ModelCatalog& cat, const std::string& endpoint)
 {
     (void)cat;
@@ -11752,6 +11807,7 @@ static void TryPreserveRareTick(ModelCatalog& cat, Pq1Context& pq, const fs::pat
         sess.required_network = g_native_network;
         sess.network_verified = sess.ssl != nullptr;
         GossipPexOnSession(sess, cat, endpoint);
+        GossipSecurityOnSession(sess, cat);
         const UniValue models = (body.exists("local") && body["local"].exists("models")) ? body["local"]["models"] : UniValue(UniValue::VARR);
         if (!models.isArray() || models.size() > 4096) continue;
         NativePeerObservation observation;
