@@ -312,6 +312,63 @@ BOOST_AUTO_TEST_CASE(idempotency_replays_one_result_and_conflicts_on_a_different
     modelnet::ResetLabApi();
 }
 
+BOOST_AUTO_TEST_CASE(evicted_idempotency_key_is_not_reused)
+{
+    BOOST_REQUIRE(!m_path_root.empty());
+    TempTree root{m_path_root / "lab-lifecycle-idem-evict"};
+    LabDirEnv env(root.path);
+    PrepareDir(root.path);
+
+    UniValue first;
+    std::string err;
+    BOOST_REQUIRE(Call("lab.identity_create", Identity("kept", "lifecycle-evict-00"), first, err));
+    const std::string record = first["record_id"].get_str();
+    // Further identity creates would change the caller. Realm creates keep it,
+    // so the oldest key is retired under the same caller the retry will use.
+    for (int i = 1; i <= 64; ++i) {
+        UniValue realm(UniValue::VOBJ);
+        realm.pushKV("name", "evict");
+        realm.pushKV("nonce", "lifecycle-realm-" + std::to_string(i));
+        realm.pushKV("policy_template", "local");
+        realm.pushKV("idempotency_key", "lifecycle-realm-" + std::to_string(i));
+        realm.pushKV("expected_state", UniValue());
+        UniValue ignored;
+        BOOST_REQUIRE(Call("lab.realm_create", realm, ignored, err));
+    }
+
+    UniValue again;
+    BOOST_CHECK(!Call("lab.identity_create", Identity("kept", "lifecycle-evict-00"), again, err));
+    BOOST_CHECK_EQUAL(err, "BTX035_IDEMPOTENCY_EXPIRED");
+    BOOST_CHECK(!again.exists("record_id"));
+
+    modelnet::ReloadLabFromDisk();
+    UniValue restored;
+    BOOST_CHECK(!Call("lab.identity_create", Identity("kept", "lifecycle-evict-00"), restored, err));
+    BOOST_CHECK_EQUAL(err, "BTX035_IDEMPOTENCY_EXPIRED");
+
+    UniValue conflict;
+    BOOST_CHECK(!Call("lab.identity_create", Identity("other", "lifecycle-evict-00"), conflict, err));
+    BOOST_CHECK_EQUAL(err, "BTX035_IDEMPOTENCY");
+
+    UniValue disk;
+    BOOST_REQUIRE(disk.read(ReadFile(root.path / "lab.json")));
+    BOOST_CHECK_EQUAL(disk["identity_pk"].size(), 1);
+    BOOST_CHECK_EQUAL(disk["realms"].size(), 64);
+    BOOST_CHECK(disk.write().find(record) != std::string::npos);
+    bool retired = false;
+    for (size_t i = 0; i < disk["idempotency"].size(); ++i) {
+        const UniValue& row = disk["idempotency"][i];
+        if (row["key"].get_str() == "lifecycle-evict-00") {
+            BOOST_CHECK(row["retired"].isTrue());
+            BOOST_CHECK(row["result"].get_str().empty());
+            retired = true;
+        }
+    }
+    BOOST_CHECK(retired);
+
+    modelnet::ResetLabApi();
+}
+
 BOOST_AUTO_TEST_CASE(bounded_read_does_not_hold_the_lab_mutex)
 {
 #ifndef _WIN32

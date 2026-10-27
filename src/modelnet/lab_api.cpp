@@ -120,6 +120,7 @@ struct Store {
         std::string key;
         std::string digest;
         std::string result;
+        bool retired{false};
     };
     std::vector<IdemRow> idempotency;
     std::map<std::string, std::string> admission_subject;
@@ -297,6 +298,7 @@ void ImageFromStore(const Store& store, LabDiskImage& image)
         row.key = saved.key;
         row.digest = saved.digest;
         row.result = saved.result;
+        row.retired = saved.retired;
         image.idempotency.push_back(std::move(row));
     }
     std::vector<LabDiskObject> model_rows;
@@ -440,6 +442,7 @@ void ImageToStore(const LabDiskImage& image, Store& store)
         row.key = saved.key;
         row.digest = saved.digest;
         row.result = saved.result;
+        row.retired = saved.retired;
         store.idempotency.push_back(std::move(row));
     }
     store.trains.clear();
@@ -846,6 +849,8 @@ bool CheckRequest(const LabMethod& method, const UniValue& req, std::string& err
 }
 
 constexpr size_t kMaxIdempotency = 64;
+/** Keys past the live cap keep a digest-only tombstone so a retry cannot mint a second result. */
+constexpr size_t kMaxRetiredIdempotency = 256;
 
 std::string IdemCaller(const Store& store)
 {
@@ -860,6 +865,7 @@ bool Replay(const UniValue& req, const std::string& digest, std::string& respons
     for (const Store::IdemRow& row : State().idempotency) {
         if (row.caller != caller || row.key != key) continue;
         if (row.digest != digest) return Fail(err, "BTX035_IDEMPOTENCY");
+        if (row.retired) return Fail(err, "BTX035_IDEMPOTENCY_EXPIRED");
         response = row.result;
         return true;
     }
@@ -874,6 +880,8 @@ void Remember(const UniValue& req, const std::string& digest, const std::string&
     const std::string caller = IdemCaller(store);
     for (Store::IdemRow& row : store.idempotency) {
         if (row.caller != caller || row.key != key) continue;
+        // A dropped result cannot be rebuilt. Leave the tombstone in place.
+        if (row.retired) return;
         row.digest = digest;
         row.result = response;
         return;
@@ -884,7 +892,25 @@ void Remember(const UniValue& req, const std::string& digest, const std::string&
     row.digest = digest;
     row.result = response;
     store.idempotency.push_back(std::move(row));
-    while (store.idempotency.size() > kMaxIdempotency) store.idempotency.erase(store.idempotency.begin());
+    size_t live = 0;
+    for (const Store::IdemRow& saved : store.idempotency) {
+        if (!saved.retired) ++live;
+    }
+    for (Store::IdemRow& saved : store.idempotency) {
+        if (live <= kMaxIdempotency) break;
+        if (saved.retired) continue;
+        saved.retired = true;
+        saved.result.clear();
+        --live;
+    }
+    size_t retired = 0;
+    for (const Store::IdemRow& saved : store.idempotency) {
+        if (saved.retired) ++retired;
+    }
+    while (retired > kMaxRetiredIdempotency && !store.idempotency.empty() && store.idempotency.front().retired) {
+        store.idempotency.erase(store.idempotency.begin());
+        --retired;
+    }
 }
 
 UniValue EnvelopeResponse(const std::string& request_id, const UniValue& result)
