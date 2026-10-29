@@ -1884,6 +1884,42 @@ BOOST_FIXTURE_TEST_CASE(chainstate_trusted_mirror_reoffers_block_evicted_by_towe
     chainman.CheckBlockIndex();
 }
 
+//! The mirror sits on a heavier unsigned branch. The signers sign the first
+//! block of the other branch, and the mirror leaves its tip for that
+//! less-work block. Its child was never offered: the old tip outranked it.
+//! On the less-work tip it is the tip's child and must be a candidate.
+BOOST_FIXTURE_TEST_CASE(chainstate_trusted_mirror_offers_child_after_moving_to_less_work_signed_block, TestChain100Setup)
+{
+    GateRefusalMirror mirror{*this};
+    ChainstateManager& chainman{mirror.chainman()};
+    const CScript script_network{GetScriptForDestination(PKHash(coinbaseKey.GetPubKey()))};
+    const CScript script_other{GateRefusalMirror::NewScript()};
+
+    CBlockIndex* const signed_block{mirror.Mine(script_other)};
+    CBlockIndex* const child{mirror.Mine(script_other)};
+    mirror.SetAside(signed_block);
+    for (int i = 0; i < 3; ++i) mirror.Mine(script_network);
+    CBlockIndex* const heavier_tip{mirror.Tip()};
+    mirror.Configure();
+    mirror.Sign(signed_block);
+
+    mirror.Offer(signed_block);
+    BOOST_REQUIRE(child->nChainWork < heavier_tip->nChainWork);
+    BOOST_REQUIRE(!mirror.IsCandidate(child));
+    BOOST_REQUIRE(WITH_LOCK(::cs_main, return chainman.FindUniqueCompetingAttestedIndex()) == signed_block);
+    chainman.CheckBlockIndex();
+
+    mirror.ActivateBestChain();
+    BOOST_CHECK_EQUAL(mirror.Tip(), signed_block);
+    BOOST_CHECK(mirror.IsCandidate(child));
+    chainman.CheckBlockIndex();
+
+    mirror.Sign(child);
+    mirror.ActivateBestChain();
+    BOOST_CHECK_EQUAL(mirror.Tip(), child);
+    chainman.CheckBlockIndex();
+}
+
 BOOST_FIXTURE_TEST_CASE(chainstate_unattested_heavier_tip_abandons_for_attested, TestChain100Setup)
 {
     // Operator report: a node already sitting on a heavier unattested fork

@@ -10965,6 +10965,22 @@ bool Chainstate::ActivateBestChainStep(BlockValidationState& state, CBlockIndex*
     // refused while on a signed twin, or connected a signed block whose
     // unsigned child it refused while that child was two above the tip.
     if (m_chain.Tip() != pindexOldTip) ReofferTrustedMirrorGateRefusals();
+    // A trusted mirror can leave a heavier unattested tip for a less-work
+    // attested one. Blocks that the old tip outranked were never offered;
+    // offer them now, as InvalidateBlock does after it lowers the tip.
+    // Trusted mirrors only, so other nodes do not pay for the scan.
+    if (pindexOldTip != nullptr && m_chain.Tip() != nullptr &&
+        m_chain.Tip()->nChainWork < pindexOldTip->nChainWork &&
+        node::matmul_trusted::IsTrustedMirror()) {
+        for (auto& [_, block_index] : m_blockman.m_block_index) {
+            if (block_index.IsValid(BLOCK_VALID_TRANSACTIONS) &&
+                block_index.HaveNumChainTxs() &&
+                !setBlockIndexCandidates.value_comp()(&block_index, m_chain.Tip()) &&
+                !m_chainman.IsOnParkedReorgBranch(&block_index)) {
+                TryAddBlockIndexCandidate(&block_index);
+            }
+        }
+    }
 
     CheckForkWarningConditions();
 
