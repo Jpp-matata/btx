@@ -13158,6 +13158,16 @@ const CBlockIndex* ChainstateManager::FindUniqueCompetingAttestedIndex() const
                     });
                 });
                 if (on_frontier.empty()) return nullptr;
+            } else if (frontiers.size() > 1 && tip_has_quorum) {
+                // A signed tip on none of two or more blocks at the highest
+                // signed height: which branch the signers follow is open. A
+                // header-only one adds no candidate of its own (consider()
+                // skips it or walks it down to the shared parent), so keeping
+                // only the candidates on a frontier chain would drop a lower
+                // signed twin and pick by body arrival and hash order. Stay
+                // put, as when both have a body. A tip without authority (an
+                // unsigned tower) is not held here and still rejoins.
+                return nullptr;
             }
             if (!on_frontier.empty()) competing = std::move(on_frontier);
         }
