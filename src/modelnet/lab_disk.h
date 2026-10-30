@@ -106,6 +106,8 @@ struct LabDiskImage {
         std::string key;
         std::string digest;
         std::string result;
+        /** Result dropped after the live cap. A retry must not run as a new request. */
+        bool retired{false};
     };
     std::vector<IdempotencyRow> idempotency;
     /** Admission id to model id, a newline, and the digest. Absent on an older file. */

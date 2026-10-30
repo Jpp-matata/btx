@@ -436,16 +436,19 @@ void StartSwarmObserver(const fs::path& modeldir)
                 } else {
                     const bool catalog_changed = !generation.seen || now.catalog != generation.catalog ||
                                                  now.mappings != generation.mappings;
-                    // Reconcile live observations even if a dead helper stops
-                    // changing its snapshot: expired peers must disappear.
-                    const bool mesh_changed = !generation.seen || now.device != generation.device || now.peers != generation.peers ||
-                                              now.native != generation.native || now.native != "missing";
+                    // Device, peer, and native fingerprints drive offers and publication.
+                    // An existing native snapshot is not itself a change: its digest stays
+                    // put while wall-clock peer expiry still has to run.
+                    const bool mesh_files_changed = !generation.seen || now.device != generation.device ||
+                                                    now.peers != generation.peers || now.native != generation.native;
+                    const bool peer_clock = generation.seen && !mesh_files_changed && now.native != "missing" &&
+                                            now.native != "skipped" && now.native != "limit";
                     bool retain = true;
                     if (catalog_changed) {
                         ok = SwarmObserveCatalog(modeldir, err);
                         if (!ok) retain = false;
                     }
-                    if (ok && (catalog_changed || mesh_changed)) {
+                    if (ok && (catalog_changed || mesh_files_changed)) {
                         std::string mesh_err;
                         const bool mesh_ok = SwarmRefreshLocalMesh(modeldir, mesh_err);
                         report("swarm mesh", mesh_ok, mesh_err);
@@ -468,6 +471,13 @@ void StartSwarmObserver(const fs::path& modeldir)
                             report("swarm live", live_ok, live_err);
                             if (!live_ok) retain = false;
                         }
+                    } else if (ok && peer_clock) {
+                        // Expiry is computed from observed_at_ms, so the mesh document can
+                        // change without any input file changing. Do not republish the catalog.
+                        std::string mesh_err;
+                        const bool mesh_ok = SwarmRefreshLocalMesh(modeldir, mesh_err);
+                        report("swarm mesh", mesh_ok, mesh_err);
+                        if (!mesh_ok) retain = false;
                     }
                     if (ok && retain) {
                         now.seen = true;
