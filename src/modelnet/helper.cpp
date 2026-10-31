@@ -63,6 +63,7 @@
 #include <tinyformat.h>
 #include <logging.h>
 #include <netaddress.h>
+#include <netbase.h>
 #include <util/fs.h>
 #include <util/strencodings.h>
 
@@ -73,6 +74,7 @@
 #include <openssl/rand.h>
 #include <openssl/ssl.h>
 #include <openssl/x509.h>
+#include <openssl/x509v3.h>
 
 #include <arpa/inet.h>
 #include <cerrno>
@@ -95,6 +97,7 @@
 #include <cstdint>
 #include <cstddef>
 #include <cstdio>
+#include <deque>
 #include <cstdlib>
 #include <functional>
 #include <cstring>
@@ -111,6 +114,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <queue>
 #include <set>
 #include <sstream>
@@ -134,11 +138,40 @@ bool LooksLikeTmpFallbackSock(const fs::path& sock)
     return s.find("/tmp/btx-md-") != std::string::npos || s.find("/var/tmp/btx-md-") != std::string::npos;
 }
 
+#if !defined(WIN32) && !defined(__APPLE__)
+// Only `owner` (and root) can add entries: a real directory, not a symlink,
+// owned by `owner`, with no group or other write bit.
+bool OwnerOnlyDir(const fs::path& dir, uid_t owner)
+{
+    struct stat st {};
+    return ::lstat(fs::PathToString(dir).c_str(), &st) == 0 && S_ISDIR(st.st_mode) && st.st_uid == owner &&
+           (st.st_mode & (S_IWGRP | S_IWOTH)) == 0;
+}
+#endif
+
 fs::path RuntimeSockDir()
 {
     const char* xdg = std::getenv("XDG_RUNTIME_DIR");
-    if (!xdg || xdg[0] != '/') return {};
-    return fs::PathFromString(xdg) / "btx-modeld";
+    if (xdg && xdg[0] == '/') return fs::PathFromString(xdg) / "btx-modeld";
+#ifdef __APPLE__
+    // macOS sets no XDG_RUNTIME_DIR. The per-user temporary directory
+    // (/var/folders/.../T/) belongs to the user, is mode 0700, and is short
+    // enough for sun_path. ListenUnix() still makes btx-modeld/ 0700 inside it.
+    char tmp[1024];
+    const size_t n = ::confstr(_CS_DARWIN_USER_TEMP_DIR, tmp, sizeof(tmp));
+    if (n > 1 && n <= sizeof(tmp) && tmp[0] == '/') return fs::PathFromString(tmp) / "btx-modeld";
+#elif !defined(WIN32)
+    // XDG_RUNTIME_DIR is often missing under cron, su, sudo and in
+    // containers. Use the login runtime directory it would have named, or
+    // /run for root. Nobody else can add entries to either, so btx-modeld/
+    // cannot be pre-created there by another user; ListenUnix() still makes
+    // it 0700 and checks its owner.
+    const uid_t uid = ::getuid();
+    const fs::path user_run = fs::PathFromString(strprintf("/run/user/%u", static_cast<unsigned>(uid)));
+    if (OwnerOnlyDir(user_run, uid)) return user_run / "btx-modeld";
+    if (uid == 0 && OwnerOnlyDir(fs::PathFromString("/run"), 0)) return fs::PathFromString("/run/btx-modeld");
+#endif
+    return {};
 }
 
 } // namespace
@@ -936,6 +969,7 @@ RouterCache& RecordsFor(const ModelCatalog& cat)
                 cache.Insert(h, now, e);
             }
         }
+        cache.MarkSaved();
     }
     return cache;
 }
@@ -957,8 +991,14 @@ bool PersistRecords(const ModelCatalog& cat, RouterCache& cache)
         arr.push_back(o);
     }
     std::string err;
-    return WriteJsonFile(HelperDir(cat) / "records.json", arr, err);
+    if (!WriteJsonFile(HelperDir(cat) / "records.json", arr, err)) return false;
+    cache.MarkSaved();
+    return true;
 }
+
+/** Peer announces leave records.json to RunModelDaemon, which writes it at most
+ *  this often and on stop. Each write is the whole cache. */
+constexpr int RECORDS_SAVE_INTERVAL_S{60};
 
 UniValue HintJson(const SignedRecordHint& h)
 {
@@ -1148,6 +1188,9 @@ ModelSearchRecord DraftSearchFromCatalog(const CatalogEntry& e)
     return rec;
 }
 
+/** Longest a record announced by a peer holds a record cache slot. */
+constexpr int64_t PEER_RECORD_MAX_HOLD_S{7 * DAY_SECONDS};
+
 bool AcceptSignedAnnounce(const UniValue& body, int64_t now, SignedRecordHint& h, std::string& err)
 {
     if (!body.exists("kind") || !body.exists("payload_hex") || !body.exists("sig_hex") || !body.exists("pubkey_hex")) {
@@ -1179,6 +1222,9 @@ bool AcceptSignedAnnounce(const UniValue& body, int64_t now, SignedRecordHint& h
     h.signed_ok = true;
     h.expiry = decoded.exists("expires_at") ? decoded["expires_at"].getInt<int64_t>() : 0;
     if (h.expiry == 0) h.expiry = now + 86400;
+    // The signer picks expires_at, so without a ceiling a peer's record could
+    // hold its slot for decades. The signed payload is kept unchanged.
+    h.expiry = std::min(h.expiry, now + PEER_RECORD_MAX_HOLD_S);
     h.provider_id = decoded.exists("signer_id") ? decoded["signer_id"].get_str() : ProviderId(*pk).Hex();
     return true;
 }
@@ -1569,6 +1615,8 @@ struct Pq1Session {
     bool outbound_held{false};
     /** Operator addmodelnode of 127.0.0.1/::1 (howto loopback seeder). PEX extras stay blocked. */
     bool allow_loopback{false};
+    /** A -modelpeer / addmodelnode endpoint. Like -addnode, -onlynet does not limit it. */
+    bool operator_named{false};
     std::string transport_pin;
     std::vector<std::pair<std::string, std::string>> piece_headers;
     /** Automatic retrieval keeps this authority across every pooled/reopened transport. */
@@ -1620,6 +1668,34 @@ struct Pq1Session {
             return false;
         }
         outbound_held = true;
+        Proxy proxy;
+        std::optional<CNetAddr> numeric;
+        const ModelDialRoute route{RouteModelDial(host, /*manual=*/operator_named, proxy, numeric, err)};
+        if (route == ModelDialRoute::REFUSED) {
+            Close();
+            return false;
+        }
+        if (route == ModelDialRoute::PROXY) {
+            // Only names and routable addresses get a proxy; local and private ones are dialed below.
+            if (IsForbiddenControlPort(port)) {
+                err = "non-public dial target";
+                Close();
+                return false;
+            }
+            fd = ConnectModelThroughProxy(proxy, host, port, err);
+            if (fd < 0) {
+                Close();
+                return false;
+            }
+            SetPq1SocketOpts(fd, true);
+            std::string try_err;
+            const std::string pin_key{numeric ? CService{*numeric, port}.ToStringAddrPort() : host + ":" + std::to_string(port)};
+            const HandshakeResult result{Handshake(ctx, pin_key, err, try_err)};
+            if (result == HandshakeResult::OK) return true;
+            if (result == HandshakeResult::NEXT) err = try_err;
+            Close();
+            return false;
+        }
         addrinfo hints{};
         hints.ai_socktype = SOCK_STREAM;
         hints.ai_family = AF_UNSPEC;
@@ -1674,6 +1750,10 @@ struct Pq1Session {
                 last_try_err = "non-public dial target";
                 continue;
             }
+            if (!operator_named && !g_reachable_nets.Contains(ModelOnlynetNetwork(resolved))) {
+                last_try_err = "network not reachable (-onlynet)";
+                continue;
+            }
             if (IsForbiddenOutboundDialAddr(resolved)) {
                 if (!(allow_loopback && resolved.IsLocal() && !resolved.IsBindAny())) {
                     last_try_err = "non-public dial target";
@@ -1704,46 +1784,54 @@ struct Pq1Session {
                 last_try_err = "connect failed";
                 continue;
             }
-            ssl = SSL_new(static_cast<SSL_CTX*>(ctx.SslCtx()));
-            if (!ssl) {
-                err = "SSL_new";
+            const HandshakeResult result{Handshake(ctx, resolved.ToStringAddrPort(), err, last_try_err)};
+            if (result == HandshakeResult::OK) return true;
+            if (result == HandshakeResult::FAIL) {
                 Close();
                 return false;
             }
-            SSL_set_fd(ssl, fd);
-            SSL_set_connect_state(ssl);
-            std::string herr;
-            if (!SslHandshake(ssl, fd, /*accept=*/false, handshake_ms, stop, herr)) {
-                last_try_err = herr.empty() ? "PQ1 handshake failed" : herr;
-                continue;
-            }
-            NegotiatedPq1 n;
-            InspectNegotiated(ssl, n);
-            if (!IsStrictPq1(n)) {
-                last_try_err = "negotiated parameters are not strict PQ1";
-                continue;
-            }
-            Digest48 pin;
-            std::string pinerr;
-            if (!ExtractPeerTransportPin(ssl, pin, pinerr)) {
-                last_try_err = pinerr.empty() ? "no peer certificate" : pinerr;
-                continue;
-            }
-            if (authorize_peer && !authorize_peer(host, port, pin.Hex(), err)) {
-                Close();
-                return false;
-            }
-            if (!pinfile.empty() && !CheckOrStorePin(pinfile, resolved.ToStringAddrPort(), pin, pinerr)) {
-                err = pinerr.empty() ? "peer cert pin mismatch (TOFU)" : pinerr;
-                Close();
-                return false;
-            }
-            transport_pin = pin.Hex();
-            return true;
         }
         err = last_try_err;
         Close();
         return false;
+    }
+
+    enum class HandshakeResult { OK, NEXT, FAIL };
+
+    /** Strict PQ1 over the connected fd, then the peer pin (TOFU under pin_key). NEXT: try the next address. */
+    HandshakeResult Handshake(Pq1Context& ctx, const std::string& pin_key, std::string& err, std::string& try_err)
+    {
+        ssl = SSL_new(static_cast<SSL_CTX*>(ctx.SslCtx()));
+        if (!ssl) {
+            err = "SSL_new";
+            return HandshakeResult::FAIL;
+        }
+        SSL_set_fd(ssl, fd);
+        SSL_set_connect_state(ssl);
+        std::string herr;
+        if (!SslHandshake(ssl, fd, /*accept=*/false, handshake_ms, stop, herr)) {
+            try_err = herr.empty() ? "PQ1 handshake failed" : herr;
+            return HandshakeResult::NEXT;
+        }
+        NegotiatedPq1 n;
+        InspectNegotiated(ssl, n);
+        if (!IsStrictPq1(n)) {
+            try_err = "negotiated parameters are not strict PQ1";
+            return HandshakeResult::NEXT;
+        }
+        Digest48 pin;
+        std::string pinerr;
+        if (!ExtractPeerTransportPin(ssl, pin, pinerr)) {
+            try_err = pinerr.empty() ? "no peer certificate" : pinerr;
+            return HandshakeResult::NEXT;
+        }
+        if (authorize_peer && !authorize_peer(host, port, pin.Hex(), err)) return HandshakeResult::FAIL;
+        if (!pinfile.empty() && !CheckOrStorePin(pinfile, pin_key, pin, pinerr)) {
+            err = pinerr.empty() ? "peer cert pin mismatch (TOFU)" : pinerr;
+            return HandshakeResult::FAIL;
+        }
+        transport_pin = pin.Hex();
+        return HandshakeResult::OK;
     }
 
     bool Ensure(std::string& err)
@@ -2010,6 +2098,13 @@ Digest48 IdFromUser(const std::string& s, std::string& err)
 
 } // namespace
 
+void FlushRecords(const ModelCatalog& cat)
+{
+    std::lock_guard<std::mutex> lock(g_ext_mu);
+    RouterCache& cache = RecordsFor(cat);
+    if (cache.Unsaved()) PersistRecords(cat, cache);
+}
+
 bool ParseHttpRequest(const std::string& raw, NativeRequest& req, std::string& err)
 {
     req = {};
@@ -2269,7 +2364,9 @@ void EnsureEconomy(ModelCatalog& cat)
     }
 }
 
-void PersistEconomy(ModelCatalog& cat)
+// g_search_mu must be held: Save() walks the index that Put() rewrites on
+// the other unix worker. The campaign lock is taken second, as elsewhere.
+static void PersistEconomyLocked(ModelCatalog& cat)
 {
     std::string err;
     (void)g_search_idx.Save(HelperDir(cat) / "search-index.json", err);
@@ -2280,6 +2377,12 @@ void PersistEconomy(ModelCatalog& cat)
         camps = g_campaigns.List();
     }
     (void)SaveCampaigns(HelperDir(cat), camps, err);
+}
+
+void PersistEconomy(ModelCatalog& cat)
+{
+    std::lock_guard<std::mutex> lock(g_search_mu);
+    PersistEconomyLocked(cat);
 }
 
 bool ReadCatalogBytes(ModelCatalog& cat, const CatalogEntry& e, std::vector<unsigned char>& out, std::string& err)
@@ -2312,13 +2415,17 @@ bool ReadCatalogBytes(ModelCatalog& cat, const CatalogEntry& e, std::vector<unsi
     return true;
 }
 
-FundingObservation ObservationFromHit(const SearchHit& h, const ReleaseCampaign* campaign, ModelCatalog* cat)
+/** include_wallet_observation=false leaves out g_chain_obs: those entries come from
+ *  btxd's join against the local wallets (ObserveReleaseFunding reads mapWallet), so
+ *  they must not reach a remote peer. */
+FundingObservation ObservationFromHit(const SearchHit& h, const ReleaseCampaign* campaign, ModelCatalog* cat,
+                                      bool include_wallet_observation = true)
 {
     FundingObservation f;
     f.funding_source = "OBSERVED_NETWORK_STATE";
     f.ciphertext_providers_observed = h.health.providers_observed;
     if (campaign) {
-        auto it = g_chain_obs.find(campaign->release_id.Hex());
+        auto it = include_wallet_observation ? g_chain_obs.find(campaign->release_id.Hex()) : g_chain_obs.end();
         if (it != g_chain_obs.end() && it->second.confirmed_known &&
             it->second.funding_source == "CHAIN_OBSERVATION") {
             f = it->second;
@@ -2359,12 +2466,12 @@ void FillKnownCatalogFields(ModelCatalog& cat, SearchHit& h)
     }
 }
 
-ModelEconomyEntry EconomyForHit(const SearchHit& h, ModelCatalog* cat = nullptr)
+ModelEconomyEntry EconomyForHit(const SearchHit& h, ModelCatalog* cat = nullptr, bool include_wallet_observation = true)
 {
     std::lock_guard<std::recursive_mutex> lock(g_campaign_mu);
     const ReleaseCampaign* c = g_campaigns.GetByModel(h.rec.model_id);
     if (!c && !h.rec.release_id.empty()) c = g_campaigns.GetByReleaseHex(h.rec.release_id);
-    return ComposeEconomyEntry(h, c, ObservationFromHit(h, c, cat));
+    return ComposeEconomyEntry(h, c, ObservationFromHit(h, c, cat, include_wallet_observation));
 }
 
 UniValue EconomyCard(const SearchHit& h)
@@ -2377,7 +2484,7 @@ void AfterIndexPut(const ModelSearchRecord& rec, int64_t now_ms)
     g_feed.NoteSearchRecord(rec, now_ms);
     {
         std::lock_guard<std::recursive_mutex> lock(g_campaign_mu);
-        g_campaigns.IngestFromSearchRecord(rec);
+        g_campaigns.IngestFromSearchRecord(rec, [](const ReleaseCampaign& c) { return CampaignIsLocal(c.release_id.Hex()); });
     }
     if (BoundModelEventJournal()) {
         ObserveResult ores;
@@ -2477,15 +2584,21 @@ const ReleaseCampaign* CampaignForEntry(const CatalogEntry& entry)
     if (const ReleaseCampaign* by_model = g_campaigns.GetByModel(entry.model_id)) {
         if (CampaignIsLocal(by_model->release_id.Hex())) return by_model;
     }
-    for (const auto& camp : g_campaigns.List()) {
-        if (!CampaignIsLocal(camp.release_id.Hex())) continue;
-        if (camp.model_id == entry.model_id || camp.artifact_id == entry.artifact_id ||
-            (!camp.ciphertext_artifact_id.IsNull() &&
-             (camp.ciphertext_artifact_id == entry.artifact_id || camp.ciphertext_artifact_id == entry.model_id))) {
-            return g_campaigns.GetByRelease(camp.release_id);
+    const auto names_entry = [&](const ReleaseCampaign& camp) {
+        return camp.model_id == entry.model_id || camp.artifact_id == entry.artifact_id ||
+               (!camp.ciphertext_artifact_id.IsNull() &&
+                (camp.ciphertext_artifact_id == entry.artifact_id || camp.ciphertext_artifact_id == entry.model_id));
+    };
+    // This runs on every piece and file request. Walk the local releases, not
+    // a copy of every campaign learned from peers.
+    if (!g_local_releases_untrusted) {
+        for (const auto& rid : g_local_releases) {
+            const ReleaseCampaign* camp = g_campaigns.GetByReleaseHex(rid);
+            if (camp && names_entry(*camp)) return camp;
         }
+        return nullptr;
     }
-    return nullptr;
+    return g_campaigns.Find(names_entry);
 }
 
 bool DistinctCiphertextObject(const ReleaseCampaign& c, const CatalogEntry& entry)
@@ -2630,19 +2743,41 @@ void UnseedSafetyTarget(ModelCatalog& cat, const std::string& hex)
     (void)cat.Seed(id, false, e);
 }
 
+namespace {
+std::mutex g_grant_issue_mu;
+std::map<std::string, std::vector<int64_t>> g_grant_issue_hits;
+int64_t g_grant_issue_pruned_ms{0};
+} // namespace
+
 bool AllowGrantIssue(const std::string& peer, int64_t now_ms, std::string& err)
 {
-    static std::mutex mu;
-    static std::map<std::string, std::vector<int64_t>> hits;
-    std::lock_guard<std::mutex> lock(mu);
-    auto& v = hits[peer.empty() ? "pq1-peer" : peer];
-    v.erase(std::remove_if(v.begin(), v.end(), [&](int64_t t) { return now_ms - t > 60000; }), v.end());
+    std::lock_guard<std::mutex> lock(g_grant_issue_mu);
+    const auto expired = [&](int64_t t) { return now_ms - t > 60000; };
+    // Every peer that ever asked for a grant would otherwise keep a key here.
+    // Once a minute, drop the peers with no grant inside the window.
+    if (now_ms < g_grant_issue_pruned_ms || now_ms - g_grant_issue_pruned_ms > 60000) {
+        for (auto it = g_grant_issue_hits.begin(); it != g_grant_issue_hits.end();) {
+            auto& times = it->second;
+            times.erase(std::remove_if(times.begin(), times.end(), expired), times.end());
+            if (times.empty()) it = g_grant_issue_hits.erase(it);
+            else ++it;
+        }
+        g_grant_issue_pruned_ms = now_ms;
+    }
+    auto& v = g_grant_issue_hits[peer.empty() ? "pq1-peer" : peer];
+    v.erase(std::remove_if(v.begin(), v.end(), expired), v.end());
     if (v.size() >= 32) {
         err = "grant issue limited";
         return false;
     }
     v.push_back(now_ms);
     return true;
+}
+
+size_t GrantIssueTrackedPeers()
+{
+    std::lock_guard<std::mutex> lock(g_grant_issue_mu);
+    return g_grant_issue_hits.size();
 }
 
 void ApplyInboundSafetyRecord(ModelCatalog& cat, const SignedRecordHint& h, int64_t now, UniValue& o)
@@ -3436,14 +3571,23 @@ bool HandleNativeRequest(ModelCatalog& cat, const NativeRequest& req, NativeResp
         fq.scope = SearchScope::LOCAL;
         std::lock_guard<std::mutex> lock(g_search_mu);
         std::string next;
-        const auto items = g_feed.Query(fq, ConnNowMs(), next);
+        // This is a peer route. Funding events come only from local pledges and from
+        // btxd's join against the local wallets, and the wallet join also sets
+        // confirmed funding, wallet_local_state and the refund state of a card.
+        // Serve neither to a peer.
+        std::vector<FeedEvent> items;
+        for (auto& ev : g_feed.Query(fq, ConnNowMs(), next)) {
+            if (ev.event_type == FeedEventType::RELEASE_FUNDING_CHANGED ||
+                ev.event_type == FeedEventType::RELEASE_FUNDED) continue;
+            items.push_back(std::move(ev));
+        }
         std::vector<ModelEconomyEntry> entries;
         UniValue recs(UniValue::VARR);
         for (const auto& ev : items) {
             SearchHit h;
             h.rec = ev.rec;
             if (h.rec.model_id.IsNull()) h.rec.model_id = ev.model_id;
-            entries.push_back(EconomyForHit(h));
+            entries.push_back(EconomyForHit(h, nullptr, /*include_wallet_observation=*/false));
             recs.push_back(SearchRecordToJson(h.rec));
         }
         FeedCoverage cov;
@@ -3538,18 +3682,21 @@ bool HandleNativeRequest(ModelCatalog& cat, const NativeRequest& req, NativeResp
             return true;
         }
         std::lock_guard<std::mutex> lock(g_ext_mu);
+        // An advisory needs no cache slot. Apply it first, so that a cache other
+        // peers have filled cannot stop a pinned publisher's takedown.
+        UniValue safety(UniValue::VOBJ);
+        ApplyInboundSafetyRecord(cat, h, now, safety);
         if (!RecordsFor(cat).Insert(h, now, err)) {
             resp.status = 400;
             resp.body = JsonError("RECORD", err);
             return true;
         }
-        PersistRecords(cat, RecordsFor(cat));
         UniValue oann(UniValue::VOBJ);
         oann.pushKV("schema_version", 2);
         oann.pushKV("accepted", true);
         oann.pushKV("signed", true);
         oann.pushKV("record_id", h.record_id.Hex());
-        ApplyInboundSafetyRecord(cat, h, now, oann);
+        oann.pushKVs(std::move(safety));
         resp.body = oann.write();
         return true;
     }
@@ -3646,18 +3793,21 @@ bool HandleNativeRequest(ModelCatalog& cat, const NativeRequest& req, NativeResp
             return true;
         }
         std::lock_guard<std::mutex> lock(g_ext_mu);
+        // An advisory needs no cache slot. Apply it first, so that a cache other
+        // peers have filled cannot stop a pinned publisher's takedown.
+        UniValue safety(UniValue::VOBJ);
+        ApplyInboundSafetyRecord(cat, h, now, safety);
         if (!RecordsFor(cat).Insert(h, now, err)) {
             resp.status = 400;
             resp.body = JsonError("RECORD", err);
             return true;
         }
-        PersistRecords(cat, RecordsFor(cat));
         UniValue oann(UniValue::VOBJ);
         oann.pushKV("schema_version", 2);
         oann.pushKV("accepted", true);
         oann.pushKV("signed", true);
         oann.pushKV("record_id", h.record_id.Hex());
-        ApplyInboundSafetyRecord(cat, h, now, oann);
+        oann.pushKVs(std::move(safety));
         resp.body = oann.write();
         return true;
     }
@@ -6811,6 +6961,17 @@ bool DispatchHelperRpc(ModelCatalog& cat, const UniValue& request, UniValue& res
         result.pushKV("link", link);
         if (params.isArray() && params.size() > 1 && Arg(1).isStr() && !Arg(1).get_str().empty()) {
             const fs::path outp = fs::PathFromString(Arg(1).get_str());
+            // The path is caller text (a UI, an agent, a script). Write a new
+            // file or replace a share file; never follow a symlink, never wait
+            // on a FIFO or a device, never truncate some other file.
+            std::error_code sec;
+            const fs::file_status st = fs::symlink_status(outp, sec);
+            std::string old_text, old_err;
+            if (fs::exists(st) && (!fs::is_regular_file(st) || !LoadShareText(outp, old_text, old_err))) {
+                err_code = "INVALID_PARAMETER";
+                err = "path exists and is not a share file";
+                return false;
+            }
             if (!outp.parent_path().empty()) fs::create_directories(outp.parent_path());
             std::ofstream f(outp, std::ios::trunc);
             if (!f) {
@@ -7367,7 +7528,7 @@ bool DispatchHelperRpc(ModelCatalog& cat, const UniValue& request, UniValue& res
             return false;
         }
         AfterIndexPut(rec, ConnNowMs());
-        PersistEconomy(cat);
+        PersistEconomyLocked(cat);
         const auto* stored = g_search_idx.Get(rec.model_id);
         result.pushKV("schema_version", 2);
         result.pushKV("model_id", rec.model_id.Hex());
@@ -8046,21 +8207,17 @@ bool DispatchHelperRpc(ModelCatalog& cat, const UniValue& request, UniValue& res
         std::vector<Quote> quotes;
         std::vector<PaymentJournal> journal;
         const fs::path dir = cat.Store().Root().parent_path();
-        LoadPaymentState(dir, quotes, journal, err);
+        std::unique_lock<std::mutex> payment_lock(PaymentStateMutex());
+        // A paid plan saves its new quote into quotes.json. Never write over
+        // a journal that could not be read; a free-only plan writes nothing.
+        if (!LoadPaymentState(dir, quotes, journal, err) && mode != RetrievalMode::FREE_ONLY) {
+            err_code = "IO";
+            return false;
+        }
         for (auto& p : missing) {
             if (DuplicateReservedRange(journal, p.file_index, p.piece_index, 1)) p.reserved_paid = true;
         }
-        int64_t outstanding = 0;
-        for (const auto& q : quotes) {
-            if (!(q.model_id == r.digest) || q.price_atoms <= 0) continue;
-            bool delivered = false;
-            for (const auto& j : journal) {
-                if (j.delivered && j.quote_id == q.offer_id.Hex()) delivered = true;
-            }
-            if (delivered) continue;
-            outstanding += q.price_atoms;
-            if (q.fee_cap_atoms > 0) outstanding += q.fee_cap_atoms;
-        }
+        const int64_t outstanding = OutstandingQuoteAtoms(quotes, journal, r.digest);
         if (mode != RetrievalMode::FREE_ONLY) {
             Quote q;
             int64_t price = 0;
@@ -8073,9 +8230,15 @@ bool DispatchHelperRpc(ModelCatalog& cat, const UniValue& request, UniValue& res
                     price = 1; // explicit paid is never a free quote; automatic spend stays 0
                 }
             }
-            MakePrepaidQuote(q, r.digest, have_local ? local_probe.artifact_id : Digest48{}, 0, 0, price, err);
+            if (!MakePrepaidQuote(q, r.digest, have_local ? local_probe.artifact_id : Digest48{}, 0, 0, price, err)) {
+                err_code = "INVALID_PARAMETER";
+                return false;
+            }
             quotes.push_back(q);
-            SavePaymentState(dir, quotes, journal, err);
+            if (!SavePaymentState(dir, quotes, journal, err)) {
+                err_code = "IO";
+                return false;
+            }
             result.pushKV("quote", QuoteToJson(q));
             if (mode == RetrievalMode::EXPLICIT_PAID) {
                 result.pushKV("funding_rpc", "preparemodelfunding");
@@ -8083,6 +8246,8 @@ bool DispatchHelperRpc(ModelCatalog& cat, const UniValue& request, UniValue& res
                 result.pushKV("note", "EXPLICIT_PAID quotes a price; automatic spend remains 0. preparemodelfunding / signmodelfunding / submitmodelfunding freeze htlc_sha256.");
             }
         }
+        // Nothing below reads or writes quotes.json; release before network or cloud work.
+        payment_lock.unlock();
         bool paid_binding = false;
         for (const auto& q : quotes) {
             if (!(q.model_id == r.digest)) continue;
@@ -8679,8 +8844,11 @@ bool DispatchHelperRpc(ModelCatalog& cat, const UniValue& request, UniValue& res
                 err = "unknown release";
                 return false;
             }
-            if (const auto* rec = g_search_idx.Get(camp.model_id)) h.rec = *rec;
-            else h.rec.model_id = camp.model_id;
+            {
+                std::lock_guard<std::mutex> lock(g_search_mu);
+                if (const auto* rec = g_search_idx.Get(camp.model_id)) h.rec = *rec;
+                else h.rec.model_id = camp.model_id;
+            }
             auto e = ComposeEconomyEntry(h, &camp, ObservationFromHit(h, &camp, &cat));
             UniValue one = CampaignToJson(camp);
             one.pushKV("lifecycle_state", ModelLifecycleName(e.lifecycle));
@@ -9734,11 +9902,12 @@ bool DispatchHelperRpc(ModelCatalog& cat, const UniValue& request, UniValue& res
                 // g_search_mu is already held. Campaign lock is taken second.
                 std::lock_guard<std::recursive_mutex> camp_lock(g_campaign_mu);
                 if (auto* c = const_cast<ReleaseCampaign*>(g_campaigns.GetByRelease(id))) {
-                    c->funded_atoms = f.confirmed_funded_atoms;
-                    if (f.chain_height_known) c->latest_funding_height = f.chain_height;
+                    // The observation comes from btxd's join against the local
+                    // wallets (ObserveReleaseFunding reads mapWallet). Keep it in
+                    // g_chain_obs for local views; do not write it into the shared
+                    // campaign, which is serialized in cards served to peers.
                     g_feed.NoteFundingChanged(*c, ConnNowMs());
                     LiveObserveCampaign(*c, FeedEventType::RELEASE_FUNDING_CHANGED);
-                    SaveCampaigns(HelperDir(cat), g_campaigns.List(), err);
                 }
             }
             result.pushKV("accepted", true);
@@ -10070,7 +10239,7 @@ bool DispatchHelperRpc(ModelCatalog& cat, const UniValue& request, UniValue& res
             }
         }
         result = FeedPageJson(items, entries, fq, cov, g_feed.Sequence(), next);
-        PersistEconomy(cat);
+        PersistEconomyLocked(cat);
         return true;
     }
     err_code = "METHOD_NOT_FOUND";
@@ -10110,8 +10279,10 @@ bool WritePrivatePem(const fs::path& path, Writer&& write)
 // Mint the helper's self-signed ML-DSA-44 TLS identity with the OpenSSL this
 // binary already links, instead of running an `openssl` command-line tool.
 // Fetch-only start must work with no openssl binary on PATH. Same output as
-// the CLI call it replaces: an unencrypted PKCS#8 key and an X.509v3
-// self-signed cert, CN=btx-modeld, 3650 days, mode 0600.
+// the CLI call it replaces with OpenSSL's stock config: an unencrypted PKCS#8
+// key and an X.509v3 self-signed cert, CN=btx-modeld, 3650 days, mode 0600,
+// with the extensions `req -x509` adds (v3_ca): subject and authority key
+// identifiers and a critical CA:TRUE.
 bool EnsureMlDsaTlsFiles(const fs::path& cert, const fs::path& key, std::string& err)
 {
     if (fs::exists(cert) && fs::exists(key)) return true;
@@ -10135,6 +10306,19 @@ bool EnsureMlDsaTlsFiles(const fs::path& cert, const fs::path& key, std::string&
     if (!X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC,
                                     reinterpret_cast<const unsigned char*>("btx-modeld"), -1, -1, 0) ||
         !X509_set_issuer_name(x.get(), name) || !X509_set_pubkey(x.get(), pkey.get())) return false;
+
+    // Self-signed: the cert is its own issuer, so the authority key identifier
+    // is read from the subject key identifier added just before it.
+    X509V3_CTX ctx;
+    X509V3_set_ctx_nodb(&ctx);
+    X509V3_set_ctx(&ctx, x.get(), x.get(), nullptr, nullptr, 0);
+    for (const auto& [nid, value] : {std::pair<int, const char*>{NID_subject_key_identifier, "hash"},
+                                     {NID_authority_key_identifier, "keyid:always"},
+                                     {NID_basic_constraints, "critical,CA:TRUE"}}) {
+        std::unique_ptr<X509_EXTENSION, decltype(&X509_EXTENSION_free)> ext(
+            X509V3_EXT_conf_nid(nullptr, &ctx, nid, value), X509_EXTENSION_free);
+        if (!ext || X509_add_ext(x.get(), ext.get(), -1) != 1) return false;
+    }
     // ML-DSA signs the message itself, so the digest must be NULL.
     if (X509_sign(x.get(), pkey.get(), nullptr) <= 0) return false;
 
@@ -10192,6 +10376,11 @@ static bool RetrieveFreeFromPeerScoped(ModelCatalog& cat, Pq1Context& pq, const 
         }
         return false;
     };
+    auto configured_peer = [&](const std::string& h, uint16_t p) {
+        const std::string ep = (h.find(':') != std::string::npos ? "[" + h + "]" : h) + ":" + std::to_string(p);
+        const auto peers = cat.Peers();
+        return std::find(peers.begin(), peers.end(), ep) != peers.end();
+    };
     auto authorize_peer = [&](const std::string& h, uint16_t p, const std::string& pin, std::string& local_err) {
         if (!AutomaticAcquisitionPermitted(cat)) {
             local_err = "automatic acquisition disabled by local policy";
@@ -10214,6 +10403,7 @@ static bool RetrieveFreeFromPeerScoped(ModelCatalog& cat, Pq1Context& pq, const 
         sess.stop = stop;
         sess.pinfile = pinfile;
         sess.allow_loopback = loopback_ok(h, p);
+        sess.operator_named = configured_peer(h, p);
         if (automatic) {
             sess.authorize_peer = authorize_peer;
             sess.required_network = g_native_network;
@@ -10339,8 +10529,10 @@ static bool RetrieveFreeFromPeerScoped(ModelCatalog& cat, Pq1Context& pq, const 
             return false;
         }
         UniValue gj;
-        if (!gj.read(grant_resp.body) || !gj.isObject() || !gj.exists("payload_hex") ||
-            !gj.exists("sig_hex") || !gj.exists("pubkey_hex")) {
+        // Peer data: a field of another type fails this grant like a missing one.
+        // Swarm sources run this on threads of their own, where a throw ends the helper.
+        if (!gj.read(grant_resp.body) || !gj.isObject() || !gj["payload_hex"].isStr() ||
+            !gj["sig_hex"].isStr() || !gj["pubkey_hex"].isStr()) {
             gerr = "missing FreeGrant";
             return false;
         }
@@ -10627,7 +10819,6 @@ static bool RetrieveFreeFromPeerScoped(ModelCatalog& cat, Pq1Context& pq, const 
             progress->pieces_committed.fetch_add(1);
             NoteRetrieveBytes(progress, cat.UsedBytes());
         };
-        ThreadJoin extra_join;
         std::atomic<int> extra_ok{0};
         std::mutex rid_mu;
         std::map<uint32_t, std::vector<uint64_t>> piece_rid;
@@ -10667,6 +10858,9 @@ static bool RetrieveFreeFromPeerScoped(ModelCatalog& cat, Pq1Context& pq, const 
             }
             xfer.ObservePeer(ep, m);
         };
+        // Declared after everything its threads use, so any return below joins
+        // them before that state is destroyed.
+        ThreadJoin extra_join;
         std::vector<SourceAvailability> sources;
         if (!missing.empty() && !extras.empty()) {
             auto add_av = [&](const std::string& eh, uint16_t eport) {
@@ -10689,7 +10883,14 @@ static bool RetrieveFreeFromPeerScoped(ModelCatalog& cat, Pq1Context& pq, const 
                     pid.service_id = aj["service_id"].get_str();
                 }
                 std::string perr;
-                (void)ParseAvailabilitySources(aj, pid.endpoint, pid, artifact, sources, perr, ConnNowMs());
+                // Peer data: the parser throws on a field of another type. Drop
+                // this source's entries; the other sources keep the retrieve going.
+                const size_t had = sources.size();
+                try {
+                    (void)ParseAvailabilitySources(aj, pid.endpoint, pid, artifact, sources, perr, ConnNowMs());
+                } catch (const std::exception&) {
+                    sources.resize(had);
+                }
             };
             add_av(host, port);
             for (const auto& ep : extras) {
@@ -11125,7 +11326,7 @@ int UnixRpcReplyTimeoutMs(const std::string& method)
     if (method == "waitformodelevent" || method == "importmodel" || method == "hostmodel" ||
         method == "getmodel" || method == "scanmodelwatch" || method == "executemodelimport" ||
         method == "importbtxpackage" || method == "exportmodelpath" || method == "loadmodel" ||
-        method == "unloadmodel" || method == "generatemodel") {
+        method == "unloadmodel" || method == "generatemodel" || method == "removemodel") {
         return UNIX_RPC_LONG_REPLY_MS;
     }
     return UNIX_RPC_REPLY_MS;
@@ -11307,8 +11508,32 @@ void HandleUnixFd(int cfd, ModelCatalog& cat, std::atomic<bool>* stop)
     close(cfd);
 }
 
+/** Where a served PQ1 connection is, for a hand-over of its worker. */
+enum Pq1ConnState : int {
+    PQ1_CONN_IDLE,   //!< in the handshake or waiting for a request
+    PQ1_CONN_BUSY,   //!< answering a request
+    PQ1_CONN_RETIRE, //!< answering a request, then closes
+    PQ1_CONN_CUT,    //!< closes now (`stop` is set)
+};
+
+/** The inbound PQ1 connection a worker is serving. Its I/O watches `stop`,
+ *  which the daemon sets on shutdown or to hand an idle connection's worker
+ *  to another address. `state` is a Pq1ConnState; `busy_since` is when the
+ *  current request began. */
+struct Pq1Served {
+    uint32_t netgroup{0};
+    std::chrono::steady_clock::time_point since{};
+    std::atomic<bool> stop{false};
+    std::atomic<int> state{PQ1_CONN_IDLE};
+    std::atomic<std::chrono::steady_clock::rep> busy_since{0};
+    bool handing_over{false};
+};
+
+/** `stop` also ends this connection when the daemon hands its worker to
+ *  another address while it is idle. When it is busy, `served->state` makes
+ *  it close once the response it is sending is out. */
 void HandlePq1Fd(int cfd, ModelCatalog& cat, Pq1Context& pq, std::atomic<bool>* stop, const fs::path& pinfile,
-                 uint32_t netgroup, const std::string& peer_addr)
+                 uint32_t netgroup, const std::string& peer_addr, Pq1Served* served)
 {
     SetPq1SocketOpts(cfd, true);
     SSL* ssl = SSL_new(static_cast<SSL_CTX*>(pq.SslCtx()));
@@ -11320,7 +11545,8 @@ void HandlePq1Fd(int cfd, ModelCatalog& cat, Pq1Context& pq, std::atomic<bool>* 
     SSL_set_accept_state(ssl);
     std::string err;
     if (!SslHandshake(ssl, cfd, /*accept=*/true, PQ1_HANDSHAKE_MS, stop, err)) {
-        CountUnauthAndBump(netgroup);
+        // A handshake this side cut short is not the peer's failure.
+        if (!(stop && stop->load())) CountUnauthAndBump(netgroup);
         SSL_free(ssl);
         close(cfd);
         return;
@@ -11358,8 +11584,19 @@ void HandlePq1Fd(int cfd, ModelCatalog& cat, Pq1Context& pq, std::atomic<bool>* 
                 .count() >= PQ1_CONN_MAX_MS) {
             break;
         }
+        if (served) {
+            // Asked to hand the worker over while answering: the response is out, so close.
+            int st = PQ1_CONN_BUSY;
+            if (!served->state.compare_exchange_strong(st, PQ1_CONN_IDLE) && st != PQ1_CONN_IDLE) break;
+        }
         const std::string raw = SslReadHttp(ssl, cfd, MAX_RPC_BODY + 8192, PQ1_IDLE_MS, stop);
         if (raw.empty()) break;
+        if (served) {
+            served->busy_since.store(std::chrono::steady_clock::now().time_since_epoch().count());
+            // Handed over while idle: leave this request unanswered rather than cut its reply.
+            int st = PQ1_CONN_IDLE;
+            if (!served->state.compare_exchange_strong(st, PQ1_CONN_BUSY)) break;
+        }
         ++requests;
         NativeRequest nreq;
         NativeResponse nresp;
@@ -11488,6 +11725,7 @@ struct WorkerJob {
     bool unix_rpc{false};
     uint32_t netgroup{0};
     std::string peer_addr;
+    std::chrono::steady_clock::time_point accepted{};
 };
 
 } // namespace
@@ -11537,7 +11775,12 @@ static void RefreshAutoStorage(HelperConfig& cfg, ModelCatalog* cat)
     g_runtime.preserve_rare = cfg.preserve_rare;
     g_runtime.follow_peers = cfg.follow_peers;
     g_runtime.upload_bps = cfg.upload_bps;
-    g_runtime.watch_dir = fs::PathToString(cfg.watch_dir);
+    // The unix RPC workers copy watch_dir without a lock, and cfg.watch_dir
+    // never changes after start. Write it only when it differs, so the 60 s
+    // refresh does not free the string while a worker is reading it.
+    if (const std::string watch{fs::PathToString(cfg.watch_dir)}; g_runtime.watch_dir != watch) {
+        g_runtime.watch_dir = watch;
+    }
     g_runtime.public_host_reachable = cfg.public_host_reachable;
     g_swarm.host = cfg.host;
     if (cfg.storage_mode == StorageMode::DISABLED) {
@@ -11660,6 +11903,7 @@ static void TryPreserveRareTick(ModelCatalog& cat, Pq1Context& pq, const fs::pat
         // Loopback is only for explicitly configured local test/owner peers.
         const auto configured = cat.Peers();
         sess.allow_loopback = std::find(configured.begin(), configured.end(), endpoint) != configured.end();
+        sess.operator_named = sess.allow_loopback;
         sess.handshake_ms = 3000;
         sess.io_ms = 3000;
         if (!sess.Connect(pq, host, port, err)) continue;
@@ -11852,7 +12096,7 @@ int RunModelDaemon(HelperConfig cfg, std::atomic<bool>* stop)
     StartRetrieveWorkers(cat);
     g_swarm.pex.NoteSelf(cfg.bind);
     if (tcp_fd >= 0) {
-        g_swarm.nat = AttemptModelPortMap(cfg.bind, true);
+        g_swarm.nat = AttemptModelPortMap(cfg.bind, cfg.natpmp);
         const bool mapped = g_swarm.nat.status == ModelNatStatus::MAPPED;
         cfg.public_host_reachable = mapped;
         g_runtime.public_host_reachable = mapped;
@@ -11870,7 +12114,109 @@ int RunModelDaemon(HelperConfig cfg, std::atomic<bool>* stop)
     std::condition_variable unix_qcv;
     std::condition_variable pq1_qcv;
     std::queue<WorkerJob> unix_jobs;
-    std::queue<WorkerJob> pq1_jobs;
+    std::deque<WorkerJob> pq1_jobs;
+    // Connections that hold a PQ1 worker now. Guarded by pq1_qmu, like pq1_jobs.
+    std::vector<Pq1Served*> pq1_served;
+    auto pq1_held = [&] {
+        std::map<uint32_t, int> held;
+        for (const Pq1Served* s : pq1_served) ++held[s->netgroup];
+        return held;
+    };
+    auto pq1_waiting = [&] {
+        std::vector<uint32_t> waiting;
+        for (const WorkerJob& j : pq1_jobs) waiting.push_back(j.netgroup);
+        return waiting;
+    };
+    // Closes the waiting connections whose peer has gone or has waited past a
+    // client's handshake timeout: serving them would only fail the handshake
+    // and count it against the address. Returns the netgroups of the others
+    // whose peer has started its handshake. Caller holds pq1_qmu.
+    auto pq1_waiting_started = [&] {
+        std::vector<uint32_t> started;
+        const auto now = std::chrono::steady_clock::now();
+        for (auto it = pq1_jobs.begin(); it != pq1_jobs.end();) {
+            // The accepted socket still blocks, and MSG_DONTWAIT is 0 on Windows:
+            // poll first, and peek only at a readable socket.
+            pollfd pfd{};
+            pfd.fd = it->fd;
+            pfd.events = POLLIN;
+            const bool readable = ::poll(&pfd, 1, 0) > 0;
+            char b;
+            // Readable with nothing to peek: the peer has closed, or the socket failed.
+            if ((readable && ::recv(it->fd, &b, 1, MSG_PEEK) <= 0) ||
+                now - it->accepted >= std::chrono::milliseconds(PQ1_HANDSHAKE_MS)) {
+                close(it->fd);
+                GlobalConnLimits().ReleaseInbound(it->netgroup);
+                it = pq1_jobs.erase(it);
+                continue;
+            }
+            if (readable) started.push_back(it->netgroup);
+            ++it;
+        }
+        return started;
+    };
+    // R10-03: when every worker is taken and a connection that has started its
+    // handshake waits, the netgroup that Pq1WorkerDonor names gives one
+    // connection up: an idle one (its longest served) if it has one, else the
+    // one whose request began first, which closes once its response is out.
+    // Paced uploads finish in the order they began. One hand-over at a time.
+    auto pq1_share_workers = [&] {
+        std::lock_guard<std::mutex> lock(pq1_qmu);
+        if (pq1_jobs.empty() || pq1_served.size() < static_cast<size_t>(PQ1_HTTP_WORKERS)) return;
+        for (const Pq1Served* s : pq1_served) {
+            if (s->handing_over) return;
+        }
+        const auto waiting = pq1_waiting_started();
+        if (waiting.empty()) return;
+        const auto held = pq1_held();
+        const auto donor = Pq1WorkerDonor(waiting[Pq1NextWaiting(waiting, held)], held);
+        if (!donor) return;
+        Pq1Served* pick = nullptr;
+        for (Pq1Served* s : pq1_served) {
+            if (s->netgroup != *donor) continue;
+            if (!pick) {
+                pick = s;
+                continue;
+            }
+            const bool s_busy = s->state.load() != PQ1_CONN_IDLE;
+            const bool pick_busy = pick->state.load() != PQ1_CONN_IDLE;
+            if (s_busy != pick_busy) {
+                if (pick_busy) pick = s;
+            } else if (s_busy ? s->busy_since.load() < pick->busy_since.load() : s->since < pick->since) {
+                pick = s;
+            }
+        }
+        if (!pick) return;
+        pick->handing_over = true;
+        // The connection moves between idle and busy on its own: mark it in one step.
+        int st = PQ1_CONN_IDLE;
+        while (!pick->state.compare_exchange_weak(st, st == PQ1_CONN_IDLE ? PQ1_CONN_CUT : PQ1_CONN_RETIRE)) {
+        }
+        if (st == PQ1_CONN_IDLE) pick->stop.store(true);
+    };
+    // R10-03: every inbound slot is taken. Unless a waiting peer has gone, the
+    // netgroup that Pq1WorkerDonor names by connections held or waiting gives
+    // up its newest waiting one, which has not been served yet.
+    auto pq1_make_room = [&](uint32_t netgroup) {
+        std::lock_guard<std::mutex> lock(pq1_qmu);
+        const size_t queued = pq1_jobs.size();
+        (void)pq1_waiting_started();
+        if (pq1_jobs.size() < queued) return true;
+        std::map<uint32_t, int> admitted = pq1_held();
+        for (const WorkerJob& j : pq1_jobs) ++admitted[j.netgroup];
+        std::map<uint32_t, int> can_give{{netgroup, admitted[netgroup]}};
+        for (const WorkerJob& j : pq1_jobs) can_give[j.netgroup] = admitted[j.netgroup];
+        const auto donor = Pq1WorkerDonor(netgroup, can_give);
+        if (!donor) return false;
+        for (auto it = pq1_jobs.rbegin(); it != pq1_jobs.rend(); ++it) {
+            if (it->netgroup != *donor) continue;
+            close(it->fd);
+            GlobalConnLimits().ReleaseInbound(it->netgroup);
+            pq1_jobs.erase(std::next(it).base());
+            return true;
+        }
+        return false;
+    };
     auto enqueue_unix = [&](WorkerJob job) -> bool {
         std::unique_lock<std::mutex> lock(unix_qmu);
         if (unix_jobs.size() >= static_cast<size_t>(PQ1_UNIX_QUEUE)) return false;
@@ -11881,7 +12227,7 @@ int RunModelDaemon(HelperConfig cfg, std::atomic<bool>* stop)
     auto enqueue_pq1 = [&](WorkerJob job) -> bool {
         std::unique_lock<std::mutex> lock(pq1_qmu);
         if (pq1_jobs.size() >= static_cast<size_t>(PQ1_HTTP_QUEUE)) return false;
-        pq1_jobs.push(std::move(job));
+        pq1_jobs.push_back(std::move(job));
         pq1_qcv.notify_one();
         return true;
     };
@@ -11906,6 +12252,7 @@ int RunModelDaemon(HelperConfig cfg, std::atomic<bool>* stop)
     }
     for (int i = 0; i < PQ1_HTTP_WORKERS; ++i) {
         workers.emplace_back([&] {
+            Pq1Served served;
             while (!stop->load()) {
                 WorkerJob job;
                 {
@@ -11913,15 +12260,28 @@ int RunModelDaemon(HelperConfig cfg, std::atomic<bool>* stop)
                     pq1_qcv.wait_for(lock, std::chrono::milliseconds(250),
                                      [&] { return !pq1_jobs.empty() || stop->load(); });
                     if (pq1_jobs.empty()) continue;
-                    job = pq1_jobs.front();
-                    pq1_jobs.pop();
+                    (void)pq1_waiting_started();
+                    if (pq1_jobs.empty()) continue;
+                    const auto next = pq1_jobs.begin() + Pq1NextWaiting(pq1_waiting(), pq1_held());
+                    job = *next;
+                    pq1_jobs.erase(next);
+                    if (job.fd < 0) continue;
+                    served.netgroup = job.netgroup;
+                    served.since = std::chrono::steady_clock::now();
+                    served.stop.store(stop->load());
+                    served.state.store(PQ1_CONN_IDLE);
+                    served.handing_over = false;
+                    pq1_served.push_back(&served);
                 }
-                if (job.fd < 0) continue;
                 try {
-                    HandlePq1Fd(job.fd, cat, pq, stop, pinfile, job.netgroup, job.peer_addr);
+                    HandlePq1Fd(job.fd, cat, pq, &served.stop, pinfile, job.netgroup, job.peer_addr, &served);
                 } catch (const std::exception&) {
                     // A malformed request must not terminate btx-modeld.
                 } catch (...) {
+                }
+                {
+                    std::lock_guard<std::mutex> lock(pq1_qmu);
+                    pq1_served.erase(std::find(pq1_served.begin(), pq1_served.end(), &served));
                 }
                 GlobalConnLimits().ReleaseInbound(job.netgroup);
             }
@@ -11959,6 +12319,7 @@ int RunModelDaemon(HelperConfig cfg, std::atomic<bool>* stop)
 
     auto last_quota = std::chrono::steady_clock::now();
     auto last_watch = std::chrono::steady_clock::now() - std::chrono::seconds(5);
+    auto last_records_save = std::chrono::steady_clock::now();
     while (!stop->load()) {
         std::optional<ProfilePolicy> pending;
         {
@@ -11995,6 +12356,7 @@ int RunModelDaemon(HelperConfig cfg, std::atomic<bool>* stop)
             nf = 2;
         }
         const int pr = poll(fds, nf, 250);
+        pq1_share_workers();
         if (cfg.storage_mode == StorageMode::AUTO &&
             std::chrono::steady_clock::now() - last_quota >= std::chrono::seconds(60)) {
             RefreshAutoStorage(cfg, &cat);
@@ -12006,6 +12368,10 @@ int RunModelDaemon(HelperConfig cfg, std::atomic<bool>* stop)
             std::string werr;
             ScanWatchDir(cat, wres, werr);
             last_watch = std::chrono::steady_clock::now();
+        }
+        if (std::chrono::steady_clock::now() - last_records_save >= std::chrono::seconds(RECORDS_SAVE_INTERVAL_S)) {
+            FlushRecords(cat);
+            last_records_save = std::chrono::steady_clock::now();
         }
         if (pr <= 0) continue;
         if (fds[0].revents & POLLIN) {
@@ -12027,7 +12393,7 @@ int RunModelDaemon(HelperConfig cfg, std::atomic<bool>* stop)
                     close(c);
                     continue;
                 }
-                if (!GlobalConnLimits().TryInbound(ng)) {
+                if (!GlobalConnLimits().TryInbound(ng) && !(pq1_make_room(ng) && GlobalConnLimits().TryInbound(ng))) {
                     close(c);
                     continue;
                 }
@@ -12044,6 +12410,7 @@ int RunModelDaemon(HelperConfig cfg, std::atomic<bool>* stop)
                     }
                     job.peer_addr = ip;
                 }
+                job.accepted = std::chrono::steady_clock::now();
                 if (!enqueue_pq1(job)) {
                     GlobalConnLimits().ReleaseInbound(ng);
                     close(c);
@@ -12051,13 +12418,21 @@ int RunModelDaemon(HelperConfig cfg, std::atomic<bool>* stop)
             }
         }
     }
+    // A SOCKS5 negotiation waits up to its own timeout; wake it for shutdown.
+    g_socks5_interrupt();
+    {
+        std::lock_guard<std::mutex> lock(pq1_qmu);
+        for (Pq1Served* s : pq1_served) s->stop.store(true);
+    }
     unix_qcv.notify_all();
     pq1_qcv.notify_all();
     if (preserve_thr.joinable()) preserve_thr.join();
     for (auto& w : workers) w.join();
+    FlushRecords(cat);
     g_native_lan.Close();
     g_native_lan_enabled.store(false);
     JoinRetrieveJobs();
+    g_socks5_interrupt.reset();
     close(unix_fd);
     if (tcp_fd >= 0) close(tcp_fd);
     ReleaseModelPortMap(g_swarm.nat);

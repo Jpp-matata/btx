@@ -54,6 +54,7 @@ add_executable(test_btx
   disconnected_transactions.cpp
   feefrac_tests.cpp
   flatfile_tests.cpp
+  fork_hole_walk_tests.cpp
   fs_tests.cpp
   getarg_tests.cpp
   hash_tests.cpp
@@ -81,6 +82,7 @@ add_executable(test_btx
   matmul_verify_worker_tests.cpp
   matmul_block_lifecycle_tests.cpp
   matmul_trusted_mirror_tests.cpp
+  matmul_trusted_withdraw_tests.cpp
   compute_profile_tests.cpp
   matmul_rc_admission_tests.cpp
   trusted_exact_replay_attestation_tests.cpp
@@ -501,6 +503,7 @@ add_executable(test_btx
   torcontrol_tests.cpp
   transaction_tests.cpp
   translation_tests.cpp
+  trusted_mirror_race_tests.cpp
   txdownload_tests.cpp
   txindex_tests.cpp
   txpackage_tests.cpp
@@ -568,15 +571,19 @@ if(WITH_MODELNET)
     modelnet_uri_resolve_tests.cpp
     modelnet_ds_remaining_tests.cpp
     modelnet_resolve_bounds_tests.cpp
+    modelnet_retrieve_peer_reply_tests.cpp
     modelnet_iso_isolation_tests.cpp
     modelnet_pay_pool_tests.cpp
     modelnet_b0_disc_store_tests.cpp
+    modelnet_records_cache_tests.cpp
     modelnet_b0_remaining_tests.cpp
     modelnet_b0_pq_rest_tests.cpp
     modelnet_hosting_tests.cpp
     modelnet_infra_tests.cpp
     modelnet_swarm_tests.cpp
     modelnet_conn_tests.cpp
+    modelnet_pq1_worker_share_tests.cpp
+    modelnet_ainode_notes_tests.cpp
     modelnet_search_tests.cpp
     modelnet_first_run_tests.cpp
     modelnet_file_stream_tests.cpp
@@ -585,6 +592,7 @@ if(WITH_MODELNET)
     modelnet_bounty_tests.cpp
     modelnet_035_codec_tests.cpp
     modelnet_035_envver_tests.cpp
+    modelnet_envelope_dupkey_tests.cpp
     modelnet_035_identity_tests.cpp
     modelnet_035_transport_tests.cpp
     modelnet_035_git_tests.cpp
@@ -2907,22 +2915,26 @@ function(add_boost_test source_file)
   endif()
 
   file(READ "${source_file}" source_file_content)
+  # Register every top-level suite in the file, also when the suite name
+  # is on the line after the macro.
   string(REGEX
-    MATCH "(BOOST_FIXTURE_TEST_SUITE|BOOST_AUTO_TEST_SUITE)\\(([A-Za-z0-9_]+)"
-    test_suite_macro "${source_file_content}"
+    MATCHALL "(BOOST_FIXTURE_TEST_SUITE|BOOST_AUTO_TEST_SUITE)\\([ \t\r\n]*[A-Za-z0-9_]+"
+    test_suite_macros "${source_file_content}"
   )
-  string(REGEX
-    REPLACE "(BOOST_FIXTURE_TEST_SUITE|BOOST_AUTO_TEST_SUITE)\\(" ""
-    test_suite_name "${test_suite_macro}"
-  )
-  if(test_suite_name)
-    add_test(NAME ${test_suite_name}
-      COMMAND test_btx --run_test=${test_suite_name} --catch_system_error=no --log_level=test_suite -- DEBUG_LOG_OUT
+  foreach(test_suite_macro IN LISTS test_suite_macros)
+    string(REGEX
+      REPLACE "(BOOST_FIXTURE_TEST_SUITE|BOOST_AUTO_TEST_SUITE)\\([ \t\r\n]*" ""
+      test_suite_name "${test_suite_macro}"
     )
-    set_property(TEST ${test_suite_name} PROPERTY
-      SKIP_REGULAR_EXPRESSION "no test cases matching filter"
-    )
-  endif()
+    if(test_suite_name AND NOT TEST ${test_suite_name})
+      add_test(NAME ${test_suite_name}
+        COMMAND test_btx --run_test=${test_suite_name} --catch_system_error=no --log_level=test_suite -- DEBUG_LOG_OUT
+      )
+      set_property(TEST ${test_suite_name} PROPERTY
+        SKIP_REGULAR_EXPRESSION "no test cases matching filter"
+      )
+    endif()
+  endforeach()
 endfunction()
 
 function(add_all_test_targets)

@@ -651,7 +651,7 @@ void SetupServerArgs(ArgsManager& argsman, bool can_listen_ipc)
     argsman.AddArg("-modeld=<path>", "Path to packaged btx-modeld. Alias of -modelhelper. Default: next to the running btxd / libexec/btx-modeld. A missing explicit path does not spawn a substitute.", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-modelhelper=<path>", "Path to packaged btx-modeld. Default: next to the running btxd / libexec/btx-modeld.", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-modeldir=<dir>", "Isolated model store (default: <datadir>/modelnet). Never wallet/chainstate.", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
-    argsman.AddArg("-modelbind=<ip:port>", "PQ1 listen address passed to the owned helper (default: 0.0.0.0:29447). Empty/0/off = unix RPC only. Does not advertise NODE_MODEL_HOST.", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
+    argsman.AddArg("-modelbind=<ip:port>", "PQ1 listen address passed to the owned helper (default: 0.0.0.0:29447, or off with -listen=0). Empty/0/off = unix RPC only. The helper maps it with PCP/NAT-PMP only when -natpmp is on. Does not advertise NODE_MODEL_HOST.", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-modelstorage=<size>", "Model payload budget: auto (packaged default), 0, or 80GiB. AUTO sizes against the model-store filesystem.", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-modelstorageautocap=<size>", "AUTO hard cap (default: 512GiB).", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-modelfreespacereserve=<size>", "AUTO free-space reserve override (default: about 10% of filesystem capacity; not raised to 32GiB).", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
@@ -679,7 +679,7 @@ void SetupServerArgs(ArgsManager& argsman, bool can_listen_ipc)
     argsman.AddArg("-matmultrustedpqpubkey=<hex>", "ML-DSA-44 (1312-byte) public key trusted to attest successful Profile-1 ExactReplay. Repeat for additional independent pin members; each must be distinct. Counted in N alongside -matmultrustedpubkey. Does not change consensus ExactReplay: only trusted mirrors skip GPU on pin quorum. Empty keeps the live secp pin.", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-matmultrustedthreshold=<n>", "Required distinct trusted signatures (M) for one block, 1..N (default: 1). On mainnet with -matmulvalidation=trusted, M<2 or N<2 is refused: above the Profile-1 activation height the quorum replaces the MatMul proof-of-work check, so a 1-of-1 quorum makes one key the node's sole proof-of-work authority. Override with -allowsinglekeytrustedmirror=1. On -matmulvalidation=consensus the pin is telemetry and never skips ExactReplay. Configure 2 independent signers with M=2.", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-allowsinglekeytrustedmirror", "Allow a mainnet trusted mirror to start with N<2 or M<2 (default: 0). That topology is a single stolen WIF hijacking ExactReplay skip. Transition override only; logged and alarming. Consensus+pin is never refused for 1-of-1 (the pin is telemetry).", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
-    argsman.AddArg("-matmulattestationblocklist=<hex>", "Compressed secp256k1 public key whose ExactReplay attestations are never counted, even if the key is also in -matmultrustedpubkey. Repeat for multiple keys. Manual emergency hijack control only; never auto-populated from peer counts or open-attestor majority. Starting or adding a block that leaves fewer than -matmultrustedthreshold unblocked pin members is refused (fail-closed). Runtime adds persist; unblocking a persisted key requires editing the durable record. Restart without this flag unblocks config-only keys.", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
+    argsman.AddArg("-matmulattestationblocklist=<hex>", "Compressed secp256k1 or ML-DSA-44 ExactReplay pin public key whose attestations are never counted, even if the key is also in -matmultrustedpubkey / -matmultrustedpqpubkey. Repeat for multiple keys. Manual emergency hijack control only; never auto-populated from peer counts or open-attestor majority. Starting or adding a block that leaves fewer than -matmultrustedthreshold unblocked pin members is refused (fail-closed). Runtime adds persist; unblocking a persisted key requires editing the durable record. Restart without this flag unblocks config-only keys.", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-matmulopenattestors", "Hear cryptographically valid ExactReplay attestations from keys outside -matmultrustedpubkey (default: 0). Off until the open-speak directory is rate-limited. A new key is listed as admitted after it co-signs a hash that already has pin quorum; that directory is not MatMul authority. A serving node also answers GETMMATTEST with up to 4 heard statements, after its pinned ones. Only trusted mirrors skip ExactReplay on pin M-of-N; consensus miners never skip because a pin signed, and the pin is not FindMostWorkChain or getblocktemplate fork choice on consensus. Set to 1 to enable the directory.", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-matmulopenthreshold=<n>", "Directory open-quorum signal: distinct pinned-or-admitted unfrozen keys (default: max(M, 2)). Reported by getmatmulattestors; never replaces -matmultrustedthreshold and never skips ExactReplay.", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-matmultrustedwaitms=<n>", "Maximum time a trusted-mirror block may remain parked awaiting an M-of-N attestation quorum before the attempt is left retryable (non-punitive), in milliseconds (default: 60000, maximum: 600000). Does not block the verify worker: many blocks may await quorum concurrently.", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
@@ -781,7 +781,7 @@ void SetupServerArgs(ArgsManager& argsman, bool can_listen_ipc)
     argsman.AddArg("-reindex-chainstate", "If enabled, wipe chain state, and rebuild it from blk*.dat files on disk. If an assumeutxo snapshot was loaded, its chainstate will be wiped as well. The snapshot can then be reloaded via RPC. Note: this does not rerun all contextual block checks; use -reindex for full historical re-validation after changing MatMul validation mode.", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-settings=<file>", strprintf("Specify path to dynamic settings data file. Can be disabled with -nosettings. File is written at runtime and not meant to be edited by users (use %s instead for custom settings). Relative paths will be prefixed by datadir location. (default: %s)", BITCOIN_CONF_FILENAME, BITCOIN_SETTINGS_FILENAME), ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-softwareexpiry", strprintf("Stop working after this POSIX timestamp (default: %s)", DEFAULT_SOFTWARE_EXPIRY), ArgsManager::ALLOW_ANY | ArgsManager::DEBUG_ONLY, OptionsCategory::OPTIONS);
-    argsman.AddArg("-autoupdate", "Enable signed source auto-update polling (default: 1 on mainnet, 0 on test chains). The updater silently no-ops unless the manifest signature and installer script hash verify.", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
+    argsman.AddArg("-autoupdate", "Enable signed source auto-update polling (default: 1 on mainnet, 0 on test chains, and 0 when -proxy is set or -onlynet excludes ipv4 and ipv6). Checks are direct HTTPS connections from this host and do not use -proxy, -onion or -onlynet. The updater silently no-ops unless the manifest signature and installer script hash verify.", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-autoupdatemanifesturl=<url>", strprintf("Signed auto-update manifest URL (default: %s)", node::DEFAULT_AUTOUPDATE_MANIFEST_URL), ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-autoupdatetrustedorigin=<origin>", strprintf("Trusted auto-update origin. Manifest, signature, and installer URLs must all stay on this origin (default: %s)", node::DEFAULT_AUTOUPDATE_TRUSTED_ORIGIN), ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-autoupdatepubkey=<hex>", "Release public key (hex) for version.txt signatures, in the scheme set by -autoupdatepubkeyalgo. Set to 0 to make auto-update inert.", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
@@ -795,7 +795,7 @@ void SetupServerArgs(ArgsManager& argsman, bool can_listen_ipc)
     argsman.AddArg("-autoupdaterequirescripthash", "Require the signed manifest to include script_sha256/install_sha256 matching the downloaded installer before execution (default: 1).", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-autoupdatetelemetry", "Attach privacy-minimized auto-update request metrics query parameters: update-flow marker, client version, platform, architecture, and rollout cohort. No wallet data, addresses, peer IPs, txids, or persistent client ID are sent by default (default: 1).", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-autoupdatetelemetryclientid", "Also attach a persistent random auto-update client UUID stored under the datadir. This is useful for controlled release cohorts but is off by default for privacy/GDPR minimization.", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
-    argsman.AddArg("-autoupdatepython=<path>", "Python interpreter used only for HTTPS manifest/signature/script fetching (default: python3).", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
+    argsman.AddArg("-autoupdatepython=<path>", "Python interpreter used only for HTTPS manifest/signature/script fetching. It is started with -I (isolated mode) (default: python3).", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
     argsman.AddArg("-autoupdatedevorigin", "Allow non-HTTPS auto-update origins for local testing only.", ArgsManager::ALLOW_ANY | ArgsManager::DEBUG_ONLY, OptionsCategory::DEBUG_TEST);
 #if HAVE_SYSTEM
     argsman.AddArg("-startupnotify=<cmd>", "Execute command on startup.", ArgsManager::ALLOW_ANY, OptionsCategory::OPTIONS);
@@ -1211,6 +1211,14 @@ void InitParameterInteraction(ArgsManager& args)
         if (args.SoftSetBoolArg("-natpmp", false)) {
             LogInfo("parameter interaction: -proxy set -> setting -natpmp=0\n");
         }
+#ifdef ENABLE_MODELNET
+        // The model helper listens on all interfaces and does not use -proxy.
+        // With -listen=1 (an onion service) the -listen=0 rule below does not
+        // apply, so keep the model port closed here unless -modelbind is set.
+        if (args.SoftSetArg("-modelbind", "off")) {
+            LogInfo("parameter interaction: -proxy set -> setting -modelbind=off\n");
+        }
+#endif
         // to protect privacy, do not discover addresses by default
         if (args.SoftSetBoolArg("-discover", false))
             LogInfo("parameter interaction: -proxy set -> setting -discover=0\n");
@@ -1230,7 +1238,45 @@ void InitParameterInteraction(ArgsManager& args)
         if (args.SoftSetBoolArg("-i2pacceptincoming", false)) {
             LogInfo("parameter interaction: -listen=0 -> setting -i2pacceptincoming=0\n");
         }
+#ifdef ENABLE_MODELNET
+        // The model helper's PQ1 port accepts connections from outside too.
+        // Keep it closed unless the operator sets -modelbind.
+        if (args.SoftSetArg("-modelbind", "off")) {
+            LogInfo("parameter interaction: -listen=0 -> setting -modelbind=off\n");
+        }
+#endif
     }
+
+#ifdef ENABLE_MODELNET
+    {
+        // A node restricted to non-IP networks, or bound to loopback only (for
+        // example behind a local Tor onion service), must not open the model
+        // helper's PQ1 port on all interfaces.
+        bool only_non_ip{false};
+        if (args.IsArgSet("-onlynet")) {
+            only_non_ip = true;
+            for (const std::string& net : args.GetArgs("-onlynet")) {
+                const std::string n{ToLower(net)};
+                if (n == "ipv4" || n == "ipv6") only_non_ip = false;
+            }
+        }
+        const std::vector<std::string> binds{args.GetArgs("-bind")};
+        bool loopback_bind{!binds.empty()};
+        for (const std::string& bind : binds) {
+            uint16_t port{0};
+            std::string host;
+            const std::string addr{bind.substr(0, bind.find('='))};
+            const auto parsed{SplitHostPort(addr, port, host) ? LookupHost(host, /*fAllowLookup=*/false) : std::nullopt};
+            if (!parsed || !parsed->IsLocal()) loopback_bind = false;
+        }
+        if (only_non_ip && args.SoftSetArg("-modelbind", "off")) {
+            LogInfo("parameter interaction: -onlynet without ipv4/ipv6 -> setting -modelbind=off\n");
+        }
+        if (loopback_bind && args.SoftSetArg("-modelbind", "off")) {
+            LogInfo("parameter interaction: -bind on loopback only -> setting -modelbind=off\n");
+        }
+    }
+#endif
 
     if (!args.GetArgs("-externalip").empty()) {
         // if an explicit public IP is specified, do not try to find others
@@ -1470,7 +1516,7 @@ bool AppInitParameterInteraction(const ArgsManager& args)
         InitWarning(warnings);
     }
 
-    const bool auto_update_enabled = args.IsArgSet("-autoupdate") ? args.GetBoolArg("-autoupdate", true) : chain == ChainType::MAIN;
+    const bool auto_update_enabled = node::AutoUpdateEnabled(args, chain);
     if (auto_update_enabled) {
         const int64_t interval = args.GetIntArg("-autoupdateinterval", node::DEFAULT_AUTOUPDATE_INTERVAL_SECONDS);
         if (interval < 1 || interval > 24 * 60 * 60) {
@@ -1550,6 +1596,9 @@ bool AppInitParameterInteraction(const ArgsManager& args)
         g_local_services = ServiceFlags(g_local_services | NODE_P2P_V2);
     } else if (args.GetBoolArg("-v2onlyclearnet", false)) {
         return InitError(_("Cannot set -v2onlyclearnet to true when v2transport is disabled."));
+    } else if (args.GetBoolArg("-v2pqonly", false)) {
+        // Without v2transport every connection is v1 and -v2pqonly would never be checked.
+        return InitError(_("Cannot set -v2pqonly to true when v2transport is disabled."));
     }
 
     // Signal NODE_COMPACT_FILTERS if peerblockfilters and basic filters index are both enabled.
@@ -1647,12 +1696,31 @@ bool AppInitParameterInteraction(const ArgsManager& args)
 
     const auto blocklist_args{args.GetArgs("-matmulattestationblocklist")};
     std::vector<CPubKey> attestation_blocklist;
+    std::vector<std::vector<unsigned char>> attestation_pq_blocklist;
     attestation_blocklist.reserve(blocklist_args.size());
+    attestation_pq_blocklist.reserve(blocklist_args.size());
     for (const auto& encoded : blocklist_args) {
-        const CPubKey pubkey{ParseHex(encoded)};
+        if (!IsHex(encoded)) {
+            return InitError(strprintf(
+                _("Invalid hex in -matmulattestationblocklist: %s"),
+                encoded));
+        }
+        const std::vector<unsigned char> raw{ParseHex(encoded)};
+        if (raw.size() == matmul::trusted::EXACT_REPLAY_ML_DSA_44_PK) {
+            if (std::find(attestation_pq_blocklist.begin(),
+                          attestation_pq_blocklist.end(),
+                          raw) != attestation_pq_blocklist.end()) {
+                return InitError(strprintf(
+                    _("Duplicate -matmulattestationblocklist: %s"),
+                    encoded));
+            }
+            attestation_pq_blocklist.push_back(raw);
+            continue;
+        }
+        const CPubKey pubkey{raw};
         if (!pubkey.IsCompressed() || !pubkey.IsFullyValid()) {
             return InitError(strprintf(
-                _("Invalid compressed public key in -matmulattestationblocklist: %s"),
+                _("Invalid compressed or ML-DSA-44 public key in -matmulattestationblocklist: %s"),
                 encoded));
         }
         if (std::find(attestation_blocklist.begin(), attestation_blocklist.end(),
@@ -1767,6 +1835,7 @@ bool AppInitParameterInteraction(const ArgsManager& args)
         (!trusted_signers.empty() || !trusted_pq_signers.empty() ||
          has_local_attestation_signer ||
          serve_attestations || !attestation_blocklist.empty() ||
+         !attestation_pq_blocklist.empty() ||
          open_attestors)) {
         return InitError(_("Discovery relay mode (-matmulvalidation=relay) is not MatMul authority and must not load a pin, signing key, GETMMATTEST serve, attestation blocklist, or open attestors. Archives follow GPU attestors via the pin; this node only introduces peers. Remove those flags or run -matmulvalidation=trusted / consensus."));
     }
@@ -1783,7 +1852,8 @@ bool AppInitParameterInteraction(const ArgsManager& args)
         !trusted_pq_signers.empty() ||
         has_local_attestation_signer ||
         serve_attestations ||
-        !attestation_blocklist.empty()};
+        !attestation_blocklist.empty() ||
+        !attestation_pq_blocklist.empty()};
     if (attestation_config_requested) {
         if (trusted_signers.empty() && trusted_pq_signers.empty() &&
             !has_local_attestation_signer) {
@@ -1814,8 +1884,19 @@ bool AppInitParameterInteraction(const ArgsManager& args)
                 ++unblocked_pin_members;
             }
         }
-        unblocked_pin_members += trusted_pq_signers.size() +
-                                 (pq_seeds_pin ? 1 : 0);
+        for (const auto& signer : trusted_pq_signers) {
+            if (std::find(attestation_pq_blocklist.begin(),
+                          attestation_pq_blocklist.end(),
+                          signer) == attestation_pq_blocklist.end()) {
+                ++unblocked_pin_members;
+            }
+        }
+        if (pq_seeds_pin &&
+            std::find(attestation_pq_blocklist.begin(),
+                      attestation_pq_blocklist.end(),
+                      local_pq_pk) == attestation_pq_blocklist.end()) {
+            ++unblocked_pin_members;
+        }
         // A local secp WIF seeds the pin in FinalizeConfiguration, as counted
         // in preliminary_signer_capacity above. Its pubkey is not known before
         // ECC_Start (it may already be pinned, or blocked), so it only lifts
@@ -1905,6 +1986,7 @@ bool AppInitParameterInteraction(const ArgsManager& args)
         }
         config.threshold = static_cast<size_t>(trusted_threshold);
         config.blocklist = attestation_blocklist;
+        config.pq_blocklist = attestation_pq_blocklist;
         config.open_attestors = open_attestors;
         config.open_threshold =
             open_attestors && args.IsArgSet("-matmulopenthreshold")
@@ -3545,6 +3627,15 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
     ChainstateManager& chainman = *Assert(node.chainman);
     auto& kernel_notifications{*Assert(node.notifications)};
 
+    // A block this signer attested can be missing from the block index after
+    // an unclean stop. -reindex rebuilds the index later, so skip it there.
+    if (node::matmul_trusted::HasLocalSigner() && !do_reindex) {
+        node::matmul_trusted::ReleaseLocalVotesOutsideBlockIndex(
+            [&](const uint256& hash) {
+                return WITH_LOCK(cs_main, return chainman.m_blockman.LookupBlockIndex(hash)) != nullptr;
+            });
+    }
+
     // Initialize Dandelion++ privacy relay (before PeerManager so we can pass the pointer)
     if (args.GetBoolArg("-dandelion", true)) {
         node.dandelion = std::make_unique<Dandelion::DandelionManager>();
@@ -4444,14 +4535,32 @@ bool AppInitMain(NodeContext& node, interfaces::BlockAndHeaderTipInfo* tip_info)
         } else {
             hcfg.bind = "0.0.0.0:29447";
         }
-        LogPrintf("model helper exe=%s socket=%s storage=%s bind=%s host=%s relay=%d missing=%d\n",
+        if (hcfg.bind.empty() && hcfg.host_mode != modelnet::HostMode::OFF) {
+            LogPrintf("model helper: -modelhost is on but -modelbind is off, so the helper listens on loopback only; set -modelbind=<ip:port> to serve peers (-listen=0 turns the default off)\n");
+        }
+        hcfg.natpmp = args.GetBoolArg("-natpmp", DEFAULT_NATPMP);
+        // The helper reaches its peers by the node's -proxy, -onion and -onlynet.
+        {
+            Proxy proxy;
+            for (const Network net : {NET_IPV4, NET_IPV6, NET_ONION}) {
+                if (GetProxy(net, proxy)) hcfg.proxies.push_back(proxy.ToString() + "=" + GetNetworkName(net));
+            }
+            if (GetNameProxy(proxy)) hcfg.proxies.push_back(proxy.ToString() + "=name");
+            hcfg.proxy_randomize = args.GetBoolArg("-proxyrandomize", DEFAULT_PROXYRANDOMIZE);
+            for (const std::string& net : args.GetArgs("-onlynet")) {
+                hcfg.onlynets.push_back(GetNetworkName(ParseNetwork(net)));
+            }
+        }
+        LogPrintf("model helper exe=%s socket=%s storage=%s bind=%s host=%s relay=%d missing=%d proxies=%d onlynet=%s\n",
                   fs::PathToString(hcfg.helper_exe),
                   fs::PathToString(hcfg.rpc_socket),
                   hcfg.storage_arg,
                   hcfg.bind,
                   modelnet::HostModeName(hcfg.host_mode),
                   hcfg.relay ? 1 : 0,
-                  hcfg.helper_explicitly_missing ? 1 : 0);
+                  hcfg.helper_explicitly_missing ? 1 : 0,
+                  hcfg.proxies.size(),
+                  hcfg.onlynets.empty() ? "all" : Join(hcfg.onlynets, ","));
         modelnet::SetModelHostServiceBitHook([&node](bool on) {
             if (!node.connman) return;
             if (on) {

@@ -80,13 +80,17 @@ void ResetForTest();
 [[nodiscard]] bool IsAuthoritySigner(const CPubKey& pubkey);
 [[nodiscard]] bool IsAuthorityPqSigner(const std::vector<unsigned char>& pubkey);
 [[nodiscard]] bool IsBlocked(const CPubKey& pubkey);
+[[nodiscard]] bool IsBlockedPq(const std::vector<unsigned char>& pubkey);
 [[nodiscard]] std::vector<CPubKey> BlockedSigners();
 [[nodiscard]] std::vector<CPubKey> ConfigBlockedSigners();
 [[nodiscard]] std::vector<CPubKey> RuntimeBlockedSigners();
+[[nodiscard]] std::vector<std::vector<unsigned char>> BlockedPqSigners();
 [[nodiscard]] size_t UnblockedPinMembers();
 [[nodiscard]] bool PinQuorumReachable();
 [[nodiscard]] matmul::trusted::BlocklistResult AddBlocklistedSigner(
     const CPubKey& pubkey, std::string& persist_error);
+[[nodiscard]] matmul::trusted::BlocklistResult AddBlocklistedPqSigner(
+    const std::vector<unsigned char>& pubkey, std::string& persist_error);
 [[nodiscard]] std::vector<matmul::trusted::ExactReplayAttestation> HeardAttestations();
 /** Heard statements for one block, for a GETMMATTEST answer. See
  *  AttestationStore::GetHeardForServe. Empty without a store. */
@@ -138,6 +142,17 @@ bool NotifyActiveChainBlockDisconnected(int32_t height,
 /** Inverse: the hash is on the active chain again. */
 void NotifyActiveChainBlockConnected(int32_t height,
                                      const uint256& connected_hash);
+/**
+ * Startup, once the block index is loaded: release this signer's votes for
+ * blocks that are not in the block index, as a disconnect of each would.
+ * After an unclean stop the index can miss blocks this node already signed
+ * (it is flushed lazily, the votes are not); nothing would disconnect them,
+ * and a vote whose block was replaced meanwhile refuses the new block at that
+ * height for good. If the block comes back, connecting it lifts the release.
+ * Returns the number of released heights.
+ */
+size_t ReleaseLocalVotesOutsideBlockIndex(
+    const std::function<bool(const uint256&)>& in_block_index);
 /**
  * Operator RPC path: clear local mint slots in [from_height, to_height]
  * inclusive. Consensus-neutral: only what this process will re-mint/serve.
@@ -1631,9 +1646,14 @@ inline constexpr int32_t PERSIST_FOLLOWED_SUFFIX_MAX_LEAD{1024};
  *  sending. HEADER_ONLY then waits forever (live: background tip frozen
  *  at height 6698, 28 HEADER_ONLY admits/hour, zero GETMMATTEST). Persist
  *  HAVE_DATA so background ConnectTip can complete with historical
- *  validation. Once attestation is active, keep HEADER_ONLY + GETMMATTEST
- *  so unattested RC history does not ExactReplay on the GPU. Competing
- *  extra twins are not followed historical holes and stay HEADER_ONLY. */
+ *  validation. Once attestation is active, an unattested hole stays
+ *  HEADER_ONLY + GETMMATTEST so unattested RC history does not ExactReplay,
+ *  except a body this node requested for its background chainstate that no
+ *  quorum covers (#292): without signer pins GETMMATTEST is never sent, so
+ *  that hole never filled. It goes through normal RC admission and
+ *  ExactReplays (net_processing.cpp, IsUncoveredBackgroundChainstateHole).
+ *  Competing extra twins are not followed historical holes and stay
+ *  HEADER_ONLY. */
 [[nodiscard]] inline constexpr bool PersistPreAttestationHistoricalHole(
     bool followed_historical_hole,
     bool attestation_active_at_height)
@@ -2942,6 +2962,11 @@ struct TrustedAttestationAdmitView {
     //! GPU-signed frontier hash itself. Coverage for the ancestor suffix
     //! cannot be fetched if this hash is RejectAboveFrontier.
     bool is_signed_frontier_hash{false};
+    //! A pinned signer's MMATTEST for this hash arrived and verified before
+    //! its header was indexed here, and was dropped. The signers are past
+    //! this block, so the signed frontier this node has indexed does not
+    //! bound it. Park, the forward-of-tip rule and backoff still apply.
+    bool attested_before_header{false};
     bool on_parked_reorg_branch{false};
     int32_t height{-1};
     std::optional<int32_t> authority_frontier{};
@@ -2976,7 +3001,7 @@ struct TrustedAttestationAdmitView {
         return TrustedAttestationAdmit::RejectNotForwardOfTip;
     }
     if (v.authority_frontier.has_value() &&
-        v.height > *v.authority_frontier) {
+        v.height > *v.authority_frontier && !v.attested_before_header) {
         return TrustedAttestationAdmit::RejectAboveFrontier;
     }
     if (v.in_backoff) {

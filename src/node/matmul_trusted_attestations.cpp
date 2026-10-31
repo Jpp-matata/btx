@@ -179,6 +179,28 @@ struct DurableBlocklistState {
     }
 };
 
+// Separate key from DurableBlocklistKey so legacy secp-only records stay
+// readable; PQ emergency blocks persist independently.
+struct DurablePqBlocklistKey {
+    static constexpr uint8_t PREFIX{'Q'};
+    uint8_t prefix{PREFIX};
+    uint256 chain_id{};
+
+    SERIALIZE_METHODS(DurablePqBlocklistKey, obj)
+    {
+        READWRITE(obj.prefix, obj.chain_id);
+    }
+};
+
+struct DurablePqBlocklistState {
+    std::vector<std::vector<unsigned char>> blocked{};
+
+    SERIALIZE_METHODS(DurablePqBlocklistState, obj)
+    {
+        READWRITE(obj.blocked);
+    }
+};
+
 // V5/RB-12 durable withdrawal tombstone (adv5): (height, hash) this node's own
 // validated reorg disconnected while its local signer had voted. Seeded into
 // the store's off-active-chain set at startup BEFORE attestations load, so a
@@ -202,6 +224,33 @@ struct DurableWithdrawnVotePrefix {
     uint256 authority_namespace{};
 
     SERIALIZE_METHODS(DurableWithdrawnVotePrefix, obj)
+    {
+        READWRITE(obj.prefix, obj.authority_namespace);
+    }
+};
+
+// Mint slot the local key took at a height (SignLocal / SignLocalPq), value
+// is the hash. Restored into the store at startup, so after a restart the
+// store keeps the one-signature-per-height slot and this node's own reorg
+// still withdraws its vote. Written only by the local sign path: a relayed
+// copy of the local key in the vote records must not occupy the slot.
+struct DurableMintSlotKey {
+    static constexpr uint8_t PREFIX{'m'};
+    uint8_t prefix{PREFIX};
+    uint256 authority_namespace{};
+    int32_t height{-1};
+
+    SERIALIZE_METHODS(DurableMintSlotKey, obj)
+    {
+        READWRITE(obj.prefix, obj.authority_namespace, obj.height);
+    }
+};
+
+struct DurableMintSlotPrefix {
+    uint8_t prefix{DurableMintSlotKey::PREFIX};
+    uint256 authority_namespace{};
+
+    SERIALIZE_METHODS(DurableMintSlotPrefix, obj)
     {
         READWRITE(obj.prefix, obj.authority_namespace);
     }
@@ -378,15 +427,30 @@ bool LoadBlocklistState(
     DurableBlocklistState state;
     const auto status{g_durable_db->TryRead(
         DurableBlocklistKey{.chain_id = store->ChainId()}, state)};
-    if (status.status == CDBWrapper::ReadStatus::Code::NOT_FOUND) return true;
-    if (status.status != CDBWrapper::ReadStatus::Code::OK) {
+    if (status.status == CDBWrapper::ReadStatus::Code::OK) {
+        std::set<CPubKey> blocked{state.blocked.begin(), state.blocked.end()};
+        if (!store->RestoreRuntimeBlocked(std::move(blocked)) ||
+            !store->PinQuorumReachable()) {
+            error = "persisted attestation blocklist leaves fewer than M unblocked pin members or would block the local signer";
+            return false;
+        }
+    } else if (status.status != CDBWrapper::ReadStatus::Code::NOT_FOUND) {
         error = "failed to read persisted attestation blocklist";
         return false;
     }
-    std::set<CPubKey> blocked{state.blocked.begin(), state.blocked.end()};
-    if (!store->RestoreRuntimeBlocked(std::move(blocked)) ||
-        !store->PinQuorumReachable()) {
-        error = "persisted attestation blocklist leaves fewer than M unblocked pin members or would block the local signer";
+    DurablePqBlocklistState pq_state;
+    const auto pq_status{g_durable_db->TryRead(
+        DurablePqBlocklistKey{.chain_id = store->ChainId()}, pq_state)};
+    if (pq_status.status == CDBWrapper::ReadStatus::Code::OK) {
+        std::set<std::vector<unsigned char>> blocked{
+            pq_state.blocked.begin(), pq_state.blocked.end()};
+        if (!store->RestoreRuntimeBlockedPq(std::move(blocked)) ||
+            !store->PinQuorumReachable()) {
+            error = "persisted attestation PQ blocklist leaves fewer than M unblocked pin members or would block the local signer";
+            return false;
+        }
+    } else if (pq_status.status != CDBWrapper::ReadStatus::Code::NOT_FOUND) {
+        error = "failed to read persisted attestation PQ blocklist";
         return false;
     }
     return true;
@@ -405,6 +469,15 @@ bool PersistBlocklistState(
             DurableBlocklistKey{.chain_id = store->ChainId()},
             state, /*fSync=*/true)) {
         error = "failed to persist attestation blocklist";
+        return false;
+    }
+    DurablePqBlocklistState pq_state;
+    const auto runtime_pq{store->RuntimeBlockedPqSigners()};
+    pq_state.blocked.assign(runtime_pq.begin(), runtime_pq.end());
+    if (!g_durable_db->Write(
+            DurablePqBlocklistKey{.chain_id = store->ChainId()},
+            pq_state, /*fSync=*/true)) {
+        error = "failed to persist attestation PQ blocklist";
         return false;
     }
     return true;
@@ -544,6 +617,15 @@ bool ImportAttestations(
             g_local_signed_hash_by_height.emplace(height, hash);
         }
     }
+    // store->Add above bypasses the Add() wrapper, so note each imported pin
+    // quorum here, as LoadDurableAttestations does for its hot tail.
+    // Otherwise a quorum known only from the WAL or the legacy archive is
+    // missing from AttestedFrontierHints after a restart.
+    for (const auto& [height, hashes] : imported_quorum) {
+        for (const auto& hash : hashes) {
+            NoteAcceptedAttestationHeight(height, hash);
+        }
+    }
     LogPrintf("Loaded %zu MatMul ExactReplay attestation(s) from %s\n",
               accepted, fs::PathToString(source));
     if (prior_authority != 0) {
@@ -578,6 +660,13 @@ bool LoadDurableAttestations(
     std::map<TailKey,
              std::vector<matmul::trusted::ExactReplayAttestation>> hot_tail;
     size_t hot_tail_attestations{0};
+    // Quorum keys in the tail. Eviction skips the ones at the highest quorum
+    // height seen so far, so more than max_blocks newer non-quorum records
+    // (one pin signing while quorum stalls) cannot evict the signed frontier
+    // and leave the watermark restored below without its hint or in-memory
+    // quorum. The height is serialized little-endian, so records do not
+    // arrive in height order and "highest" is a running maximum.
+    std::set<TailKey> quorum_tail_keys;
     for (; cursor->Valid(); cursor->Next()) {
         DurableAttestationKey key;
         if (!cursor->GetKey(key) ||
@@ -591,6 +680,14 @@ bool LoadDurableAttestations(
             error = "durable attestation database contains a malformed record";
             return false;
         }
+        // The durable record still holds a local vote that this node withdrew
+        // on its own reorg (the tombstone seeded by LoadWithdrawnLocalVotes).
+        // AttestationStore::Add refuses that vote below, so it must not count
+        // toward the quorum, the watermark or the local-signed height here
+        // either. Peer votes for the same hash stay.
+        const bool local_vote_withdrawn{
+            local_pk.has_value() &&
+            store->IsOffActiveChain(key.height, key.block_hash)};
         std::set<CPubKey> seen;
         std::vector<matmul::trusted::ExactReplayAttestation> pin_only;
         for (const auto& attestation : attestations) {
@@ -614,6 +711,9 @@ bool LoadDurableAttestations(
                 }
                 continue;
             }
+            if (local_vote_withdrawn && attestation.signer == *local_pk) {
+                continue;
+            }
             pin_only.push_back(attestation);
         }
         if (pin_only.empty()) {
@@ -635,10 +735,22 @@ bool LoadDurableAttestations(
         }
         hot_tail_attestations += pin_only.size();
         hot_tail.emplace(tail_key, std::move(pin_only));
+        if (pin_quorum) quorum_tail_keys.insert(tail_key);
         while (hot_tail.size() > store->MaxBlocks() ||
                hot_tail_attestations > store->MaxAttestations()) {
-            hot_tail_attestations -= hot_tail.begin()->second.size();
-            hot_tail.erase(hot_tail.begin());
+            // Oldest first, but step over the frontier quorum
+            // key(s). Newer partials stay, and an eviction only walks past
+            // the frontier twins when the tail starts at that height. If the
+            // tail holds nothing else, fall back to the oldest key.
+            auto drop{hot_tail.begin()};
+            while (drop != hot_tail.end() && drop->first.first == highest &&
+                   quorum_tail_keys.count(drop->first) != 0) {
+                ++drop;
+            }
+            if (drop == hot_tail.end()) drop = hot_tail.begin();
+            quorum_tail_keys.erase(drop->first);
+            hot_tail_attestations -= drop->second.size();
+            hot_tail.erase(drop);
         }
         ++records;
     }
@@ -697,6 +809,18 @@ bool LoadDurablePqAttestations(
     size_t records{0};
     int32_t highest{-1};
     std::map<int32_t, std::set<uint256>> all_quorum;
+    // Same hot tail as LoadDurableAttestations: verify every record, but
+    // import only the newest cache-sized tail, and never evict the quorum
+    // key(s) at the highest quorum height seen so far. Importing in key order
+    // instead lets every later record evict an earlier one, and the height
+    // is serialized little-endian, so the frontier is often loaded first and
+    // evicted.
+    using TailKey = std::pair<int32_t, uint256>;
+    std::map<TailKey,
+             std::vector<matmul::trusted::ExactReplayPqAttestation>> hot_tail;
+    size_t hot_tail_attestations{0};
+    std::set<TailKey> quorum_tail_keys;
+    const auto local_pq_pk{store->LocalPqPubKey()};
     for (; cursor->Valid(); cursor->Next()) {
         DurablePqAttestationKey key;
         if (!cursor->GetKey(key) ||
@@ -710,7 +834,14 @@ bool LoadDurablePqAttestations(
             error = "durable PQ attestation database contains a malformed record";
             return false;
         }
+        // As in LoadDurableAttestations: a local vote this node withdrew on
+        // its own reorg stays in the durable record, and AddPq refuses it,
+        // so it must not count toward the quorum or the watermark either.
+        const bool local_vote_withdrawn{
+            local_pq_pk.has_value() &&
+            store->IsOffActiveChain(key.height, key.block_hash)};
         std::set<std::vector<unsigned char>> seen;
+        std::vector<matmul::trusted::ExactReplayPqAttestation> pin_only;
         for (const auto& attestation : attestations) {
             if (attestation.statement.block_hash != key.block_hash ||
                 attestation.statement.block_height != key.height ||
@@ -731,20 +862,54 @@ bool LoadDurablePqAttestations(
                 }
                 continue;
             }
-            const auto result{store->AddPq(attestation, key.block_hash, key.height)};
+            if (local_vote_withdrawn && attestation.signer == *local_pq_pk) {
+                continue;
+            }
+            pin_only.push_back(attestation);
+        }
+        ++records;
+        if (pin_only.empty()) continue;
+        // A mixed pin quorum counts the secp votes already in the hot cache.
+        const TailKey tail_key{key.height, key.block_hash};
+        const bool pin_quorum{store->HasQuorumFromAttestations(
+            store->GetAttestations(key.block_hash, key.height), pin_only,
+            key.block_hash, key.height)};
+        if (pin_quorum) {
+            highest = std::max(highest, key.height);
+            all_quorum[key.height].insert(key.block_hash);
+        }
+        hot_tail_attestations += pin_only.size();
+        hot_tail.emplace(tail_key, std::move(pin_only));
+        if (pin_quorum) quorum_tail_keys.insert(tail_key);
+        while (hot_tail.size() > store->MaxBlocks() ||
+               hot_tail_attestations > store->MaxAttestations()) {
+            auto drop{hot_tail.begin()};
+            while (drop != hot_tail.end() && drop->first.first == highest &&
+                   quorum_tail_keys.count(drop->first) != 0) {
+                ++drop;
+            }
+            if (drop == hot_tail.end()) drop = hot_tail.begin();
+            quorum_tail_keys.erase(drop->first);
+            hot_tail_attestations -= drop->second.size();
+            hot_tail.erase(drop);
+        }
+    }
+    for (const auto& [tail_key, attestations] : hot_tail) {
+        for (const auto& attestation : attestations) {
+            // LoadBlocklistState runs first, so a vote a key cast before the
+            // operator blocked it comes back as BlocklistedSigner. Skip it
+            // (the record stays on disk), as the secp256k1 loaders do.
+            const auto result{store->AddPq(attestation, tail_key.second,
+                                           tail_key.first)};
             if (result != matmul::trusted::AddResult::Accepted &&
                 result != matmul::trusted::AddResult::Duplicate &&
                 result != matmul::trusted::AddResult::Capacity &&
-                result != matmul::trusted::AddResult::UntrustedSigner) {
+                result != matmul::trusted::AddResult::UntrustedSigner &&
+                result != matmul::trusted::AddResult::BlocklistedSigner) {
                 error = strprintf("durable PQ hot-cache import rejected: %s",
                                   matmul::trusted::AddResultName(result));
                 return false;
             }
-        }
-        ++records;
-        if (store->HasQuorum(key.block_hash, key.height)) {
-            highest = std::max(highest, key.height);
-            all_quorum[key.height].insert(key.block_hash);
         }
     }
     {
@@ -757,6 +922,14 @@ bool LoadDurablePqAttestations(
             }
         }
     }
+    // store->AddPq above bypasses the AddPq() wrapper, so note each restored
+    // pin quorum here, as LoadDurableAttestations does for its hot tail.
+    // NoteAcceptedAttestationHeight keeps only the hint window.
+    for (const auto& [height, hashes] : all_quorum) {
+        for (const auto& hash : hashes) {
+            NoteAcceptedAttestationHeight(height, hash);
+        }
+    }
     if (records != 0) {
         LogPrintf("Verified %zu durable MatMul ML-DSA-44 attestation block record(s)\n",
                   records);
@@ -764,30 +937,44 @@ bool LoadDurablePqAttestations(
     return true;
 }
 
-void PersistWithdrawnLocalVote(int32_t height, const uint256& block_hash)
+//! The tombstone and, when the store released the mint slot for this hash,
+//! the erase of the mint-slot record go in one batch, so a restart never
+//! restores the slot for a hash whose vote is withdrawn.
+void PersistWithdrawnLocalVote(int32_t height, const uint256& block_hash,
+                               bool release_mint_slot)
 {
     if (height < 0 || block_hash.IsNull()) return;
     std::lock_guard io_lock{g_persist_io_mutex};
     if (!g_durable_db || !g_durable_namespace.has_value()) return;
-    const bool ok{g_durable_db->Write(
+    CDBBatch batch{*g_durable_db};
+    batch.Write(
         DurableWithdrawnVoteKey{.authority_namespace = *g_durable_namespace,
                                 .height = height, .block_hash = block_hash},
-        uint8_t{1}, /*fSync=*/true)};
+        uint8_t{release_mint_slot ? uint8_t{2} : uint8_t{1}});
+    if (release_mint_slot) {
+        batch.Erase(DurableMintSlotKey{
+            .authority_namespace = *g_durable_namespace, .height = height});
+    }
+    const bool ok{g_durable_db->WriteBatch(batch, /*fSync=*/true)};
     if (!ok) {
         LogPrintf("matmul: failed to persist withdrawn-local-vote tombstone "
                   "height=%d hash=%s\n", height, block_hash.ToString());
     }
 }
 
-void EraseWithdrawnLocalVote(int32_t height, const uint256& block_hash)
+//! Returns the tombstone's value (2: written with the mint-slot release,
+//! 1: without), or 0 when there was none.
+uint8_t EraseWithdrawnLocalVote(int32_t height, const uint256& block_hash)
 {
-    if (height < 0 || block_hash.IsNull()) return;
+    if (height < 0 || block_hash.IsNull()) return 0;
     std::lock_guard io_lock{g_persist_io_mutex};
-    if (!g_durable_db || !g_durable_namespace.has_value()) return;
-    (void)g_durable_db->Erase(
-        DurableWithdrawnVoteKey{.authority_namespace = *g_durable_namespace,
-                                .height = height, .block_hash = block_hash},
-        /*fSync=*/false);
+    if (!g_durable_db || !g_durable_namespace.has_value()) return 0;
+    const DurableWithdrawnVoteKey key{.authority_namespace = *g_durable_namespace,
+                                      .height = height, .block_hash = block_hash};
+    uint8_t value{0};
+    if (!g_durable_db->Read(key, value)) return 0;
+    (void)g_durable_db->Erase(key, /*fSync=*/false);
+    return value;
 }
 
 bool LoadWithdrawnLocalVotes(
@@ -806,6 +993,81 @@ bool LoadWithdrawnLocalVotes(
             break;
         }
         store->SeedOffActiveChain(key.height, key.block_hash);
+    }
+    return true;
+}
+
+void PersistLocalMintSlot(int32_t height, const uint256& block_hash)
+{
+    if (height < 0 || block_hash.IsNull()) return;
+    std::lock_guard io_lock{g_persist_io_mutex};
+    if (!g_durable_db || !g_durable_namespace.has_value()) return;
+    // No fsync: the local vote itself reaches disk through the persistence
+    // worker, and a slot record that outlives its vote only refuses a second
+    // local signature at that height.
+    const bool ok{g_durable_db->Write(
+        DurableMintSlotKey{.authority_namespace = *g_durable_namespace,
+                           .height = height},
+        block_hash, /*fSync=*/false)};
+    if (!ok) {
+        LogPrintf("matmul: failed to persist local mint slot "
+                  "height=%d hash=%s\n", height, block_hash.ToString());
+    }
+}
+
+void EraseLocalMintSlots(int32_t from_height, int32_t to_height)
+{
+    std::lock_guard io_lock{g_persist_io_mutex};
+    if (!g_durable_db || !g_durable_namespace.has_value()) return;
+    // Heights are serialized little-endian, so walk the whole namespace.
+    CDBBatch batch{*g_durable_db};
+    std::unique_ptr<CDBIterator> cursor{g_durable_db->NewIterator()};
+    cursor->Seek(DurableMintSlotPrefix{
+        .authority_namespace = *g_durable_namespace});
+    for (; cursor->Valid(); cursor->Next()) {
+        DurableMintSlotKey key;
+        if (!cursor->GetKey(key) ||
+            key.prefix != DurableMintSlotKey::PREFIX ||
+            key.authority_namespace != *g_durable_namespace) {
+            break;
+        }
+        if (key.height >= from_height && key.height <= to_height) {
+            batch.Erase(key);
+        }
+    }
+    (void)g_durable_db->WriteBatch(batch, /*fSync=*/true);
+}
+
+bool LoadLocalMintSlots(
+    const std::shared_ptr<matmul::trusted::AttestationStore>& store,
+    std::string& error)
+{
+    if (!g_durable_db) return true;
+    const uint256 authority_namespace{AuthorityNamespace(*store)};
+    std::map<int32_t, uint256> restored;
+    std::unique_ptr<CDBIterator> cursor{g_durable_db->NewIterator()};
+    cursor->Seek(DurableMintSlotPrefix{
+        .authority_namespace = authority_namespace});
+    for (; cursor->Valid(); cursor->Next()) {
+        DurableMintSlotKey key;
+        if (!cursor->GetKey(key) ||
+            key.prefix != DurableMintSlotKey::PREFIX ||
+            key.authority_namespace != authority_namespace) {
+            break;
+        }
+        uint256 block_hash;
+        if (!cursor->GetValue(block_hash)) {
+            error = "durable attestation database contains a malformed mint-slot record";
+            return false;
+        }
+        store->RestoreLocalMintSlot(key.height, block_hash);
+        restored.emplace(key.height, block_hash);
+    }
+    {
+        std::lock_guard lock{g_mutex};
+        for (const auto& [height, hash] : restored) {
+            g_local_signed_hash_by_height.emplace(height, hash);
+        }
     }
     return true;
 }
@@ -880,8 +1142,16 @@ std::vector<matmul::trusted::ExactReplayAttestation> ReadDurableAttestations(
                               .block_hash = block_hash}, out)};
     if (status.status != CDBWrapper::ReadStatus::Code::OK) return {};
     if (auto store{Store()}) {
+        // Like LoadDurableAttestations: a local vote this node withdrew on its
+        // own reorg stays in the durable record, but must not count or be
+        // served again.
+        const auto local_pk{store->LocalSignerPubKey()};
+        const bool local_vote_withdrawn{
+            local_pk.has_value() &&
+            store->IsOffActiveChain(block_height, block_hash)};
         std::erase_if(out, [&](const matmul::trusted::ExactReplayAttestation& a) {
-            return !store->IsAuthoritySigner(a.signer);
+            return !store->IsAuthoritySigner(a.signer) ||
+                   (local_vote_withdrawn && a.signer == *local_pk);
         });
     }
     return out;
@@ -958,9 +1228,17 @@ std::vector<matmul::trusted::ExactReplayPqAttestation> ReadDurablePqAttestations
         out)};
     if (status.status != CDBWrapper::ReadStatus::Code::OK) return {};
     if (auto store{Store()}) {
+        // Same rule as ReadDurableAttestations for the local ML-DSA-44 vote:
+        // a vote this node withdrew on its own reorg stays in the durable
+        // record, but must not count or be served again.
+        const auto local_pq_pk{store->LocalPqPubKey()};
+        const bool local_vote_withdrawn{
+            local_pq_pk.has_value() &&
+            store->IsOffActiveChain(block_height, block_hash)};
         std::erase_if(
             out, [&](const matmul::trusted::ExactReplayPqAttestation& a) {
-                return !store->IsAuthorityPqSigner(a.signer);
+                return !store->IsAuthorityPqSigner(a.signer) ||
+                       (local_vote_withdrawn && a.signer == *local_pq_pk);
             });
     }
     return out;
@@ -969,10 +1247,18 @@ std::vector<matmul::trusted::ExactReplayPqAttestation> ReadDurablePqAttestations
 void PersistAfterPqMutation(
     const matmul::trusted::ExactReplayPqAttestation& attestation)
 {
-    std::lock_guard config_lock{g_mutex};
-    if (!g_persist_enabled || g_persist_path.empty()) return;
-    std::string error;
+    // PersistDurablePqAttestations calls Store(), which locks g_mutex, so
+    // g_mutex is held only for the admission check. Taking the io lock first
+    // (the order every other persistence path uses) and keeping it across
+    // the write means ClosePersistence cannot reset the database under a
+    // record admitted here, the same guarantee PersistAfterMutation gives
+    // its queue.
     std::lock_guard io_lock{g_persist_io_mutex};
+    {
+        std::lock_guard config_lock{g_mutex};
+        if (!g_persist_enabled || g_persist_path.empty()) return;
+    }
+    std::string error;
     (void)PersistDurablePqAttestations(Span{&attestation, 1}, error);
 }
 
@@ -1491,11 +1777,25 @@ bool IsBlocked(const CPubKey& pubkey)
     return store && store->IsBlocked(pubkey);
 }
 
+bool IsBlockedPq(const std::vector<unsigned char>& pubkey)
+{
+    auto store{Store()};
+    return store && store->IsBlockedPq(pubkey);
+}
+
 std::vector<CPubKey> BlockedSigners()
 {
     auto store{Store()};
     if (!store) return {};
     const auto blocked{store->BlockedSigners()};
+    return {blocked.begin(), blocked.end()};
+}
+
+std::vector<std::vector<unsigned char>> BlockedPqSigners()
+{
+    auto store{Store()};
+    if (!store) return {};
+    const auto blocked{store->BlockedPqSigners()};
     return {blocked.begin(), blocked.end()};
 }
 
@@ -1534,6 +1834,20 @@ matmul::trusted::BlocklistResult AddBlocklistedSigner(
     auto store{Store()};
     if (!store) return matmul::trusted::BlocklistResult::Invalid;
     const auto result{store->AddBlocklistedSigner(pubkey)};
+    if (result == matmul::trusted::BlocklistResult::Blocked) {
+        std::lock_guard io_lock{g_persist_io_mutex};
+        (void)PersistBlocklistState(store, persist_error);
+    }
+    return result;
+}
+
+matmul::trusted::BlocklistResult AddBlocklistedPqSigner(
+    const std::vector<unsigned char>& pubkey, std::string& persist_error)
+{
+    persist_error.clear();
+    auto store{Store()};
+    if (!store) return matmul::trusted::BlocklistResult::Invalid;
+    const auto result{store->AddBlocklistedPqSigner(pubkey)};
     if (result == matmul::trusted::BlocklistResult::Blocked) {
         std::lock_guard io_lock{g_persist_io_mutex};
         (void)PersistBlocklistState(store, persist_error);
@@ -1729,6 +2043,9 @@ matmul::trusted::AddResult SignAuthoritative(
             std::lock_guard lock{g_mutex};
             g_local_signed_hash_by_height.emplace(block_height, block_hash);
         }
+        if (store->LocalMintedHash(block_height) == block_hash) {
+            PersistLocalMintSlot(block_height, block_hash);
+        }
     }
     if (store->LocalSignerPubKey().has_value()) return secp_result;
     return pq_result;
@@ -1752,10 +2069,39 @@ bool NotifyActiveChainBlockDisconnected(int32_t height,
             released_hint = true;
         }
     }
+    if (released_store && !store->HasQuorum(disconnected_hash, height)) {
+        // Without the withdrawn vote the hash has no quorum in memory. If it
+        // had quorum, NoteAcceptedAttestationHeight put it in the quorum map
+        // and the frontier hints and may have raised the watermark to this
+        // height. Drop all three, so the signed-frontier lookups fall back to
+        // the highest remaining quorum instead of a hash that no longer has
+        // quorum in memory.
+        std::lock_guard lock{g_mutex};
+        if (const auto quorum_it{g_quorum_hashes_by_height.find(height)};
+            quorum_it != g_quorum_hashes_by_height.end()) {
+            quorum_it->second.erase(disconnected_hash);
+            if (quorum_it->second.empty()) {
+                g_quorum_hashes_by_height.erase(quorum_it);
+            }
+        }
+        if (const auto hint_it{g_attested_by_height.find(height)};
+            hint_it != g_attested_by_height.end()) {
+            hint_it->second.erase(disconnected_hash);
+            if (hint_it->second.empty()) g_attested_by_height.erase(hint_it);
+        }
+        if (g_highest_attested_height == height &&
+            g_quorum_hashes_by_height.count(height) == 0) {
+            g_highest_attested_height =
+                g_quorum_hashes_by_height.empty()
+                    ? -1
+                    : g_quorum_hashes_by_height.rbegin()->first;
+        }
+    }
     if (released_store || released_hint) {
         // V5/RB-12 (adv5): make the withdrawal DURABLE so a reloaded or relayed
         // copy of our abandoned vote cannot re-form quorum after restart.
-        PersistWithdrawnLocalVote(height, disconnected_hash);
+        PersistWithdrawnLocalVote(height, disconnected_hash,
+                                  /*release_mint_slot=*/released_store);
         LogPrintf("matmul: released local mint slot at height %d after "
                   "active-chain disconnect of %s\n",
                   height, disconnected_hash.ToString());
@@ -1773,7 +2119,38 @@ void NotifyActiveChainBlockConnected(int32_t height,
     }
     // The hash is back on the active chain: drop its withdrawal tombstone so a
     // future re-vote / reload is allowed again.
-    EraseWithdrawnLocalVote(height, connected_hash);
+    if (EraseWithdrawnLocalVote(height, connected_hash) == 2 && store) {
+        // This node held the mint slot for the hash when it withdrew its vote,
+        // and the vote counts on disk again. Take the slot back, so a later
+        // disconnect withdraws the vote again, also after a restart.
+        store->RestoreLocalMintSlot(height, connected_hash);
+        if (store->LocalMintedHash(height) == connected_hash) {
+            PersistLocalMintSlot(height, connected_hash);
+            std::lock_guard lock{g_mutex};
+            g_local_signed_hash_by_height.emplace(height, connected_hash);
+        }
+    }
+}
+
+size_t ReleaseLocalVotesOutsideBlockIndex(
+    const std::function<bool(const uint256&)>& in_block_index)
+{
+    // Copy first: in_block_index takes cs_main, which is ordered before g_mutex.
+    std::map<int32_t, uint256> local_signed;
+    {
+        std::lock_guard lock{g_mutex};
+        local_signed = g_local_signed_hash_by_height;
+    }
+    size_t released{0};
+    for (const auto& [height, hash] : local_signed) {
+        if (hash.IsNull() || in_block_index(hash)) continue;
+        if (NotifyActiveChainBlockDisconnected(height, hash)) ++released;
+    }
+    if (released != 0) {
+        LogPrintf("matmul: released %zu local vote(s) for blocks missing from "
+                  "the block index after restart\n", released);
+    }
+    return released;
 }
 
 size_t ClearMintedAttestations(int32_t from_height, int32_t to_height)
@@ -1788,6 +2165,7 @@ size_t ClearMintedAttestations(int32_t from_height, int32_t to_height)
         }
         store->ClearLocalMintSlots(from_height, to_height);
     }
+    EraseLocalMintSlots(from_height, to_height);
     {
         std::lock_guard lock{g_mutex};
         auto it{g_local_signed_hash_by_height.lower_bound(from_height)};
@@ -2051,6 +2429,7 @@ bool OpenPersistence(const fs::path& path, std::string& error)
             if (!LoadBlocklistState(store, error) ||
                 !LoadOpenAttestorState(store) ||
                 !LoadWithdrawnLocalVotes(store) ||
+                !LoadLocalMintSlots(store, error) ||
                 !LoadDurableAttestations(store, error) ||
                 !LoadDurablePqAttestations(store, error) ||
                 !LoadPersistenceSnapshot(store, path, error) ||

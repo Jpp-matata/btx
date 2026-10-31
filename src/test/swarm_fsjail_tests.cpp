@@ -210,7 +210,8 @@ BOOST_AUTO_TEST_CASE(macos_helper_runs_jailed)
     BOOST_CHECK(out.find("etc_hosts=0\n") != std::string::npos);
     BOOST_CHECK(out.find("loopback_bind=0\n") != std::string::npos);
     // Regression checks for the default-deny profile.
-    for (const char* line : {"mach_lookup=0\n", "fork=0\n", "signal_parent=0\n", "posix_shm=0\n", "cwd_root=1\n"}) {
+    for (const char* line : {"mach_lookup=0\n", "fork=0\n", "signal_parent=0\n", "procargs_parent=0\n",
+                             "uname=1\n", "posix_shm=0\n", "cwd_root=1\n"}) {
         BOOST_CHECK_MESSAGE(out.find(line) != std::string::npos, "probe line " << line);
     }
 }
@@ -399,6 +400,21 @@ BOOST_AUTO_TEST_CASE(linux_jail_tree_limit_refuses_result_after_run)
     const bool done = fs::exists(root / "burst.done");
     fs::remove_all(root);
     BOOST_CHECK(done);
+}
+
+// A regular file at put_old (root/.btx-fsjail-old), which a package can ship,
+// makes pivot_root fail. The jail refuses then; it does not fall back to a
+// chroot and run the helper.
+BOOST_AUTO_TEST_CASE(linux_jail_refuses_when_pivot_root_fails)
+{
+    if (!JailAvailable()) return;
+    const fs::path root = FreshRoot("btx-swarm-fsjail-linux-put-old");
+    modelnet::SwarmFilesystemJailRequest request = BaseRequest(CopyProbe(root, nullptr), root);
+    WriteRegularFile(root / ".btx-fsjail-old");
+    ExpectRefusal(request, "JAIL_ABSENT");
+    const bool ran = fs::exists(root / "probe.out");
+    fs::remove_all(root);
+    BOOST_CHECK(!ran);
 }
 
 // A root that is already over max_tree_bytes is refused before launch: the

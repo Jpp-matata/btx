@@ -510,6 +510,11 @@ bool DecodeImage(const std::string& json, LabDiskImage& image)
                 !FieldStr(row, "digest", saved.digest) || saved.digest.empty() || !FieldStr(row, "result", saved.result)) {
                 return false;
             }
+            if (row.exists("retired")) {
+                if (!row["retired"].isBool()) return false;
+                saved.retired = row["retired"].isTrue();
+            }
+            if (saved.retired) saved.result.clear();
             loaded.idempotency.push_back(std::move(saved));
         }
     }
@@ -687,7 +692,8 @@ std::string EncodeImage(const LabDiskImage& image)
         row.pushKV("caller", saved.caller);
         row.pushKV("key", saved.key);
         row.pushKV("digest", saved.digest);
-        row.pushKV("result", saved.result);
+        row.pushKV("result", saved.retired ? std::string() : saved.result);
+        if (saved.retired) row.pushKV("retired", true);
         idempotency.push_back(std::move(row));
     }
     root.pushKV("idempotency", idempotency);

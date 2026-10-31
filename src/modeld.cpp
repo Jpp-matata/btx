@@ -5,6 +5,7 @@
 #include <clientversion.h>
 #include <modelnet/auto_storage.h>
 #include <modelnet/helper.h>
+#include <modelnet/model_nat.h>
 #include <modelnet/policy.h>
 #include <modelnet/profile.h>
 #include <modelnet/resource_uri.h>
@@ -22,6 +23,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <string>
+#include <vector>
 
 const TranslateFn G_TRANSLATION_FUN{nullptr};
 
@@ -63,12 +65,17 @@ static void Usage()
         "  -modelwatch=<dir>    auto-host GGUF/SafeTensors/EXL3 dropped in this directory\n"
         "  -modelallowencrypted   allow preserve-rare of unqualified ciphertext\n"
         "  -modelbind=<ip:port>  PQ1 TLS listen address (empty = unix RPC only)\n"
+        "  -modelnatpmp=0|1     map the PQ1 port with PCP/NAT-PMP (default 1)\n"
         "  -modelrpcsocket=<path> unix JSON-RPC socket\n"
         "  -modeltransport=pq1  only accepted value; anything else fail-closes\n"
         "  -modeltlscert=<file>  self-signed ML-DSA certificate\n"
         "  -modeltlskey=<file>   matching private key\n"
         "  -modelpeer=<host:port>  model-plane bootstrap contact (repeatable)\n"
         "  -modelseednode=<host:port>  alias of -modelpeer\n"
+        "  -modelproxy=<proxy>=<ipv4|ipv6|onion|name>  dial peers of that network through\n"
+        "                        this SOCKS5 proxy (repeatable; btxd passes its -proxy/-onion)\n"
+        "  -modelproxyrandomize=0|1  random proxy credentials per connection (default 1)\n"
+        "  -modelonlynet=<net>   dial only peers on these networks (repeatable; btxd -onlynet)\n"
         "  -modelrelay            CPU-only discovery relay (no GPU, no wallet)\n"
         "  -modelhost=auto|1|0   serve seeded artifacts over PQ1 when proven\n"
         "                        (auto: wait for reachability; 1/true same wait;\n"
@@ -90,6 +97,9 @@ int main(int argc, char* argv[])
     modelnet::HelperConfig cfg;
     std::string decode;
     std::string transport = "pq1";
+    std::vector<std::string> proxies;
+    std::vector<std::string> onlynets;
+    bool proxy_randomize = true;
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
         auto take = [&](const char* key) -> std::string {
@@ -176,11 +186,15 @@ int main(int argc, char* argv[])
                 return 1;
             }
         } else if (auto v = take("-modelbind"); !v.empty()) cfg.bind = v;
+        else if (auto v = take("-modelnatpmp"); !v.empty()) cfg.natpmp = !(v == "0" || v == "false" || v == "off");
         else if (auto v = take("-modelrpcsocket"); !v.empty()) cfg.rpc_socket = v.c_str();
         else if (auto v = take("-modeltransport"); !v.empty()) transport = v;
         else if (auto v = take("-modeltlscert"); !v.empty()) cfg.tls_cert = v.c_str();
         else if (auto v = take("-modeltlskey"); !v.empty()) cfg.tls_key = v.c_str();
         else if (auto v = take("-modelpeer"); !v.empty()) cfg.peers.push_back(v);
+        else if (auto v = take("-modelproxy"); !v.empty()) proxies.push_back(v);
+        else if (auto v = take("-modelproxyrandomize"); !v.empty()) proxy_randomize = !(v == "0" || v == "false" || v == "off");
+        else if (auto v = take("-modelonlynet"); !v.empty()) onlynets.push_back(v);
         else if (auto v = take("-modelwatch"); !v.empty()) cfg.watch_dir = v.c_str();
         else if (auto v = take("-pwcchain"); !v.empty()) cfg.pwc_chain = v;
         else if (auto v = take("-computequalificationfile"); !v.empty()) cfg.qualification_file = v;
@@ -207,6 +221,10 @@ int main(int argc, char* argv[])
         std::cerr << "model subsystem fail-closed: -modeltransport must be pq1\n";
         return 2;
     }
+    if (std::string err; !modelnet::ApplyModelOutboundArgs(proxies, proxy_randomize, onlynets, err)) {
+        std::cerr << err << "\n";
+        return 1;
+    }
     modelnet::SeedMode seed_mode;
     if (!modelnet::SeedModeFromName(cfg.seed, seed_mode)) {
         std::cerr << "-modelseed must be auto, manual, or off\n";
@@ -217,7 +235,9 @@ int main(int argc, char* argv[])
 
     std::signal(SIGINT, OnSignal);
     std::signal(SIGTERM, OnSignal);
+#ifndef WIN32
     // Peer RST during retrieve must not kill the helper (DISC-05).
     std::signal(SIGPIPE, SIG_IGN);
+#endif
     return modelnet::RunModelDaemon(cfg, &g_stop);
 }
