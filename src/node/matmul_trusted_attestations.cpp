@@ -229,6 +229,33 @@ struct DurableWithdrawnVotePrefix {
     }
 };
 
+// Mint slot the local key took at a height (SignLocal / SignLocalPq), value
+// is the hash. Restored into the store at startup, so after a restart the
+// store keeps the one-signature-per-height slot and this node's own reorg
+// still withdraws its vote. Written only by the local sign path: a relayed
+// copy of the local key in the vote records must not occupy the slot.
+struct DurableMintSlotKey {
+    static constexpr uint8_t PREFIX{'m'};
+    uint8_t prefix{PREFIX};
+    uint256 authority_namespace{};
+    int32_t height{-1};
+
+    SERIALIZE_METHODS(DurableMintSlotKey, obj)
+    {
+        READWRITE(obj.prefix, obj.authority_namespace, obj.height);
+    }
+};
+
+struct DurableMintSlotPrefix {
+    uint8_t prefix{DurableMintSlotKey::PREFIX};
+    uint256 authority_namespace{};
+
+    SERIALIZE_METHODS(DurableMintSlotPrefix, obj)
+    {
+        READWRITE(obj.prefix, obj.authority_namespace);
+    }
+};
+
 //! Scalable authority history. The hot AttestationStore remains bounded;
 //! historical quorum proofs live in LevelDB and are queried on demand.
 std::unique_ptr<CDBWrapper> g_durable_db;
@@ -861,30 +888,44 @@ bool LoadDurablePqAttestations(
     return true;
 }
 
-void PersistWithdrawnLocalVote(int32_t height, const uint256& block_hash)
+//! The tombstone and, when the store released the mint slot for this hash,
+//! the erase of the mint-slot record go in one batch, so a restart never
+//! restores the slot for a hash whose vote is withdrawn.
+void PersistWithdrawnLocalVote(int32_t height, const uint256& block_hash,
+                               bool release_mint_slot)
 {
     if (height < 0 || block_hash.IsNull()) return;
     std::lock_guard io_lock{g_persist_io_mutex};
     if (!g_durable_db || !g_durable_namespace.has_value()) return;
-    const bool ok{g_durable_db->Write(
+    CDBBatch batch{*g_durable_db};
+    batch.Write(
         DurableWithdrawnVoteKey{.authority_namespace = *g_durable_namespace,
                                 .height = height, .block_hash = block_hash},
-        uint8_t{1}, /*fSync=*/true)};
+        uint8_t{release_mint_slot ? uint8_t{2} : uint8_t{1}});
+    if (release_mint_slot) {
+        batch.Erase(DurableMintSlotKey{
+            .authority_namespace = *g_durable_namespace, .height = height});
+    }
+    const bool ok{g_durable_db->WriteBatch(batch, /*fSync=*/true)};
     if (!ok) {
         LogPrintf("matmul: failed to persist withdrawn-local-vote tombstone "
                   "height=%d hash=%s\n", height, block_hash.ToString());
     }
 }
 
-void EraseWithdrawnLocalVote(int32_t height, const uint256& block_hash)
+//! Returns the tombstone's value (2: written with the mint-slot release,
+//! 1: without), or 0 when there was none.
+uint8_t EraseWithdrawnLocalVote(int32_t height, const uint256& block_hash)
 {
-    if (height < 0 || block_hash.IsNull()) return;
+    if (height < 0 || block_hash.IsNull()) return 0;
     std::lock_guard io_lock{g_persist_io_mutex};
-    if (!g_durable_db || !g_durable_namespace.has_value()) return;
-    (void)g_durable_db->Erase(
-        DurableWithdrawnVoteKey{.authority_namespace = *g_durable_namespace,
-                                .height = height, .block_hash = block_hash},
-        /*fSync=*/false);
+    if (!g_durable_db || !g_durable_namespace.has_value()) return 0;
+    const DurableWithdrawnVoteKey key{.authority_namespace = *g_durable_namespace,
+                                      .height = height, .block_hash = block_hash};
+    uint8_t value{0};
+    if (!g_durable_db->Read(key, value)) return 0;
+    (void)g_durable_db->Erase(key, /*fSync=*/false);
+    return value;
 }
 
 bool LoadWithdrawnLocalVotes(
@@ -903,6 +944,81 @@ bool LoadWithdrawnLocalVotes(
             break;
         }
         store->SeedOffActiveChain(key.height, key.block_hash);
+    }
+    return true;
+}
+
+void PersistLocalMintSlot(int32_t height, const uint256& block_hash)
+{
+    if (height < 0 || block_hash.IsNull()) return;
+    std::lock_guard io_lock{g_persist_io_mutex};
+    if (!g_durable_db || !g_durable_namespace.has_value()) return;
+    // No fsync: the local vote itself reaches disk through the persistence
+    // worker, and a slot record that outlives its vote only refuses a second
+    // local signature at that height.
+    const bool ok{g_durable_db->Write(
+        DurableMintSlotKey{.authority_namespace = *g_durable_namespace,
+                           .height = height},
+        block_hash, /*fSync=*/false)};
+    if (!ok) {
+        LogPrintf("matmul: failed to persist local mint slot "
+                  "height=%d hash=%s\n", height, block_hash.ToString());
+    }
+}
+
+void EraseLocalMintSlots(int32_t from_height, int32_t to_height)
+{
+    std::lock_guard io_lock{g_persist_io_mutex};
+    if (!g_durable_db || !g_durable_namespace.has_value()) return;
+    // Heights are serialized little-endian, so walk the whole namespace.
+    CDBBatch batch{*g_durable_db};
+    std::unique_ptr<CDBIterator> cursor{g_durable_db->NewIterator()};
+    cursor->Seek(DurableMintSlotPrefix{
+        .authority_namespace = *g_durable_namespace});
+    for (; cursor->Valid(); cursor->Next()) {
+        DurableMintSlotKey key;
+        if (!cursor->GetKey(key) ||
+            key.prefix != DurableMintSlotKey::PREFIX ||
+            key.authority_namespace != *g_durable_namespace) {
+            break;
+        }
+        if (key.height >= from_height && key.height <= to_height) {
+            batch.Erase(key);
+        }
+    }
+    (void)g_durable_db->WriteBatch(batch, /*fSync=*/true);
+}
+
+bool LoadLocalMintSlots(
+    const std::shared_ptr<matmul::trusted::AttestationStore>& store,
+    std::string& error)
+{
+    if (!g_durable_db) return true;
+    const uint256 authority_namespace{AuthorityNamespace(*store)};
+    std::map<int32_t, uint256> restored;
+    std::unique_ptr<CDBIterator> cursor{g_durable_db->NewIterator()};
+    cursor->Seek(DurableMintSlotPrefix{
+        .authority_namespace = authority_namespace});
+    for (; cursor->Valid(); cursor->Next()) {
+        DurableMintSlotKey key;
+        if (!cursor->GetKey(key) ||
+            key.prefix != DurableMintSlotKey::PREFIX ||
+            key.authority_namespace != authority_namespace) {
+            break;
+        }
+        uint256 block_hash;
+        if (!cursor->GetValue(block_hash)) {
+            error = "durable attestation database contains a malformed mint-slot record";
+            return false;
+        }
+        store->RestoreLocalMintSlot(key.height, block_hash);
+        restored.emplace(key.height, block_hash);
+    }
+    {
+        std::lock_guard lock{g_mutex};
+        for (const auto& [height, hash] : restored) {
+            g_local_signed_hash_by_height.emplace(height, hash);
+        }
     }
     return true;
 }
@@ -1878,6 +1994,9 @@ matmul::trusted::AddResult SignAuthoritative(
             std::lock_guard lock{g_mutex};
             g_local_signed_hash_by_height.emplace(block_height, block_hash);
         }
+        if (store->LocalMintedHash(block_height) == block_hash) {
+            PersistLocalMintSlot(block_height, block_hash);
+        }
     }
     if (store->LocalSignerPubKey().has_value()) return secp_result;
     return pq_result;
@@ -1932,7 +2051,8 @@ bool NotifyActiveChainBlockDisconnected(int32_t height,
     if (released_store || released_hint) {
         // V5/RB-12 (adv5): make the withdrawal DURABLE so a reloaded or relayed
         // copy of our abandoned vote cannot re-form quorum after restart.
-        PersistWithdrawnLocalVote(height, disconnected_hash);
+        PersistWithdrawnLocalVote(height, disconnected_hash,
+                                  /*release_mint_slot=*/released_store);
         LogPrintf("matmul: released local mint slot at height %d after "
                   "active-chain disconnect of %s\n",
                   height, disconnected_hash.ToString());
@@ -1950,7 +2070,17 @@ void NotifyActiveChainBlockConnected(int32_t height,
     }
     // The hash is back on the active chain: drop its withdrawal tombstone so a
     // future re-vote / reload is allowed again.
-    EraseWithdrawnLocalVote(height, connected_hash);
+    if (EraseWithdrawnLocalVote(height, connected_hash) == 2 && store) {
+        // This node held the mint slot for the hash when it withdrew its vote,
+        // and the vote counts on disk again. Take the slot back, so a later
+        // disconnect withdraws the vote again, also after a restart.
+        store->RestoreLocalMintSlot(height, connected_hash);
+        if (store->LocalMintedHash(height) == connected_hash) {
+            PersistLocalMintSlot(height, connected_hash);
+            std::lock_guard lock{g_mutex};
+            g_local_signed_hash_by_height.emplace(height, connected_hash);
+        }
+    }
 }
 
 size_t ClearMintedAttestations(int32_t from_height, int32_t to_height)
@@ -1965,6 +2095,7 @@ size_t ClearMintedAttestations(int32_t from_height, int32_t to_height)
         }
         store->ClearLocalMintSlots(from_height, to_height);
     }
+    EraseLocalMintSlots(from_height, to_height);
     {
         std::lock_guard lock{g_mutex};
         auto it{g_local_signed_hash_by_height.lower_bound(from_height)};
@@ -2228,6 +2359,7 @@ bool OpenPersistence(const fs::path& path, std::string& error)
             if (!LoadBlocklistState(store, error) ||
                 !LoadOpenAttestorState(store) ||
                 !LoadWithdrawnLocalVotes(store) ||
+                !LoadLocalMintSlots(store, error) ||
                 !LoadDurableAttestations(store, error) ||
                 !LoadDurablePqAttestations(store, error) ||
                 !LoadPersistenceSnapshot(store, path, error) ||
