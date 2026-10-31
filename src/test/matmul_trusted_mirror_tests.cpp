@@ -5582,4 +5582,212 @@ BOOST_AUTO_TEST_CASE(hot_tail_keeps_tip_partial_across_restart)
     BOOST_CHECK(HasFrontierHint(TwoPinMirror::HashAt(12), 12));
 }
 
+namespace {
+//! TwoPinMirror with two ML-DSA-44 pins.
+struct TwoPqPinMirror {
+    PqKey a{MakePqKey(0x81)};
+    PqKey b{MakePqKey(0x82)};
+    uint256 chain{Hex256('5')};
+    uint256 context{Hex256('6')};
+    fs::path archive;
+
+    explicit TwoPqPinMirror(fs::path path) : archive{std::move(path)} {}
+    void Start() const
+    {
+        matmul::trusted::StoreConfig config;
+        config.chain_id = chain;
+        config.replay_authority_context = context;
+        config.trusted_pq_signers = {a.pk, b.pk};
+        config.threshold = 2;
+        config.max_blocks = 2;
+        config.max_attestations = 8;
+        std::string error;
+        BOOST_REQUIRE(node::matmul_trusted::Configure(
+            std::move(config), /*trusted_mirror=*/true, /*serve=*/false,
+            std::chrono::milliseconds{20}, error));
+        BOOST_REQUIRE(node::matmul_trusted::OpenPersistence(archive, error));
+    }
+    void Restart() const
+    {
+        std::string error;
+        BOOST_REQUIRE(node::matmul_trusted::FlushPersistence(error));
+        node::matmul_trusted::ResetForTest();
+        Start();
+    }
+    static uint256 HashAt(int32_t height) { return (HashWriter{} << height).GetHash(); }
+    void Sign(const PqKey& key, int32_t height) const
+    {
+        matmul::trusted::ExactReplayStatement statement;
+        statement.chain_id = chain;
+        statement.block_hash = HashAt(height);
+        statement.block_height = height;
+        statement.replay_authority_context = context;
+        const auto att{matmul::trusted::SignStatementMlDsa44(statement, key.sk, key.pk)};
+        BOOST_REQUIRE(att.has_value());
+        BOOST_REQUIRE(node::matmul_trusted::AddPq(*att, HashAt(height), height) ==
+                      matmul::trusted::AddResult::Accepted);
+    }
+};
+} // namespace
+
+BOOST_AUTO_TEST_CASE(pq_hot_tail_keeps_frontier_quorum_across_restart)
+{
+    // hot_tail_keeps_frontier_quorum_across_restart with ML-DSA-44 pins.
+    RuntimeReset reset;
+    const TwoPqPinMirror mirror{m_args.GetDataDirNet() / "matmul_pq_hot_tail_frontier.dat"};
+    mirror.Start();
+    mirror.Sign(mirror.a, 10);
+    mirror.Sign(mirror.b, 10);
+    for (int32_t height{11}; height <= 13; ++height) mirror.Sign(mirror.a, height);
+    BOOST_REQUIRE(!node::matmul_trusted::HasQuorum(TwoPqPinMirror::HashAt(13), 13));
+
+    mirror.Restart();
+    BOOST_CHECK_EQUAL(node::matmul_trusted::HighestAttestedHeight().value_or(-1), 10);
+    BOOST_CHECK(node::matmul_trusted::HasQuorumInMemory(TwoPqPinMirror::HashAt(10), 10));
+    BOOST_CHECK(HasFrontierHint(TwoPqPinMirror::HashAt(10), 10));
+}
+
+BOOST_AUTO_TEST_CASE(pq_hot_tail_keeps_frontier_loaded_first_across_restart)
+{
+    // Quorum at 10, 11 and 256. Height 256 serializes before 10 and 11 in the
+    // durable key, so the frontier is the first record loaded; two later
+    // records must not evict it.
+    RuntimeReset reset;
+    const TwoPqPinMirror mirror{m_args.GetDataDirNet() / "matmul_pq_hot_tail_first.dat"};
+    mirror.Start();
+    for (const int32_t height : {10, 11, 256}) {
+        mirror.Sign(mirror.a, height);
+        mirror.Sign(mirror.b, height);
+    }
+
+    mirror.Restart();
+    BOOST_CHECK_EQUAL(node::matmul_trusted::HighestAttestedHeight().value_or(-1), 256);
+    BOOST_CHECK_MESSAGE(node::matmul_trusted::HasQuorumInMemory(TwoPqPinMirror::HashAt(256), 256),
+                        "PQ durable load evicted the frontier quorum from the hot cache");
+    BOOST_CHECK(HasFrontierHint(TwoPqPinMirror::HashAt(256), 256));
+}
+
+BOOST_AUTO_TEST_CASE(pq_hot_tail_keeps_frontier_loaded_last_across_restart)
+{
+    // hot_tail_keeps_frontier_loaded_last_across_restart with ML-DSA-44 pins.
+    RuntimeReset reset;
+    const TwoPqPinMirror mirror{m_args.GetDataDirNet() / "matmul_pq_hot_tail_last.dat"};
+    mirror.Start();
+    mirror.Sign(mirror.a, 255);
+    mirror.Sign(mirror.b, 255);
+    for (int32_t height{256}; height <= 258; ++height) mirror.Sign(mirror.a, height);
+
+    mirror.Restart();
+    BOOST_CHECK_EQUAL(node::matmul_trusted::HighestAttestedHeight().value_or(-1), 255);
+    BOOST_CHECK(node::matmul_trusted::HasQuorumInMemory(TwoPqPinMirror::HashAt(255), 255));
+    BOOST_CHECK(HasFrontierHint(TwoPqPinMirror::HashAt(255), 255));
+    mirror.Sign(mirror.b, 258);
+    BOOST_CHECK(node::matmul_trusted::HasQuorumInMemory(TwoPqPinMirror::HashAt(258), 258));
+    BOOST_CHECK_EQUAL(node::matmul_trusted::HighestAttestedHeight().value_or(-1), 258);
+}
+
+BOOST_AUTO_TEST_CASE(pq_hot_tail_keeps_tip_partial_across_restart)
+{
+    // hot_tail_keeps_tip_partial_across_restart with ML-DSA-44 pins.
+    RuntimeReset reset;
+    const TwoPqPinMirror mirror{m_args.GetDataDirNet() / "matmul_pq_hot_tail_tip.dat"};
+    mirror.Start();
+    mirror.Sign(mirror.a, 10);
+    mirror.Sign(mirror.b, 10);
+    mirror.Sign(mirror.a, 11);
+    mirror.Sign(mirror.b, 11);
+    mirror.Sign(mirror.a, 12);
+
+    mirror.Restart();
+    BOOST_CHECK(node::matmul_trusted::HasQuorumInMemory(TwoPqPinMirror::HashAt(11), 11));
+    mirror.Sign(mirror.b, 12);
+    BOOST_CHECK(node::matmul_trusted::HasQuorumInMemory(TwoPqPinMirror::HashAt(12), 12));
+    BOOST_CHECK_EQUAL(node::matmul_trusted::HighestAttestedHeight().value_or(-1), 12);
+    BOOST_CHECK(HasFrontierHint(TwoPqPinMirror::HashAt(12), 12));
+}
+
+namespace {
+//! LocalSignerNode with an ML-DSA-44 local key and one ML-DSA-44 peer pin.
+struct LocalPqSignerNode {
+    PqKey local{MakePqKey(0x91)};
+    PqKey peer{MakePqKey(0x92)};
+    uint256 chain{Hex256('8')};
+    uint256 context{Hex256('9')};
+    fs::path archive;
+
+    explicit LocalPqSignerNode(fs::path path) : archive{std::move(path)} {}
+    void Start() const
+    {
+        matmul::trusted::StoreConfig config;
+        config.chain_id = chain;
+        config.replay_authority_context = context;
+        config.trusted_pq_signers = {local.pk, peer.pk};
+        config.threshold = 2;
+        config.local_pq_pk = local.pk;
+        config.local_pq_sk = local.sk;
+        std::string error;
+        BOOST_REQUIRE(node::matmul_trusted::Configure(
+            std::move(config), /*trusted_mirror=*/false, /*serve=*/true,
+            std::chrono::milliseconds{20}, error));
+        BOOST_REQUIRE(node::matmul_trusted::OpenPersistence(archive, error));
+    }
+    void Restart() const
+    {
+        std::string error;
+        BOOST_REQUIRE(node::matmul_trusted::FlushPersistence(error));
+        node::matmul_trusted::ResetForTest();
+        Start();
+    }
+    //! The local PQ vote plus the PQ peer: a quorum that needs the local vote.
+    void SignQuorum(const uint256& hash, int32_t height) const
+    {
+        BOOST_REQUIRE(node::matmul_trusted::SignAuthoritative(hash, height) ==
+                      matmul::trusted::AddResult::Accepted);
+        matmul::trusted::ExactReplayStatement statement;
+        statement.chain_id = chain;
+        statement.block_hash = hash;
+        statement.block_height = height;
+        statement.replay_authority_context = context;
+        const auto att{matmul::trusted::SignStatementMlDsa44(statement, peer.sk, peer.pk)};
+        BOOST_REQUIRE(att.has_value());
+        BOOST_REQUIRE(node::matmul_trusted::AddPq(*att, hash, height) ==
+                      matmul::trusted::AddResult::Accepted);
+        BOOST_REQUIRE(node::matmul_trusted::HasQuorumInMemory(hash, height));
+    }
+};
+} // namespace
+
+BOOST_AUTO_TEST_CASE(pq_withdrawn_local_vote_not_restored_after_reload)
+{
+    // withdrawn_necessary_votes_do_not_keep_frontier_height and
+    // withdrawn_local_vote_does_not_occupy_height_after_reload with an
+    // ML-DSA-44 local key. The durable PQ records still hold the withdrawn
+    // local votes; after a restart they must not bring back the quorum, the
+    // watermark or the hint, nor occupy the height.
+    RuntimeReset reset;
+    const LocalPqSignerNode signer{m_args.GetDataDirNet() / "matmul_pq_withdrawn.dat"};
+    const uint256 low{Hex256('a')};
+    const uint256 mid{Hex256('b')};
+    const uint256 top{Hex256('c')};
+    const uint256 replacement{Hex256('d')};
+    signer.Start();
+    signer.SignQuorum(low, 10);
+    signer.SignQuorum(mid, 30);
+    signer.SignQuorum(top, 31);
+    BOOST_REQUIRE(node::matmul_trusted::NotifyActiveChainBlockDisconnected(31, top));
+    BOOST_REQUIRE(node::matmul_trusted::NotifyActiveChainBlockDisconnected(30, mid));
+    BOOST_REQUIRE_EQUAL(node::matmul_trusted::HighestAttestedHeight().value_or(-1), 10);
+
+    signer.Restart();
+    BOOST_CHECK(node::matmul_trusted::HasQuorumInMemory(low, 10));
+    BOOST_CHECK(!node::matmul_trusted::HasQuorumInMemory(mid, 30));
+    BOOST_CHECK_EQUAL(node::matmul_trusted::HighestAttestedHeight().value_or(-1), 10);
+    BOOST_CHECK(HasFrontierHint(low, 10));
+    BOOST_CHECK_MESSAGE(!HasFrontierHint(mid, 30) && !HasFrontierHint(top, 31),
+                        "a withdrawn local PQ vote brought back a frontier hint");
+    BOOST_CHECK_MESSAGE(node::matmul_trusted::SignAuthoritative(replacement, 30) ==
+                            matmul::trusted::AddResult::Accepted,
+                        "a withdrawn local PQ vote occupies the height after a restart");
+}
+
 BOOST_AUTO_TEST_SUITE_END()
