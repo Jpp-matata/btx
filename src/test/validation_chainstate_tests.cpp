@@ -7388,4 +7388,153 @@ BOOST_FIXTURE_TEST_CASE(phase1_only_header_does_not_become_best_header_at_securi
     }
 }
 
+namespace {
+//! Live 2026-10-30, mainnet archive (trusted mirror, threshold 1 over 5 pins,
+//! no local signer). One pin signed a one-block twin at 263283, then the
+//! other twin and its descendants. The mirror sat on that signed chain with the
+//! frontier on it. Each ActivateBestChain call nominated the lower signed twin
+//! (LCA depth 4 to 6, inside the short-reorg window) and moved onto it; the
+//! next call returned to the frontier chain. About 90 rounds until the frontier
+//! chain was 7 past the fork.
+void TrustedMirrorSingleKeyTwinBelowFrontier(TestChain100Setup& t, bool start_on_twin)
+{
+    ChainstateManager& chainman = *Assert(t.m_node.chainman);
+    Chainstate& chainstate = chainman.ActiveChainstate();
+    auto& consensus = const_cast<Consensus::Params&>(Params().GetConsensus());
+    auto& action = const_cast<kernel::DeepReorgAction&>(chainman.m_options.deep_reorg_action);
+    auto& park_depth = const_cast<std::optional<uint32_t>&>(chainman.m_options.max_reorg_depth_park);
+    auto& mode = const_cast<kernel::MatMulValidationMode&>(chainman.m_options.matmul_validation_mode);
+    struct Restore {
+        Consensus::Params& consensus;
+        int32_t start;
+        kernel::DeepReorgAction& action;
+        kernel::DeepReorgAction saved_action;
+        std::optional<uint32_t>& park_depth;
+        std::optional<uint32_t> saved_park_depth;
+        kernel::MatMulValidationMode& mode;
+        kernel::MatMulValidationMode saved_mode;
+        ~Restore()
+        {
+            node::matmul_trusted::ResetForTest();
+            consensus.nReorgProtectionStartHeight = start;
+            action = saved_action;
+            park_depth = saved_park_depth;
+            mode = saved_mode;
+        }
+    } restore{consensus, consensus.nReorgProtectionStartHeight,
+              action, action, park_depth, park_depth, mode, mode};
+    consensus.nReorgProtectionStartHeight = 10;
+    action = kernel::DeepReorgAction::PARK;
+    // As in TrustedMirrorWithSignedTwins: far above the fork depth, so no park
+    // can hide a flip.
+    park_depth = 32;
+    mode = kernel::MatMulValidationMode::TRUSTED;
+
+    const CScript script_network =
+        GetScriptForDestination(PKHash(t.coinbaseKey.GetPubKey()));
+    CKey twin_dest;
+    twin_dest.MakeNewKey(/*fCompressed=*/true);
+    const CScript script_twin =
+        GetScriptForDestination(PKHash(twin_dest.GetPubKey()));
+    const auto mine = [&](const CScript& script) {
+        const CBlock block{t.CreateAndProcessBlock({}, script)};
+        CBlockIndex* const idx{WITH_LOCK(::cs_main, {
+            return chainman.m_blockman.LookupBlockIndex(block.GetHash());
+        })};
+        BOOST_REQUIRE(idx != nullptr);
+        return idx;
+    };
+    const auto set_aside = [&](CBlockIndex* block) {
+        BlockValidationState state;
+        BOOST_REQUIRE(chainstate.InvalidateBlock(state, block));
+        BOOST_REQUIRE(WITH_LOCK(::cs_main, return chainstate.m_chain.Tip()) == block->pprev);
+    };
+
+    // fork = 263282, twin = 263283 48726d67, network = 263283 0b53800c and
+    // four descendants (LCA depth 5 from the network tip).
+    CBlockIndex* const fork{WITH_LOCK(::cs_main, return chainstate.m_chain.Tip())};
+    BOOST_REQUIRE(fork != nullptr);
+    CBlockIndex* const twin{mine(script_twin)};
+    set_aside(twin);
+    std::vector<CBlockIndex*> network;
+    for (int i = 0; i < 5; ++i) network.push_back(mine(script_network));
+    CBlockIndex* const network_tip{network.back()};
+    BOOST_REQUIRE_EQUAL(twin->nHeight, network.front()->nHeight);
+    BOOST_REQUIRE_LE(network_tip->nHeight - fork->nHeight,
+                     node::matmul_trusted::TRUSTED_MIRROR_SHORT_REORG_DEPTH);
+    BlockValidationState state;
+    if (start_on_twin) {
+        set_aside(network.front());
+        {
+            LOCK(::cs_main);
+            chainstate.ResetBlockFailureFlags(twin);
+        }
+        BOOST_REQUIRE(chainstate.ActivateBestChain(state));
+    }
+    CBlockIndex* const start_tip{start_on_twin ? twin : network_tip};
+    BOOST_REQUIRE(WITH_LOCK(::cs_main, return chainstate.m_chain.Tip()) == start_tip);
+
+    std::array<CKey, 5> pins;
+    for (CKey& pin : pins) pin.MakeNewKey(/*fCompressed=*/true);
+    const uint256 chain_id{uint256::ONE};
+    const uint256 replay_ctx{uint256::FromHex(std::string(64, 'e')).value()};
+    matmul::trusted::StoreConfig config;
+    config.chain_id = chain_id;
+    config.replay_authority_context = replay_ctx;
+    for (const CKey& pin : pins) config.trusted_signers.push_back(pin.GetPubKey());
+    config.threshold = 1;
+    std::string error;
+    BOOST_REQUIRE(node::matmul_trusted::Configure(
+        std::move(config), /*trusted_mirror=*/true, /*serve=*/false,
+        std::chrono::milliseconds{50}, error));
+    BOOST_REQUIRE(node::matmul_trusted::IsTrustedMirror());
+    BOOST_REQUIRE(!node::matmul_trusted::HasLocalSigner());
+    // One pin signs the twin first, then the network chain.
+    const auto sign = [&](const CBlockIndex* idx) {
+        BOOST_REQUIRE(InjectHistoricalAttestation(
+                          pins[0], chain_id, replay_ctx, idx->GetBlockHash(),
+                          idx->nHeight) ==
+                      matmul::trusted::AddResult::Accepted);
+    };
+    sign(twin);
+    for (const CBlockIndex* idx : network) sign(idx);
+
+    {
+        LOCK(::cs_main);
+        chainstate.ResetBlockFailureFlags(twin);
+        chainstate.ResetBlockFailureFlags(network.front());
+        BOOST_REQUIRE(chainstate.m_chain.Tip() == start_tip);
+        BOOST_REQUIRE(node::matmul_trusted::HasQuorum(twin->GetBlockHash(), twin->nHeight));
+        BOOST_REQUIRE(node::matmul_trusted::HasQuorum(network_tip->GetBlockHash(), network_tip->nHeight));
+        BOOST_CHECK(chainman.IndexIsOnSignedFrontierChain(network_tip));
+        BOOST_CHECK(!chainman.IndexIsOnSignedFrontierChain(twin));
+    }
+
+    // Several calls: the mirror must reach the frontier chain and stay there.
+    for (int pass = 0; pass < 4; ++pass) {
+        state = BlockValidationState{};
+        BOOST_REQUIRE(chainstate.ActivateBestChain(state));
+        LOCK(::cs_main);
+        BOOST_CHECK_MESSAGE(chainstate.m_chain.Tip() == network_tip,
+                            "pass " << pass << ": tip height "
+                                    << chainstate.m_chain.Tip()->nHeight
+                                    << (chainstate.m_chain.Tip() == twin ? " (twin)" : ""));
+        BOOST_CHECK(chainman.GetSignedFrontierStatus().on_active_chain);
+        BOOST_CHECK(chainman.FindUniqueCompetingAttestedIndex() == nullptr);
+        BOOST_CHECK(!chainman.IsAttestedAbandonForkCandidate(twin));
+    }
+    chainman.CheckBlockIndex();
+}
+} // namespace
+
+BOOST_FIXTURE_TEST_CASE(chainstate_trusted_mirror_single_key_on_frontier_ignores_lower_signed_twin, TestChain100Setup)
+{
+    TrustedMirrorSingleKeyTwinBelowFrontier(*this, /*start_on_twin=*/false);
+}
+
+BOOST_FIXTURE_TEST_CASE(chainstate_trusted_mirror_single_key_leaves_lower_signed_twin_for_frontier, TestChain100Setup)
+{
+    TrustedMirrorSingleKeyTwinBelowFrontier(*this, /*start_on_twin=*/true);
+}
+
 BOOST_AUTO_TEST_SUITE_END()

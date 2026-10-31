@@ -13057,6 +13057,16 @@ const CBlockIndex* ChainstateManager::FindUniqueCompetingAttestedIndex() const
     // every frontier hint at a height (not last-writer) so a later
     // loser MMATTEST cannot hide the winner.
     const bool tip_has_quorum{IndexHasTrustedMatMulAuthority(tip)};
+    // A trusted mirror whose tip is on the signed-frontier chain is already
+    // where the signers are. A signed block on another branch inside the
+    // short-reorg window is one they have signed past (at threshold 1 one key
+    // can sign both blocks of a race). Adopting it moves the mirror off the
+    // frontier and the next call moves it back: live 2026-10-30, threshold 1,
+    // ~90 rounds of 4-6 block reorgs at 263283 until the frontier chain was
+    // 7 past the fork. Same-height frontier races are not covered here:
+    // IndexIsOnSignedFrontierChain then names the off-chain hash.
+    const bool tip_on_signed_frontier_chain{
+        trusted_mirror && IndexIsOnSignedFrontierChain(tip)};
 
     // Lives for this call only: cs_main is held throughout and nothing below
     // modifies a CBlockIndex, so remembered walk results cannot go stale.
@@ -13154,6 +13164,10 @@ const CBlockIndex* ChainstateManager::FindUniqueCompetingAttestedIndex() const
                     attested_suffix, lca_depth, on_signed_frontier_chain)) {
                 return;
             }
+            if (tip_on_signed_frontier_chain && !attested_suffix &&
+                !on_signed_frontier_chain) {
+                return;
+            }
         }
         competing.push_back(idx);
     };
@@ -13183,8 +13197,10 @@ const CBlockIndex* ChainstateManager::FindUniqueCompetingAttestedIndex() const
     // branch at the same height is a race, and adopting it would flip back on
     // the next call. Candidates on two frontier branches still fail closed
     // below. A quorum hash there with no known header leaves nothing to
-    // compare, and nothing changes. Nor at threshold 1, where one key sets the
-    // highest signed height.
+    // compare, and nothing changes. Not at threshold 1, where one key sets the
+    // highest signed height and already has full authority: there consider()
+    // only keeps a mirror already on the signed-frontier chain from leaving
+    // it (tip_on_signed_frontier_chain), which adds no steering.
     if (trusted_mirror && node::matmul_trusted::Threshold() >= 2) {
         std::vector<const CBlockIndex*> frontiers;
         if (const auto frontier_height{node::matmul_trusted::HighestAttestedHeight()}) {
