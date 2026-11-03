@@ -2945,19 +2945,6 @@ private:
      *  obtain quorum for ConnectTip and must not be gated on GPU spend. */
     void RequestMatMulTrustedAttestations(const uint256& hash,
                                           NodeId source);
-    //! Blocks a configured trusted signer attested while their header was
-    //! unknown here. That MMATTEST is not kept (Add() waits for the header),
-    //! so once the header is indexed the mirror asks for it again, also above
-    //! its signed frontier: the signature already shows the signers are past
-    //! it. Node-wide rather than per peer like
-    //! m_unknown_attested_header_requests, because the MMATTEST and the
-    //! header often come from different peers. Bounded; the oldest entry goes
-    //! first.
-    std::map<uint256, NodeClock::time_point> m_attested_before_header GUARDED_BY(cs_main);
-    static constexpr size_t MAX_ATTESTED_BEFORE_HEADER{64};
-    void NoteAttestedBeforeHeader(const uint256& hash) EXCLUSIVE_LOCKS_REQUIRED(cs_main);
-    void RequestAttestationsHeardBeforeHeader(const std::vector<CBlockHeader>& headers,
-                                              NodeId source);
     node::matmul_trusted::HistoricalReverifyAdmit
     MaybeQueueHistoricalAttestationReverify(
         const uint256& hash, int32_t height, const CBlockHeader& header)
@@ -6068,34 +6055,6 @@ static bool TrustedMirrorMayDownloadIndex(
         /*may_fetch=*/true, immediate_fork_child, contiguous_to_active);
 }
 
-//! Trusted mirror (no local signer) on a one-block twin: the sibling at the
-//! tip height was HEADER_ONLY'd before the signers moved, then they signed
-//! past it on its own branch. Neither pull-ahead path in
-//! IsHeaderOnlyFetchSuppressed is open to a mirror whose tip has quorum: the
-//! lost-twin path sees the height occupied, and the heavier-tower path is
-//! closed to every mirror. For a mirror, pulling ahead means a signed
-//! frontier strictly above the sibling that descends from it and not from
-//! the tip. A lone sibling whose own quorum is the frontier stays skipped.
-//! Live 2026-10-27 (community archive): root selected, never requested, 6 h.
-[[nodiscard]] static bool TrustedMirrorSignedPastTipSibling(
-    const ChainstateManager& chainman,
-    const CBlockIndex* tip,
-    const CBlockIndex* index)
-    EXCLUSIVE_LOCKS_REQUIRED(cs_main)
-{
-    if (tip == nullptr || index == nullptr) return false;
-    if (!node::matmul_trusted::IsTrustedMirror() ||
-        node::matmul_trusted::HasLocalSigner()) {
-        return false;
-    }
-    const auto frontier_height{node::matmul_trusted::HighestAttestedHeight()};
-    if (!frontier_height.has_value() || *frontier_height <= index->nHeight) {
-        return false;
-    }
-    return chainman.IndexIsCoveredBySignedFrontier(index) &&
-           !chainman.IndexIsCoveredBySignedFrontier(tip);
-}
-
 [[nodiscard]] static bool IsHeaderOnlyFetchSuppressed(
     const ChainstateManager& chainman,
     const CBlockIndex* tip,
@@ -6115,18 +6074,13 @@ static bool TrustedMirrorMayDownloadIndex(
     }
     // A same-height sibling of the connected tip is not a download hole
     // (F3). Quorum does not make it inflight. A pulled-ahead lost-twin
-    // or heavier-tower path below is what unsuppresses it, or on a trusted
-    // mirror a signed frontier past it on its own branch.
+    // or heavier-tower path below is what unsuppresses it.
     const bool same_height_tip_sibling{
         tip != nullptr && index != tip && index->pprev == tip->pprev &&
         index->nHeight == tip->nHeight};
     const bool already_header_only_skipped{
         competing.count(index->GetBlockHash()) != 0 ||
         followed_skip.count(index->GetBlockHash()) != 0};
-    if (same_height_tip_sibling && already_header_only_skipped &&
-        TrustedMirrorSignedPastTipSibling(chainman, tip, index)) {
-        return false;
-    }
     if (!(same_height_tip_sibling && already_header_only_skipped)) {
         if (IndexIsShortReorgAttestedForkChild(chainman, tip, index)) return false;
         if (chainman.IsAcquisitionEscapeFrontier(index)) return false;
@@ -6287,30 +6241,6 @@ bool PeerManagerImpl::HeaderFetchSuppressedForTest(const uint256& hash) const
     EXCLUSIVE_LOCKS_REQUIRED(cs_main)
 {
     return chainman.IsMatMulFollowedHistoricalHole(index);
-}
-
-//! A body the assumeutxo background chainstate still needs that nothing else
-//! stores on this node: an ancestor of the snapshot base above the background
-//! tip and at most BLOCK_DOWNLOAD_WINDOW above it (the window
-//! TryDownloadingHistoricalBlocks requests), at an attestation-active height,
-//! with no trusted quorum covering it. Below that height the followed-hole
-//! branch already persists it, and a covered one keeps the attested path. Its
-//! header is fixed by the snapshot base, so only the real body matches it.
-[[nodiscard]] static bool IsUncoveredBackgroundChainstateHole(
-    const ChainstateManager& chainman,
-    const CBlockIndex* index)
-    EXCLUSIVE_LOCKS_REQUIRED(cs_main)
-{
-    if (index == nullptr || (index->nStatus & BLOCK_FAILED_MASK) != 0) return false;
-    if (!chainman.GetConsensus().IsMatMulTrustedReplayAttestationActive(index->nHeight)) return false;
-    if (!chainman.BackgroundSyncInProgress()) return false;
-    const CBlockIndex* const bg_tip{chainman.GetBackgroundSyncTip()};
-    const CBlockIndex* const base{chainman.GetSnapshotBaseBlock()};
-    if (bg_tip == nullptr || base == nullptr) return false;
-    if (index->nHeight <= bg_tip->nHeight || index->nHeight > base->nHeight) return false;
-    if (index->nHeight - bg_tip->nHeight > static_cast<int>(BLOCK_DOWNLOAD_WINDOW)) return false;
-    if (base->GetAncestor(index->nHeight) != index) return false;
-    return !chainman.IndexHasTrustedMatMulAuthority(index);
 }
 
 //! ExactReplay GPU is 5GB+/12s. A competing header tree or same-height
@@ -10040,16 +9970,9 @@ void PeerManagerImpl::NewPoWValidBlock(const CBlockIndex *pindex, const std::sha
         node::matmul_trusted::IsConfigured() &&
         consensus_params.IsMatMulTrustedReplayAttestationActive(pindex->nHeight)};
 
-    // Fast announcement normally goes to the first block at each height. A
-    // mirror that waits for attestation can hold an earlier tip child that
-    // never connects: no signer attests a block that fails ConnectBlock. A
-    // signer that reaches the network only through this mirror would then
-    // never see an honest sibling, never attest it, and both would stall on
-    // the parent. While connect waits for attestation, announce every stored
-    // tip child; each one carries valid proof of work.
-    if (pindex->nHeight <= m_highest_fast_announce && !connect_waits_for_attestation)
+    if (pindex->nHeight <= m_highest_fast_announce)
         return;
-    m_highest_fast_announce = std::max(m_highest_fast_announce, pindex->nHeight);
+    m_highest_fast_announce = pindex->nHeight;
 
     if (!DeploymentActiveAt(*pindex, m_chainman, Consensus::DEPLOYMENT_SEGWIT)) return;
 
@@ -12363,7 +12286,6 @@ PeerManagerImpl::EvaluateTrustedMirrorAttestationAdmit(
         .followed_body_awaiting_attestation =
             followed_body_awaiting_attestation,
         .is_signed_frontier_hash = is_signed_frontier_hash,
-        .attested_before_header = m_attested_before_header.count(hash) != 0,
         .on_parked_reorg_branch = parked,
         .height = index ? index->nHeight : -1,
         .authority_frontier = CappedAuthorityAttestedFrontier(m_chainman),
@@ -13419,32 +13341,6 @@ void PeerManagerImpl::HistoricalAttestationReverifyLoop()
     }
 }
 
-void PeerManagerImpl::NoteAttestedBeforeHeader(const uint256& hash)
-{
-    AssertLockHeld(cs_main);
-    m_attested_before_header.insert_or_assign(hash, NodeClock::now());
-    while (m_attested_before_header.size() > MAX_ATTESTED_BEFORE_HEADER) {
-        m_attested_before_header.erase(std::min_element(
-            m_attested_before_header.begin(), m_attested_before_header.end(),
-            [](const auto& a, const auto& b) { return a.second < b.second; }));
-    }
-}
-
-void PeerManagerImpl::RequestAttestationsHeardBeforeHeader(
-    const std::vector<CBlockHeader>& headers, NodeId source)
-{
-    std::vector<uint256> wanted;
-    {
-        LOCK(cs_main);
-        if (m_attested_before_header.empty()) return;
-        for (const CBlockHeader& header : headers) {
-            const uint256 hash{header.GetHash()};
-            if (m_attested_before_header.count(hash) != 0) wanted.push_back(hash);
-        }
-    }
-    for (const uint256& hash : wanted) RequestMatMulTrustedAttestations(hash, source);
-}
-
 void PeerManagerImpl::RequestMatMulTrustedAttestations(
     const uint256& hash, NodeId source)
 {
@@ -13526,7 +13422,6 @@ void PeerManagerImpl::RequestMatMulTrustedAttestations(
         if (index != nullptr &&
             m_chainman.IndexHasTrustedMatMulAuthority(index)) {
             m_matmul_attestation_requested.erase(hash);
-            m_attested_before_header.erase(hash);
             (void)m_matmul_block_lifecycle.WakeRetryOnce(
                 hash,
                 node::MatMulBlockLifecycle::RetryWakeReason::TRUSTED_AUTHORITY);
@@ -13554,16 +13449,11 @@ void PeerManagerImpl::RequestMatMulTrustedAttestations(
         const auto frontier_status{m_chainman.GetSignedFrontierStatus()};
         const bool is_signed_frontier{
             frontier_status.hash_known && frontier_status.hash == hash};
-        // A trusted signer attested this block before its header arrived,
-        // and that MMATTEST was not kept.
-        const bool attested_before_header{
-            !parked && m_attested_before_header.count(hash) != 0};
         const bool preferred{
             node::matmul_trusted::TrustedMirrorPreferGetMmAttest(
                 tip_child, short_reorg, parked, recent_active_ancestor,
                 followed_body_awaiting, is_signed_frontier,
-                signed_frontier_catch_up) ||
-            attested_before_header};
+                signed_frontier_catch_up)};
         const uint8_t request_priority{
             node::matmul_trusted::TrustedAttestationRequestPriority(
                 source_gpu,
@@ -14920,9 +14810,6 @@ void PeerManagerImpl::ProcessHeadersMessage(CNode& pfrom, Peer& peer,
         pfrom.fDisconnect = true;
         return;
     }
-    // A trusted signer attested some of these blocks before their headers
-    // reached this node, and those MMATTESTs were not kept. Ask for them.
-    RequestAttestationsHeardBeforeHeader(headers, pfrom.GetId());
     // Consider fetching more headers if we are not using our headers-sync mechanism.
     if (nCount == m_opts.max_headers_result && !have_headers_sync) {
         // Headers message had its maximum size; the peer may have more headers.
@@ -16371,12 +16258,6 @@ bool PeerManagerImpl::HoldRCJobForLowerAncestor(
 {
     AssertLockHeld(cs_main);
     if (index == nullptr) return false;
-    // #292: a requested background-chainstate hole can be retained for RC
-    // capacity, and it is an ancestor of every block above the snapshot
-    // base. It holds only another such hole: the active chain and an
-    // acquired fork above the base do not depend on the background.
-    const bool index_is_background_hole{
-        IsUncoveredBackgroundChainstateHole(m_chainman, index)};
     const auto lower{
         m_matmul_block_lifecycle.CapacityDeferredBodiesBelow(index->nHeight)};
     for (const auto& deferred : lower) {
@@ -16385,10 +16266,6 @@ bool PeerManagerImpl::HoldRCJobForLowerAncestor(
         if (cand == nullptr) continue;
         if ((cand->nStatus & BLOCK_EXACT_REPLAY_VERIFIED) != 0) continue;
         if (index->GetAncestor(cand->nHeight) != cand) continue;
-        if (!index_is_background_hole &&
-            IsUncoveredBackgroundChainstateHole(m_chainman, cand)) {
-            continue;
-        }
         // A pending CPU confirmation has already yielded its GPU slot.
         // It cannot use another GPU replay, so do not hold otherwise
         // admissible descendants behind its stale capacity-deferred entry.
@@ -16471,7 +16348,6 @@ bool PeerManagerImpl::AdmitMatMulBlockVerification(
     bool request_attestations_without_gpu{false};
     bool header_only_competing_first{false};
     bool persist_unrequested_followed{false};
-    bool requested_background_body{false};
     bool persist_gpu_body_awaiting_attestation{false};
     bool persist_lost_twin_for_signer{false};
     bool persist_heavier_competing_fork{false};
@@ -16502,23 +16378,7 @@ bool PeerManagerImpl::AdmitMatMulBlockVerification(
                 admission.state = MatMulBlockAdmission::State::HEADER_ONLY;
                 return true;
             }
-            // #292 / #305: a body this node requested for its background
-            // chainstate at an attestation-active height, with no quorum
-            // covering it, has no other way to be stored: dropping it
-            // HEADER_ONLY stopped the background below the first such
-            // height. It ExactReplays through the same admission slot,
-            // budgets and ConnectTip checks as any other body. Unsolicited
-            // pushes keep the old path.
-            requested_background_body =
-                (force_processing ||
-                 (is_retained_retry &&
-                  m_matmul_block_lifecycle.HasRetainedBody(block_hash))) &&
-                m_chainman.GetMatMulValidationMode() ==
-                    kernel::MatMulValidationMode::CONSENSUS &&
-                !node::matmul_trusted::IsTrustedMirror() &&
-                IsUncoveredBackgroundChainstateHole(m_chainman, indexed);
             persist_unrequested_followed =
-                !requested_background_body &&
                 MatMulFollowedHistoricalHole(m_chainman, indexed);
             acceptance_stable_early_exit = indexed != nullptr &&
                 (((indexed->nStatus & BLOCK_HAVE_DATA) != 0) ||
@@ -16635,10 +16495,9 @@ bool PeerManagerImpl::AdmitMatMulBlockVerification(
                                     block_hash.ToString(),
                                     exact_reference_height, node.GetId());
                         } else if (indexed == nullptr ||
-                                   !(requested_background_body ||
-                                     MatMulMaySpendExactReplayGpu(
-                                         m_chainman, m_matmul_block_lifecycle,
-                                         tip, indexed, peer_best, /*body_available=*/true))) {
+                                   !MatMulMaySpendExactReplayGpu(
+                                       m_chainman, m_matmul_block_lifecycle,
+                                       tip, indexed, peer_best, /*body_available=*/true)) {
                             // Extra twins / trusted-mirror pin-follow: do not
                             // ExactReplay. HEADER_ONLY — except a strictly
                             // heavier competing fork whose headers we already
@@ -17464,11 +17323,6 @@ bool PeerManagerImpl::AdmitMatMulBlockVerification(
             ? node::MatMulBlockLifecycle::RetryCause::RC_PENDING_CAPACITY
             : node::MatMulBlockLifecycle::RetryCause::ENCDR_PENDING_CAPACITY;
         admission.capacity_epoch = observed_capacity_epoch;
-        // A background body that finds the retained store full is dropped
-        // and held off the scheduler until the deferral expires (the same
-        // fallback as an acquired-tower body): no synchronous replay on this
-        // thread, and no disconnect of the peer that served it.
-        admission.retain_floating_no_sync_fallback = requested_background_body;
         return true;
     }
     if (rc_profile) {
@@ -19808,23 +19662,19 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
         switch (accept_result) {
         case Dandelion::DandelionManager::AcceptResult::ACCEPTED:
             if (relay_dest.has_value()) {
-                bool sent = m_connman.ForNode(relay_dest.value(), [&](CNode* pnode) {
-                    if (pnode->m_supports_dandelion) {
-                        MakeAndPushMessage(*pnode, NetMsgType::DLTX, TX_WITH_WITNESS(ptx));
-                    } else {
-                        // Relay peer doesn't support Dandelion; remove from
-                        // stempool and fluff immediately.
-                        m_dandelion->RemoveFromStemPool(txid);
-                        LOCK(cs_main);
-                        const MempoolAcceptResult r = m_chainman.ProcessTransaction(ptx);
-                        if (r.m_result_type == MempoolAcceptResult::ResultType::VALID) {
-                            RelayTransaction(txid, tx.GetWitnessHash());
-                        }
-                    }
+                // Only send under ForNode. The fluff below takes the
+                // Dandelion++ mutex and cs_main, which must not be taken while
+                // ForNode holds m_nodes_mutex (route selection takes them in
+                // the other order).
+                const bool sent = m_connman.ForNode(relay_dest.value(), [&](CNode* pnode) {
+                    if (!pnode->m_supports_dandelion) return false;
+                    MakeAndPushMessage(*pnode, NetMsgType::DLTX, TX_WITH_WITNESS(ptx));
                     return true;
                 });
-                // If the relay peer disconnected between route assignment and
-                // send, fall back to immediate fluff to avoid silent tx loss.
+                // If the relay peer does not support Dandelion++, or it
+                // disconnected between route assignment and send, remove the
+                // transaction from the stempool and fluff it at once, to avoid
+                // silent tx loss.
                 if (!sent) {
                     m_dandelion->RemoveFromStemPool(txid);
                     LOCK(cs_main);
@@ -19971,7 +19821,9 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
         // it or sent unasked. A stem relay takes such a copy into its mempool,
         // which ends the embargo there, and announces it (ProcessValidTx). The
         // originator already holds it in its mempool, so do the rest here.
-        if (const CTransactionRef own{OwnStemTx(GenTxid::Txid(txid))}) {
+        // Match on wtxid: a copy with another witness goes to validation, which
+        // rejects it here as on a relay, instead of ending the embargo.
+        if (const CTransactionRef own{OwnStemTx(GenTxid::Wtxid(wtxid))}) {
             m_dandelion->TxAddedToMempool(txid);
             m_mempool.RemoveUnbroadcastTx(txid);
             m_txdownloadman.MempoolAcceptedTx(own);
@@ -22001,7 +21853,6 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
                              node::matmul_trusted::IsAuthoritySigner(
                                  attestation.signer))};
                         if (authority_signer) {
-                            WITH_LOCK(cs_main, NoteAttestedBeforeHeader(hash));
                             if (!attested_headers_seen.insert(hash).second) {
                                 LogDebug(
                                     BCLog::NET,
@@ -22144,7 +21995,6 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
                 {
                     LOCK(cs_main);
                     m_matmul_attestation_requested.erase(hash);
-                    m_attested_before_header.erase(hash);
                     // Body may have been HEADER_ONLY-dropped before quorum
                     // existed. Tip-move clears are unreachable if this hash
                     // is the followed tip-child that never connected. Allow
@@ -22377,7 +22227,6 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
                             CBlockLocator locator;
                             {
                                 LOCK(cs_main);
-                                NoteAttestedBeforeHeader(hash);
                                 if (const CBlockIndex* start{
                                         HeaderSyncLocatorIndex(m_chainman)}) {
                                     locator = GetLocator(start);
@@ -22430,7 +22279,6 @@ void PeerManagerImpl::ProcessMessage(CNode& pfrom, const std::string& msg_type, 
                 {
                     LOCK(cs_main);
                     m_matmul_attestation_requested.erase(hash);
-                    m_attested_before_header.erase(hash);
                     m_header_only_competing.erase(hash);
                     m_header_only_followed_skip.erase(hash);
                     m_need_activate_best_chain = true;

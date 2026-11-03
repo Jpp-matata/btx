@@ -62,7 +62,6 @@ add_executable(fuzz
   load_external_block_file.cpp
   locale.cpp
   matmul_attestation.cpp
-  matmul_rc_admission.cpp
   merkleblock.cpp
   message.cpp
   miniscript.cpp

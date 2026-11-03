@@ -2142,6 +2142,10 @@ bool ParseHttpRequest(const std::string& raw, NativeRequest& req, std::string& e
             err = "body too large";
             return false;
         }
+        if (req.body.size() < v) {
+            err = "truncated http";
+            return false;
+        }
         if (req.body.size() > v) req.body.resize(v);
     }
     return true;
@@ -11483,7 +11487,23 @@ void HandleUnixFd(int cfd, ModelCatalog& cat, std::atomic<bool>* stop)
         UniValue result;
         std::string code, emsg;
         const std::string method = req.exists("method") && req["method"].isStr() ? req["method"].get_str() : "";
-        if (DispatchHelperRpc(cat, req, result, code, emsg, stop)) {
+        // A long call holds its worker until it ends, up to 24 h for
+        // waitformodelevent. Keep one of the PQ1_UNIX_WORKERS free for short
+        // calls such as btxd's own getmodelnetworkinfo poll.
+        static std::atomic<int> g_long_calls{0};
+        const bool long_call{UnixRpcReplyTimeoutMs(method) == UNIX_RPC_LONG_REPLY_MS};
+        bool busy{false};
+        if (long_call && g_long_calls.fetch_add(1) >= PQ1_UNIX_WORKERS - 1) {
+            g_long_calls.fetch_sub(1);
+            busy = true;
+            code = "HELPER_BUSY";
+            emsg = std::to_string(PQ1_UNIX_WORKERS - 1) + " long helper call(s) already running; retry later";
+        }
+        struct Release {
+            bool held;
+            ~Release() { if (held) g_long_calls.fetch_sub(1); }
+        } release{long_call && !busy};
+        if (!busy && DispatchHelperRpc(cat, req, result, code, emsg, stop)) {
             if (HelperUnixMethodIsPublicSurface(method) && JsonLeaksPrivateLocalState(result)) {
                 UniValue e(UniValue::VOBJ);
                 e.pushKV("code", "PRIVATE_STATE_DENIED");
@@ -12013,6 +12033,37 @@ int RunModelDaemon(HelperConfig cfg, std::atomic<bool>* stop)
     std::signal(SIGPIPE, SIG_IGN);
     std::atomic<bool> local_stop{false};
     if (!stop) stop = &local_stop;
+#if !defined(__linux__) && !defined(WIN32)
+    // No PR_SET_PDEATHSIG here, so poll for the parent instead: once btxd is
+    // gone the helper is reparented and stops as on SIGTERM, so a crashed btxd
+    // does not leave it holding the model socket and port.
+    struct ParentWatch {
+        std::atomic<bool> done{false};
+        std::thread thread;
+        ~ParentWatch()
+        {
+            done = true;
+            if (thread.joinable()) thread.join();
+        }
+    } parent_watch;
+    if (std::getenv("BTX_HELPER_PARENT_WATCH") != nullptr) {
+        const pid_t parent{getppid()};
+        if (parent == 1) {
+            std::cerr << "btx-modeld: parent already exited\n";
+            return 1;
+        }
+        parent_watch.thread = std::thread([&done = parent_watch.done, stop, parent] {
+            while (!done.load() && !stop->load()) {
+                if (getppid() != parent) {
+                    std::cerr << "btx-modeld: parent exited, stopping\n";
+                    stop->store(true);
+                    break;
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            }
+        });
+    }
+#endif
     struct ClearSeedPace {
         ~ClearSeedPace() { g_seed_pace_stop = nullptr; }
     } clear_seed_pace;

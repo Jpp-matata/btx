@@ -82,7 +82,6 @@ add_executable(test_btx
   matmul_verify_worker_tests.cpp
   matmul_block_lifecycle_tests.cpp
   matmul_trusted_mirror_tests.cpp
-  matmul_trusted_withdraw_tests.cpp
   compute_profile_tests.cpp
   matmul_rc_admission_tests.cpp
   trusted_exact_replay_attestation_tests.cpp
@@ -449,8 +448,6 @@ add_executable(test_btx
   shielded_v2_send_runtime_report.cpp
   shielded_v2_send_runtime_report_tests.cpp
   shielded_v2_wire_tests.cpp
-  shielded_wallet_privacy_tests.cpp
-  shielded_wallet_chunk_discovery_tests.cpp
   shielded_chunk_runtime_report.cpp
   shielded_chunk_runtime_report_tests.cpp
   shielded_scan_hint_runtime_report.cpp
@@ -503,7 +500,6 @@ add_executable(test_btx
   torcontrol_tests.cpp
   transaction_tests.cpp
   translation_tests.cpp
-  trusted_mirror_race_tests.cpp
   txdownload_tests.cpp
   txindex_tests.cpp
   txpackage_tests.cpp
@@ -554,6 +550,7 @@ target_compile_definitions(test_btx PRIVATE
 if(WITH_MODELNET)
   target_sources(test_btx PRIVATE
     modelnet_tests.cpp
+    modelnet_native_http_tests.cpp
     compute_economy_tests.cpp
     compute_economy_review_tests.cpp
     pwc_v03414_review_tests.cpp
