@@ -6,6 +6,10 @@ import {operationDialog,operationWorkbench} from './operations.js';
 import {operationButtons} from './models.js';
 import {feeBins} from '../core/mempool.js';
 import {banSubnet} from '../core/network.js';
+// getmodelfeed and getrecentreleases default to scope NETWORK and query index, catalog and PEX peers.
+// The native gate reads them without review only with scope LOCAL; the network feed stays under Native operations.
+const LOCAL_FEEDS=new Set(['getmodelfeed','getrecentreleases']);
+export function observationParams(method){return LOCAL_FEEDS.has(method)?[{scope:'LOCAL'}]:[];}
 export function observationView(app,view){
  const definitions={
   swarms:['Swarms & communities','Following a model family is not a grant to train, seed, spend or route private prompts.',['getmodelnetworkinfo','getmodelpeers','listmodels'],'Models'],
@@ -17,7 +21,7 @@ export function observationView(app,view){
  if(view==='swarms')root.append(note('Peers, model communities, work relationships and payment relationships are different graphs. This screen exposes this node’s partial observations.'));
  const workbench=operationWorkbench(app,{groups:view==='compute'?['Compute','Capabilities']:[group],title:'Native operations'});
  root.append(button('Refresh these observations',load),area,el('details',{},el('summary',{},'Native operations'),workbench));
- async function load(){area.replaceChildren();let chain=app.state.state.sources.getblockchaininfo?.result;for(const m of methods){const box=el('section',{class:'panel'});area.append(box);try{const envelope=await app.bridge.read(m);if(m==='getblockchaininfo')chain=envelope.result;const shown=presentObservation(m,envelope.result);box.append(el('div',{class:'row'},el('h2',{},shown.title),el('small',{class:'mono'},m),badge('Native source')));if(shown.metrics.length)box.append(el('div',{class:'metrics'},...shown.metrics.map(item=>metric(item.label,item.value))));if(shown.rows.length&&shown.columns.length)box.append(table(shown.rows,shown.columns));else if(m==='listmodels')box.append(table(sourceRows(envelope),['name','model_id','bytes_verified','incomplete']));box.append(jsonView(envelope.result,{open:false,title:'Native record'}));}catch(err){box.append(el('div',{class:'row'},el('h2',{},presentObservation(m,null).title),el('small',{class:'mono'},m),badge('Native source')),note(err.message,'danger'));}}if(view==='mining'){const sync=syncBanner(chain)||{};if(sync.visible===true)area.append(el('p',{class:'sync-line'},el('strong',{},sync.title==null?'':String(sync.title)),sync.detail==null?'':String(sync.detail)));}}
+ async function load(){area.replaceChildren();let chain=app.state.state.sources.getblockchaininfo?.result;for(const m of methods){const box=el('section',{class:'panel'});area.append(box);try{const envelope=await app.bridge.read(m,observationParams(m));if(m==='getblockchaininfo')chain=envelope.result;const shown=presentObservation(m,envelope.result);box.append(el('div',{class:'row'},el('h2',{},shown.title),el('small',{class:'mono'},m),badge('Native source')));if(shown.metrics.length)box.append(el('div',{class:'metrics'},...shown.metrics.map(item=>metric(item.label,item.value))));if(shown.rows.length&&shown.columns.length)box.append(table(shown.rows,shown.columns));else if(m==='listmodels')box.append(table(sourceRows(envelope),['name','model_id','bytes_verified','incomplete']));box.append(jsonView(envelope.result,{open:false,title:'Native record'}));}catch(err){box.append(el('div',{class:'row'},el('h2',{},presentObservation(m,null).title),el('small',{class:'mono'},m),badge('Native source')),note(err.message,'danger'));}}if(view==='mining'){const sync=syncBanner(chain)||{};if(sync.visible===true)area.append(el('p',{class:'sync-line'},el('strong',{},sync.title==null?'':String(sync.title)),sync.detail==null?'':String(sync.detail)));}}
  load();return root;
 }
 export function activityView(app){

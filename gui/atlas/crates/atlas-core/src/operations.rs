@@ -269,7 +269,34 @@ pub fn read_allowed(method: &str, params: &Value) -> bool {
     ) {
         return search_stays_local(params);
     }
+    if matches!(
+        method,
+        "getmodelfeed" | "getreleasefeed" | "getrecentreleases"
+    ) {
+        return feed_stays_local(params);
+    }
     true
+}
+/// The query object of a request given as an object. The node uses an "args" array
+/// as the positional parameters (transformNamedArguments), so {"args":[q]} is [q].
+fn named_query(params: &Value) -> &Value {
+    match params.get("args") {
+        Some(Value::Array(args)) if !args.is_empty() => &args[0],
+        _ => params.get("query").unwrap_or(params),
+    }
+}
+/// The feeds default to scope NETWORK and query index, catalog and PEX peers, so only
+/// an explicit LOCAL scope is a silent read.
+fn feed_stays_local(params: &Value) -> bool {
+    let query = match params {
+        Value::Array(a) => a.first(),
+        Value::Object(_) => Some(named_query(params)),
+        _ => None,
+    };
+    matches!(
+        query.and_then(|q| q.get("scope")),
+        Some(Value::String(s)) if s.eq_ignore_ascii_case("local")
+    )
 }
 fn search_stays_local(params: &Value) -> bool {
     let query = if params.is_array() {
@@ -278,7 +305,7 @@ fn search_stays_local(params: &Value) -> bool {
             None => return true,
         }
     } else if params.is_object() {
-        params.get("query").unwrap_or(params)
+        named_query(params)
     } else {
         return false;
     };
@@ -672,6 +699,61 @@ mod tests {
             assert!(!read_allowed(method, &json!([{"scope":"PEERS"}])));
             assert!(!read_allowed(method, &json!([{"scope":"ALL"}])));
             assert!(!read_allowed(method, &json!([{"scope":""}])));
+        }
+    }
+    #[test]
+    fn named_args_network_queries() {
+        // The node uses an object's "args" array as the positional parameters
+        // (transformNamedArguments), so {"args":[q]} is the same search as [q].
+        for method in [
+            "searchmodels",
+            "searchbounties",
+            "searchcollections",
+            "searchpublishers",
+        ] {
+            assert!(read_allowed(method, &json!({"args":[{"scope":"LOCAL"}]})));
+            assert!(read_allowed(method, &json!({"args":[]})));
+            assert!(!read_allowed(method, &json!({"args":["x"]})), "{method}");
+            assert!(
+                !read_allowed(method, &json!({"args":[{"text":"x"}]})),
+                "{method}"
+            );
+            assert!(
+                !read_allowed(method, &json!({"args":[{"scope":"NETWORK"}]})),
+                "{method}"
+            );
+            assert!(
+                !read_allowed(method, &json!({"args":[{"text":"x"}],"scope":"LOCAL"})),
+                "{method}"
+            );
+        }
+    }
+    #[test]
+    fn network_feeds() {
+        // getmodelfeed and getreleasefeed default to scope NETWORK, and
+        // getrecentreleases dispatches a NETWORK getmodelfeed unless scope is LOCAL.
+        for method in ["getmodelfeed", "getreleasefeed", "getrecentreleases"] {
+            assert!(read_allowed(method, &json!([{"scope":"LOCAL"}])));
+            assert!(read_allowed(method, &json!([{"scope":"local","limit":20}])));
+            assert!(read_allowed(method, &json!({"args":[{"scope":"LOCAL"}]})));
+            assert!(read_allowed(method, &json!({"query":{"scope":"LOCAL"}})));
+            assert!(!read_allowed(method, &json!([])), "{method}");
+            assert!(!read_allowed(method, &json!([{}])), "{method}");
+            assert!(!read_allowed(method, &json!([{"limit":5}])), "{method}");
+            assert!(
+                !read_allowed(method, &json!([{"scope":"NETWORK"}])),
+                "{method}"
+            );
+            assert!(!read_allowed(method, &json!([{"scope":""}])), "{method}");
+            assert!(!read_allowed(method, &json!({"args":[]})), "{method}");
+            assert!(
+                !read_allowed(method, &json!({"args":[{"scope":"NETWORK"}]})),
+                "{method}"
+            );
+        }
+        // These two read only this node's index.
+        for method in ["getfundablemodels", "getrecentlyunlockedmodels"] {
+            assert!(read_allowed(method, &json!([])));
         }
     }
     #[test]

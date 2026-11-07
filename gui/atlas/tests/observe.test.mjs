@@ -95,3 +95,13 @@ test('a models array is used only when record rows are empty, and only objects, 
   assert.deepEqual(both.rows, [peer]);
   assert.deepEqual(both.columns, ['address']);
 });
+
+test('Economy reads the network-default feeds with scope LOCAL, the scope the native gate reads without review', async () => {
+  const {observationParams} = await import('../web/views/observations.js');
+  assert.equal(typeof observationParams, 'function');
+  assert.deepEqual(observationParams('getmodelfeed'), [{scope: 'LOCAL'}]);
+  assert.deepEqual(observationParams('getrecentreleases'), [{scope: 'LOCAL'}]);
+  assert.deepEqual(observationParams('getfundablemodels'), []);
+  assert.deepEqual(observationParams('searchbounties'), []);
+  assert.deepEqual(observationParams('toString'), []);
+});
