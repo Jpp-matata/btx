@@ -284,7 +284,42 @@ fn verify_sources(r: &Runner) -> Result<()> {
             ));
         }
     }
+    // worker.py puts its own directory first on sys.path, so an unlisted module,
+    // bytecode, extension or package there shadows the standard library and the
+    // reviewed package. Other files (LICENSE, schemas/, tests/) are not importable.
+    for entry in
+        std::fs::read_dir(root).map_err(|_| err("LAB_SOURCE", "Worker directory unavailable"))?
+    {
+        let e = entry.map_err(|_| err("LAB_SOURCE", "Cannot enumerate worker directory"))?;
+        let name = e.file_name().to_string_lossy().into_owned();
+        if name == "btx_neuronlab" || allowed.contains(&name) {
+            continue;
+        }
+        if importable(&e.path(), &name) {
+            return Err(err(
+                "LAB_SOURCE_UNREVIEWED",
+                "Unlisted module or bytecode beside worker.py; use a clean reviewed installation",
+            ));
+        }
+    }
     Ok(())
+}
+/// A worker-directory entry that Python's path import could load.
+fn importable(path: &Path, name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    lower == "__pycache__"
+        || [".py", ".pyc", ".pyo", ".pyw", ".pyd", ".so"]
+            .iter()
+            .any(|ext| lower.ends_with(ext))
+        || (path.is_dir()
+            && std::fs::read_dir(path).map_or(true, |d| {
+                d.flatten().any(|f| {
+                    f.file_name()
+                        .to_string_lossy()
+                        .to_ascii_lowercase()
+                        .starts_with("__init__.")
+                })
+            }))
 }
 fn spawn_reader<T: Read + Send + 'static>(
     reader: T,
@@ -772,6 +807,75 @@ mod tests {
         let refused = verify_interpreter(&python, &target, &hash).unwrap_err();
         assert_eq!(refused.code, "LAB_INTERPRETER_CHANGED");
         let _ = std::fs::remove_dir_all(&d);
+    }
+    fn lab_fixture(tag: &str) -> (PathBuf, Runner) {
+        let d = std::env::temp_dir().join(format!("atlas-lab-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        let root = d.join("neuronlab");
+        for dir in ["btx_neuronlab", "tests", "schemas"] {
+            std::fs::create_dir_all(root.join(dir)).unwrap();
+        }
+        let mut files = serde_json::Map::new();
+        for (name, body) in [
+            ("worker.py", "import btx_neuronlab\n"),
+            ("generate_adapter.py", "\n"),
+            ("btx_neuronlab/__init__.py", "\n"),
+        ] {
+            std::fs::write(root.join(name), body).unwrap();
+            files.insert(name.into(), json!(atlas_core::hash(body.as_bytes())));
+        }
+        for (name, body) in [
+            ("tests/test_codec.py", "\n"),
+            ("schemas/profile.schema.json", "{}\n"),
+            ("LICENSE", "MIT\n"),
+            ("pyproject.toml", "\n"),
+        ] {
+            std::fs::write(root.join(name), body).unwrap();
+        }
+        let manifest =
+            serde_json::to_vec(&json!({"schema":"btx.neuronlab.code-manifest/1","files":files}))
+                .unwrap();
+        std::fs::write(root.join("code-manifest.json"), &manifest).unwrap();
+        let python = d.join("python3");
+        std::fs::write(&python, b"interpreter").unwrap();
+        let r = Runner {
+            python_target: python.canonicalize().unwrap(),
+            python,
+            entry: root.join("worker.py"),
+            store: d.join("store"),
+            python_hash: atlas_core::hash(b"interpreter"),
+            manifest_hash: atlas_core::hash(&manifest),
+        };
+        (root, r)
+    }
+    #[test]
+    fn an_unlisted_module_beside_worker_py_is_refused() {
+        // worker.py puts its own directory first on sys.path, so a module there
+        // shadows the standard library and the reviewed package.
+        let (root, r) = lab_fixture("root");
+        verify_sources(&r).unwrap();
+        for planted in [
+            "hashlib.py",
+            "numpy.pyc",
+            "_ssl.cpython-312-x86_64-linux-gnu.so",
+            "zlib.pyd",
+            "json/__init__.py",
+            "__pycache__/generate_adapter.cpython-312.pyc",
+        ] {
+            let path = root.join(planted);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, b"print('planted')\n").unwrap();
+            let refused = verify_sources(&r).map(|_| ()).unwrap_err();
+            assert_eq!(refused.code, "LAB_SOURCE_UNREVIEWED", "{planted}");
+            let top = root.join(planted.split('/').next().unwrap());
+            if top.is_dir() {
+                std::fs::remove_dir_all(&top).unwrap();
+            } else {
+                std::fs::remove_file(&top).unwrap();
+            }
+            verify_sources(&r).unwrap();
+        }
+        let _ = std::fs::remove_dir_all(root.parent().unwrap());
     }
     #[test]
     fn one_operator_review_is_complete() {
