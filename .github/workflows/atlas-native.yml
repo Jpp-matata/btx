@@ -24,7 +24,11 @@ jobs:
       - name: Install pinned compiler
         shell: bash
         run: rustup toolchain install 1.95.0 --profile minimal --component clippy --component rustfmt
-      - run: cargo test --locked -p btx-atlas-core
+      - run: cargo fmt --all --check
+        working-directory: gui/atlas
+      - run: cargo test --locked --workspace
+        working-directory: gui/atlas
+      - run: cargo clippy --locked --workspace --all-targets -- -D warnings
         working-directory: gui/atlas
       - run: cargo check --locked -p btx-atlas
         working-directory: gui/atlas
