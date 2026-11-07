@@ -152,6 +152,21 @@ fn dialog<T: Send + 'static>(app: &AppHandle, f: impl FnOnce() -> T + Send + 'st
         main_thread(app, f)
     }
 }
+/// Shows why Atlas did not start. Called from its own thread while the event loop runs.
+pub fn refuse_startup(app: &AppHandle, text: &str) {
+    let message = format!(
+        "{}\n\nAtlas did not open and sent nothing to the node.",
+        atlas_core::safe_text(text, 2000)
+    );
+    let _ = dialog(app, move || {
+        rfd::MessageDialog::new()
+            .set_title("BTX Atlas failed closed during startup")
+            .set_description(message)
+            .set_buttons(rfd::MessageButtons::Ok)
+            .set_level(rfd::MessageLevel::Error)
+            .show()
+    });
+}
 pub fn confirm(app: &AppHandle, title: &str, message: String) -> Result<()> {
     if message.len() > 20000 {
         return Err(Error::new(

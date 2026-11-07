@@ -69,7 +69,22 @@ fn main() {
         ])
         .setup(|app| {
             let dir = app.path().app_local_data_dir()?;
-            let host = Arc::new(Host::new(dir.join("audit/operations.jsonl"))?);
+            let journal = dir.join("audit/operations.jsonl");
+            let host = match Host::new(journal.clone()) {
+                Ok(host) => Arc::new(host),
+                // A setup error is a panic in tauri, an abort in a release build, and a
+                // Windows release or desktop launch shows no stderr. Show the refusal, then exit.
+                Err(e) => {
+                    let text = format!("{e}\nAudit journal: {}", journal.display());
+                    eprintln!("BTX Atlas failed closed during startup: {text}");
+                    let handle = app.handle().clone();
+                    std::thread::spawn(move || {
+                        host::refuse_startup(&handle, &text);
+                        handle.exit(1);
+                    });
+                    return Ok(());
+                }
+            };
             // The plugin copies one scheme argument into get_current. Skip those env args
             // when it already delivered a URL. Paths and file:// are still delivered.
             let mut plugin_delivered = false;
