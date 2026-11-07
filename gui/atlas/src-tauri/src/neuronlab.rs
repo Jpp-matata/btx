@@ -122,6 +122,7 @@ static CONFIG: OnceLock<Mutex<Option<Runner>>> = OnceLock::new();
 #[derive(Clone)]
 struct Runner {
     python: PathBuf,
+    python_target: PathBuf,
     entry: PathBuf,
     store: PathBuf,
     python_hash: String,
@@ -205,13 +206,31 @@ fn source_manifest(entry: &Path) -> Result<(String, Value)> {
     }
     Ok((atlas_core::hash(&manifest), parsed))
 }
-fn verify_sources(r: &Runner) -> Result<()> {
-    if atlas_core::hash(&files::read_bounded(&r.python, 268_435_456)?) != r.python_hash {
+/// The selected interpreter path, made absolute, and the file it resolves to.
+/// A venv's python is a symlink to the base interpreter, and Python finds the
+/// venv (pyvenv.cfg) from the path it was started with, so the selected path is
+/// what runs. The resolved file is what is hashed.
+fn interpreter(selected: &Path) -> Result<(PathBuf, PathBuf)> {
+    let python = std::path::absolute(selected)
+        .map_err(|_| err("LAB_PYTHON", "Cannot resolve interpreter"))?;
+    let target = python
+        .canonicalize()
+        .map_err(|_| err("LAB_PYTHON", "Cannot resolve interpreter"))?;
+    Ok((python, target))
+}
+fn verify_interpreter(python: &Path, target: &Path, python_hash: &str) -> Result<()> {
+    if python.canonicalize().ok().as_deref() != Some(target)
+        || atlas_core::hash(&files::read_bounded(target, 268_435_456)?) != python_hash
+    {
         return Err(err(
             "LAB_INTERPRETER_CHANGED",
             "Research interpreter changed; configure again",
         ));
     }
+    Ok(())
+}
+fn verify_sources(r: &Runner) -> Result<()> {
+    verify_interpreter(&r.python, &r.python_target, &r.python_hash)?;
     let (hash, m) = source_manifest(&r.entry)?;
     if hash != r.manifest_hash {
         return Err(err(
@@ -643,13 +662,13 @@ pub async fn atlas_neuronlab(
     blocking(move||{
   if action=="configure"{
    only_keys(&p,&[])?;
-   let python=pick(&app,false,"Choose a trusted Python 3.11+ interpreter for scientific work")?.canonicalize().map_err(|_|err("LAB_PYTHON","Cannot resolve interpreter"))?;
+   let(python,python_target)=interpreter(&pick(&app,false,"Choose a trusted Python 3.11+ interpreter for scientific work")?)?;
    let entry=pick(&app,false,"Choose installed contrib/atlas/neuronlab/worker.py")?.canonicalize().map_err(|_|err("LAB_RUNNER","Cannot resolve worker entry"))?;
    let(hash,_)=source_manifest(&entry)?;
-   let python_hash=atlas_core::hash(&files::read_bounded(&python,268_435_456)?);
+   let python_hash=atlas_core::hash(&files::read_bounded(&python_target,268_435_456)?);
    let store=app.path().app_local_data_dir().map_err(|_|err("LAB_STORE","No local application directory"))?.join("neuronlab");
-   let r=Runner{python,entry,store,python_hash,manifest_hash:hash};verify_sources(&r)?;
-   confirm(&app,"Install local scientific worker",format!("Interpreter: {}\nSHA-256: {}\nWorker: {}\nSource manifest SHA-256: {}\nStore: {}\n\nThis explicitly trusts installed code and its scientific dependencies. It does NOT grant wallet keys or peer activation. OS sandbox and native platform qualification remain separate gates.",r.python.display(),r.python_hash,r.entry.display(),r.manifest_hash,r.store.display()))?;
+   let r=Runner{python,python_target,entry,store,python_hash,manifest_hash:hash};verify_sources(&r)?;
+   confirm(&app,"Install local scientific worker",format!("Interpreter: {}\nResolves to: {}\nSHA-256: {}\nWorker: {}\nSource manifest SHA-256: {}\nStore: {}\n\nThis explicitly trusts installed code and its scientific dependencies. It does NOT grant wallet keys or peer activation. OS sandbox and native platform qualification remain separate gates.",r.python.display(),r.python_target.display(),r.python_hash,r.entry.display(),r.manifest_hash,r.store.display()))?;
    CANCEL.fetch_add(1,Ordering::SeqCst);*lock(config())?=Some(r.clone());return run(&r,"status",json!({}),&operation_id);
   }
   let r=lock(config())?.clone().ok_or_else(||err("LAB_NOT_CONFIGURED","Configure an approved local research worker first"))?;
@@ -715,6 +734,44 @@ mod tests {
     }
     fn activate() -> Value {
         json!({"profile_id":"a".repeat(96),"model_id":"b".repeat(96),"expected_generation":3})
+    }
+    #[cfg(unix)]
+    fn venv_fixture(tag: &str) -> PathBuf {
+        // A venv's bin/python is a symlink to the base interpreter.
+        let d = std::env::temp_dir().join(format!("atlas-venv-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        for dir in ["base", "other", "venv/bin"] {
+            std::fs::create_dir_all(d.join(dir)).unwrap();
+        }
+        std::fs::write(d.join("base/python3.12"), b"base interpreter").unwrap();
+        std::fs::write(d.join("other/python3.12"), b"other interpreter").unwrap();
+        std::fs::write(d.join("venv/pyvenv.cfg"), b"home = base\n").unwrap();
+        std::os::unix::fs::symlink(d.join("base/python3.12"), d.join("venv/bin/python")).unwrap();
+        d
+    }
+    #[cfg(unix)]
+    #[test]
+    fn a_venv_interpreter_runs_from_the_selected_path() {
+        // Python finds pyvenv.cfg from the path it was started with, so running the
+        // resolved target loses the venv's site-packages.
+        let d = venv_fixture("path");
+        let (python, target) = interpreter(&d.join("venv/bin/python")).unwrap();
+        assert_eq!(python, d.join("venv/bin/python"));
+        assert_eq!(target, d.join("base/python3.12").canonicalize().unwrap());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+    #[cfg(unix)]
+    #[test]
+    fn a_repointed_venv_interpreter_is_refused() {
+        let d = venv_fixture("repoint");
+        let (python, target) = interpreter(&d.join("venv/bin/python")).unwrap();
+        let hash = atlas_core::hash(&files::read_bounded(&target, 1024).unwrap());
+        assert!(verify_interpreter(&python, &target, &hash).is_ok());
+        std::fs::remove_file(d.join("venv/bin/python")).unwrap();
+        std::os::unix::fs::symlink(d.join("other/python3.12"), d.join("venv/bin/python")).unwrap();
+        let refused = verify_interpreter(&python, &target, &hash).unwrap_err();
+        assert_eq!(refused.code, "LAB_INTERPRETER_CHANGED");
+        let _ = std::fs::remove_dir_all(&d);
     }
     #[test]
     fn one_operator_review_is_complete() {
