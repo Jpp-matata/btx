@@ -508,7 +508,35 @@ fn run_stream(
         .cloned()
         .ok_or_else(|| err("LAB_RESULT", "Worker result missing"))
 }
-fn compact_review(action: &str, operation_id: &str, payload: &Value, pretty: &str) -> String {
+/// The native review of a research write. `operators` is the worker's signed
+/// `profile.operations` for compare, generate and activate.
+fn intervention_review(
+    action: &str,
+    operation_id: &str,
+    p: &Value,
+    operators: Option<&Value>,
+) -> Result<String> {
+    let pretty = serde_json::to_string_pretty(p)
+        .map_err(|_| err("LAB_JSON", "Review serialization failed"))?;
+    let mut review = format!("Research action: {action}\nOperation ID: {operation_id}\n\n{pretty}\n\nNo wallet/host-tool authority is added. Profile signatures do not certify model behavior.");
+    if let Some(operators) = operators {
+        review.push_str(&format!(
+            "\n\nExact signed operators:\n{}",
+            serde_json::to_string_pretty(operators).unwrap_or_default()
+        ));
+    }
+    if review.len() > 1200 {
+        review = compact_review(action, operation_id, p, &pretty, operators);
+    }
+    Ok(review)
+}
+fn compact_review(
+    action: &str,
+    operation_id: &str,
+    payload: &Value,
+    pretty: &str,
+    operators: Option<&Value>,
+) -> String {
     let preview: String = pretty.chars().take(400).collect();
     let digest = atlas_core::hash(pretty.as_bytes());
     let title = payload
@@ -516,9 +544,58 @@ fn compact_review(action: &str, operation_id: &str, payload: &Value, pretty: &st
         .and_then(Value::as_str)
         .map(|title| format!("Title: {title}\n"))
         .unwrap_or_default();
+    let operators = operators.map(operator_lines).unwrap_or_default();
     format!(
-        "Research action: {action}\nOperation ID: {operation_id}\n{title}\n{preview}\n\nSHA-256: {digest}\n\nApproval still covers the exact payload and the dialog omitted the rest so the buttons stay on screen."
+        "Research action: {action}\nOperation ID: {operation_id}\n{title}\n{preview}\n\nSHA-256: {digest}{operators}\n\nApproval still covers the exact payload and the dialog omitted the rest so the buttons stay on screen."
     )
+}
+/// Signed operators shown in a compact review: their count, the SHA-256 of their
+/// JSON, and one line for each of the first eight.
+fn operator_lines(operators: &Value) -> String {
+    const SHOWN: usize = 8;
+    let json = serde_json::to_string(operators).unwrap_or_default();
+    let list = operators.as_array().map(Vec::as_slice).unwrap_or_default();
+    let mut out = format!(
+        "\n\nExact signed operators: {}, SHA-256 {}",
+        list.len(),
+        atlas_core::hash(json.as_bytes())
+    );
+    let text = |o: &Value, key: &str| match o.get(key) {
+        Some(Value::String(s)) => atlas_core::safe_text(s, 64),
+        Some(v) => atlas_core::safe_text(&v.to_string(), 64),
+        None => "?".to_owned(),
+    };
+    for o in list.iter().take(SHOWN) {
+        let indices = o.get("indices").and_then(Value::as_array);
+        let mut units = indices
+            .map(|a| a.iter().take(8).map(Value::to_string).collect::<Vec<_>>())
+            .unwrap_or_default()
+            .join(",");
+        if let Some(rest) = indices
+            .map(|a| a.len().saturating_sub(8))
+            .filter(|n| *n > 0)
+        {
+            units.push_str(&format!(",+{rest}"));
+        }
+        out.push_str(&format!(
+            "\n- {}: {} layer {} units [{units}] {} ppm {} phase {} tokens {}..{}",
+            text(o, "id"),
+            text(o, "kind"),
+            text(o, "layer"),
+            text(o, "coefficient_ppm"),
+            text(o, "normalization"),
+            text(o, "phase"),
+            text(o, "token_start"),
+            text(o, "token_end"),
+        ));
+    }
+    if list.len() > SHOWN {
+        out.push_str(&format!(
+            "\n- {} more operators, covered by the SHA-256 above",
+            list.len() - SHOWN
+        ));
+    }
+    out
 }
 
 fn uri(p: &Value) -> Result<String> {
@@ -613,13 +690,12 @@ pub async fn atlas_neuronlab(
   }
   if action=="export"{only_keys(&p,&["profile_id"])?;digest(string(&p,"profile_id")?)?;let path=pick(&app,true,"Save capsule to a NEW .safetensors file")?;p["path"]=json!(path.to_string_lossy());}
   if !READS.contains(&action.as_str()){
-   let pretty=serde_json::to_string_pretty(&p).map_err(|_|err("LAB_JSON","Review serialization failed"))?;
-   let mut review=format!("Research action: {action}\nOperation ID: {operation_id}\n\n{pretty}\n\nNo wallet/host-tool authority is added. Profile signatures do not certify model behavior.");
+   let mut actual=None;
    if ["compare","generate","activate"].contains(&action.as_str()){
-    if let Some(id)=p.get("profile_id").and_then(Value::as_str){let actual=run(&r,"profile",json!({"profile_id":id}),&format!("{operation_id}-inspect"))?;
-     review.push_str(&format!("\n\nExact signed operators:\n{}",serde_json::to_string_pretty(&actual.pointer("/profile/operations")).unwrap_or_default()));}
+    if let Some(id)=p.get("profile_id").and_then(Value::as_str){actual=Some(run(&r,"profile",json!({"profile_id":id}),&format!("{operation_id}-inspect"))?);}
    }
-   if review.len()>1200{review=compact_review(&action,&operation_id,&p,&pretty);}
+   let operators=actual.as_ref().map(|a|a.pointer("/profile/operations").unwrap_or(&Value::Null));
+   let review=intervention_review(&action,&operation_id,&p,operators)?;
    confirm(&app,"Review local model intervention",review)?;
    if action=="revoke"||action=="deactivate"{CANCEL.fetch_add(1,Ordering::SeqCst);}
    h.audit(&operation_id,&format!("neuronlab.{action}"),"SUBMITTED")?;
@@ -628,4 +704,56 @@ pub async fn atlas_neuronlab(
   if !READS.contains(&action.as_str()){h.audit(&operation_id,&format!("neuronlab.{action}"),"SUCCEEDED")?;}
   Ok(result)
  }).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn operator(id: &str, layer: u64, indices: &[u64], coefficient_ppm: i64) -> Value {
+        // The shape of web/neuronlab/contract.js operation().
+        json!({"id":id,"kind":"neuron_scale","layer":layer,"indices":indices,"coefficient_ppm":coefficient_ppm,"normalization":"absolute","phase":"both","token_start":0,"token_end":-1,"tensor":null,"calibration":null,"bounds_ppm":null,"sae":null})
+    }
+    fn activate() -> Value {
+        json!({"profile_id":"a".repeat(96),"model_id":"b".repeat(96),"expected_generation":3})
+    }
+    #[test]
+    fn one_operator_review_is_complete() {
+        let ops = json!([operator("op-1", 2, &[4, 9], 1_500_000)]);
+        let review = intervention_review("activate", "op", &activate(), Some(&ops)).unwrap();
+        assert!(review.len() <= 1200, "{review}");
+        assert!(review.contains("\"coefficient_ppm\": 1500000"), "{review}");
+    }
+    #[test]
+    fn compact_review_keeps_signed_operators() {
+        let wide: Vec<u64> = (0..40).collect();
+        let ops = json!([
+            operator("op-1", 0, &[1, 2], 1_500_000),
+            operator("op-2", 5, &[7], -250_000),
+            operator("op-3", 11, &wide, 2_000_000)
+        ]);
+        let review = intervention_review("activate", "op", &activate(), Some(&ops)).unwrap();
+        assert!(review.contains("the dialog omitted the rest"), "{review}");
+        for shown in ["op-1", "op-2", "op-3", "-250000", "layer 11"] {
+            assert!(review.contains(shown), "{shown} missing from\n{review}");
+        }
+        let digest = atlas_core::hash(serde_json::to_string(&ops).unwrap().as_bytes());
+        assert!(review.contains(&digest), "{review}");
+        assert!(review.lines().count() <= 24, "{review}");
+    }
+    #[test]
+    fn compact_review_bounds_many_operators() {
+        let ops = Value::Array(
+            (0..64)
+                .map(|i| operator(&format!("op-{i}"), i, &[i], 1_000_000))
+                .collect(),
+        );
+        let review = intervention_review("activate", "op", &activate(), Some(&ops)).unwrap();
+        assert!(review.contains("Exact signed operators: 64"), "{review}");
+        assert!(
+            review.contains("op-7") && !review.contains("op-8 "),
+            "{review}"
+        );
+        assert!(review.contains("56 more"), "{review}");
+        assert!(review.lines().count() <= 24, "{review}");
+    }
 }
