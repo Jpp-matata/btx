@@ -142,6 +142,31 @@ pub fn main_thread<T: Send + 'static>(
     rx.recv()
         .map_err(|_| Error::new("NATIVE_UI", "Native control closed unexpectedly"))
 }
+/// Runs a native dialog. On Linux, rfd's GTK backend posts the dialog to the GTK
+/// main loop and blocks until it closes, so it is called from this worker thread:
+/// posted from the main thread, it waits for itself. Every caller is a blocking task.
+fn dialog<T: Send + 'static>(app: &AppHandle, f: impl FnOnce() -> T + Send + 'static) -> Result<T> {
+    if cfg!(target_os = "linux") {
+        Ok(f())
+    } else {
+        main_thread(app, f)
+    }
+}
+/// Shows why Atlas did not start. Called from its own thread while the event loop runs.
+pub fn refuse_startup(app: &AppHandle, text: &str) {
+    let message = format!(
+        "{}\n\nAtlas did not open and sent nothing to the node.",
+        atlas_core::safe_text(text, 2000)
+    );
+    let _ = dialog(app, move || {
+        rfd::MessageDialog::new()
+            .set_title("BTX Atlas failed closed during startup")
+            .set_description(message)
+            .set_buttons(rfd::MessageButtons::Ok)
+            .set_level(rfd::MessageLevel::Error)
+            .show()
+    });
+}
 pub fn confirm(app: &AppHandle, title: &str, message: String) -> Result<()> {
     if message.len() > 20000 {
         return Err(Error::new(
@@ -150,7 +175,7 @@ pub fn confirm(app: &AppHandle, title: &str, message: String) -> Result<()> {
         ));
     }
     let title = format!("BTX ATLAS • {title}");
-    let ok = main_thread(app, move || {
+    let ok = dialog(app, move || {
         rfd::MessageDialog::new()
             .set_title(title)
             .set_description(message)
@@ -169,7 +194,7 @@ pub fn confirm(app: &AppHandle, title: &str, message: String) -> Result<()> {
 }
 pub fn pick(app: &AppHandle, save: bool, title: &str) -> Result<PathBuf> {
     let title = title.to_owned();
-    main_thread(app, move || {
+    dialog(app, move || {
         let d = rfd::FileDialog::new().set_title(title);
         if save {
             d.save_file()
@@ -181,7 +206,7 @@ pub fn pick(app: &AppHandle, save: bool, title: &str) -> Result<PathBuf> {
 }
 pub fn pick_save(app: &AppHandle, title: &str, name: Option<String>) -> Result<PathBuf> {
     let title = title.to_owned();
-    main_thread(app, move || {
+    dialog(app, move || {
         let d = rfd::FileDialog::new().set_title(title);
         match name {
             Some(name) => d.set_file_name(name),
@@ -193,7 +218,7 @@ pub fn pick_save(app: &AppHandle, title: &str, name: Option<String>) -> Result<P
 }
 pub fn pick_folder(app: &AppHandle, title: &str) -> Result<PathBuf> {
     let title = title.to_owned();
-    main_thread(app, move || {
+    dialog(app, move || {
         rfd::FileDialog::new().set_title(title).pick_folder()
     })?
     .ok_or_else(|| Error::new("CANCELLED", "No directory selected"))

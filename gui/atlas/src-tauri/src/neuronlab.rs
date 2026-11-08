@@ -122,6 +122,7 @@ static CONFIG: OnceLock<Mutex<Option<Runner>>> = OnceLock::new();
 #[derive(Clone)]
 struct Runner {
     python: PathBuf,
+    python_target: PathBuf,
     entry: PathBuf,
     store: PathBuf,
     python_hash: String,
@@ -205,13 +206,31 @@ fn source_manifest(entry: &Path) -> Result<(String, Value)> {
     }
     Ok((atlas_core::hash(&manifest), parsed))
 }
-fn verify_sources(r: &Runner) -> Result<()> {
-    if atlas_core::hash(&files::read_bounded(&r.python, 268_435_456)?) != r.python_hash {
+/// The selected interpreter path, made absolute, and the file it resolves to.
+/// A venv's python is a symlink to the base interpreter, and Python finds the
+/// venv (pyvenv.cfg) from the path it was started with, so the selected path is
+/// what runs. The resolved file is what is hashed.
+fn interpreter(selected: &Path) -> Result<(PathBuf, PathBuf)> {
+    let python = std::path::absolute(selected)
+        .map_err(|_| err("LAB_PYTHON", "Cannot resolve interpreter"))?;
+    let target = python
+        .canonicalize()
+        .map_err(|_| err("LAB_PYTHON", "Cannot resolve interpreter"))?;
+    Ok((python, target))
+}
+fn verify_interpreter(python: &Path, target: &Path, python_hash: &str) -> Result<()> {
+    if python.canonicalize().ok().as_deref() != Some(target)
+        || atlas_core::hash(&files::read_bounded(target, 268_435_456)?) != python_hash
+    {
         return Err(err(
             "LAB_INTERPRETER_CHANGED",
             "Research interpreter changed; configure again",
         ));
     }
+    Ok(())
+}
+fn verify_sources(r: &Runner) -> Result<()> {
+    verify_interpreter(&r.python, &r.python_target, &r.python_hash)?;
     let (hash, m) = source_manifest(&r.entry)?;
     if hash != r.manifest_hash {
         return Err(err(
@@ -265,7 +284,42 @@ fn verify_sources(r: &Runner) -> Result<()> {
             ));
         }
     }
+    // worker.py puts its own directory first on sys.path, so an unlisted module,
+    // bytecode, extension or package there shadows the standard library and the
+    // reviewed package. Other files (LICENSE, schemas/, tests/) are not importable.
+    for entry in
+        std::fs::read_dir(root).map_err(|_| err("LAB_SOURCE", "Worker directory unavailable"))?
+    {
+        let e = entry.map_err(|_| err("LAB_SOURCE", "Cannot enumerate worker directory"))?;
+        let name = e.file_name().to_string_lossy().into_owned();
+        if name == "btx_neuronlab" || allowed.contains(&name) {
+            continue;
+        }
+        if importable(&e.path(), &name) {
+            return Err(err(
+                "LAB_SOURCE_UNREVIEWED",
+                "Unlisted module or bytecode beside worker.py; use a clean reviewed installation",
+            ));
+        }
+    }
     Ok(())
+}
+/// A worker-directory entry that Python's path import could load.
+fn importable(path: &Path, name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    lower == "__pycache__"
+        || [".py", ".pyc", ".pyo", ".pyw", ".pyd", ".so"]
+            .iter()
+            .any(|ext| lower.ends_with(ext))
+        || (path.is_dir()
+            && std::fs::read_dir(path).map_or(true, |d| {
+                d.flatten().any(|f| {
+                    f.file_name()
+                        .to_string_lossy()
+                        .to_ascii_lowercase()
+                        .starts_with("__init__.")
+                })
+            }))
 }
 fn spawn_reader<T: Read + Send + 'static>(
     reader: T,
@@ -508,7 +562,35 @@ fn run_stream(
         .cloned()
         .ok_or_else(|| err("LAB_RESULT", "Worker result missing"))
 }
-fn compact_review(action: &str, operation_id: &str, payload: &Value, pretty: &str) -> String {
+/// The native review of a research write. `operators` is the worker's signed
+/// `profile.operations` for compare, generate and activate.
+fn intervention_review(
+    action: &str,
+    operation_id: &str,
+    p: &Value,
+    operators: Option<&Value>,
+) -> Result<String> {
+    let pretty = serde_json::to_string_pretty(p)
+        .map_err(|_| err("LAB_JSON", "Review serialization failed"))?;
+    let mut review = format!("Research action: {action}\nOperation ID: {operation_id}\n\n{pretty}\n\nNo wallet/host-tool authority is added. Profile signatures do not certify model behavior.");
+    if let Some(operators) = operators {
+        review.push_str(&format!(
+            "\n\nExact signed operators:\n{}",
+            serde_json::to_string_pretty(operators).unwrap_or_default()
+        ));
+    }
+    if review.len() > 1200 {
+        review = compact_review(action, operation_id, p, &pretty, operators);
+    }
+    Ok(review)
+}
+fn compact_review(
+    action: &str,
+    operation_id: &str,
+    payload: &Value,
+    pretty: &str,
+    operators: Option<&Value>,
+) -> String {
     let preview: String = pretty.chars().take(400).collect();
     let digest = atlas_core::hash(pretty.as_bytes());
     let title = payload
@@ -516,9 +598,58 @@ fn compact_review(action: &str, operation_id: &str, payload: &Value, pretty: &st
         .and_then(Value::as_str)
         .map(|title| format!("Title: {title}\n"))
         .unwrap_or_default();
+    let operators = operators.map(operator_lines).unwrap_or_default();
     format!(
-        "Research action: {action}\nOperation ID: {operation_id}\n{title}\n{preview}\n\nSHA-256: {digest}\n\nApproval still covers the exact payload and the dialog omitted the rest so the buttons stay on screen."
+        "Research action: {action}\nOperation ID: {operation_id}\n{title}\n{preview}\n\nSHA-256: {digest}{operators}\n\nApproval still covers the exact payload and the dialog omitted the rest so the buttons stay on screen."
     )
+}
+/// Signed operators shown in a compact review: their count, the SHA-256 of their
+/// JSON, and one line for each of the first eight.
+fn operator_lines(operators: &Value) -> String {
+    const SHOWN: usize = 8;
+    let json = serde_json::to_string(operators).unwrap_or_default();
+    let list = operators.as_array().map(Vec::as_slice).unwrap_or_default();
+    let mut out = format!(
+        "\n\nExact signed operators: {}, SHA-256 {}",
+        list.len(),
+        atlas_core::hash(json.as_bytes())
+    );
+    let text = |o: &Value, key: &str| match o.get(key) {
+        Some(Value::String(s)) => atlas_core::safe_text(s, 64),
+        Some(v) => atlas_core::safe_text(&v.to_string(), 64),
+        None => "?".to_owned(),
+    };
+    for o in list.iter().take(SHOWN) {
+        let indices = o.get("indices").and_then(Value::as_array);
+        let mut units = indices
+            .map(|a| a.iter().take(8).map(Value::to_string).collect::<Vec<_>>())
+            .unwrap_or_default()
+            .join(",");
+        if let Some(rest) = indices
+            .map(|a| a.len().saturating_sub(8))
+            .filter(|n| *n > 0)
+        {
+            units.push_str(&format!(",+{rest}"));
+        }
+        out.push_str(&format!(
+            "\n- {}: {} layer {} units [{units}] {} ppm {} phase {} tokens {}..{}",
+            text(o, "id"),
+            text(o, "kind"),
+            text(o, "layer"),
+            text(o, "coefficient_ppm"),
+            text(o, "normalization"),
+            text(o, "phase"),
+            text(o, "token_start"),
+            text(o, "token_end"),
+        ));
+    }
+    if list.len() > SHOWN {
+        out.push_str(&format!(
+            "\n- {} more operators, covered by the SHA-256 above",
+            list.len() - SHOWN
+        ));
+    }
+    out
 }
 
 fn uri(p: &Value) -> Result<String> {
@@ -566,13 +697,13 @@ pub async fn atlas_neuronlab(
     blocking(move||{
   if action=="configure"{
    only_keys(&p,&[])?;
-   let python=pick(&app,false,"Choose a trusted Python 3.11+ interpreter for scientific work")?.canonicalize().map_err(|_|err("LAB_PYTHON","Cannot resolve interpreter"))?;
+   let(python,python_target)=interpreter(&pick(&app,false,"Choose a trusted Python 3.11+ interpreter for scientific work")?)?;
    let entry=pick(&app,false,"Choose installed contrib/atlas/neuronlab/worker.py")?.canonicalize().map_err(|_|err("LAB_RUNNER","Cannot resolve worker entry"))?;
    let(hash,_)=source_manifest(&entry)?;
-   let python_hash=atlas_core::hash(&files::read_bounded(&python,268_435_456)?);
+   let python_hash=atlas_core::hash(&files::read_bounded(&python_target,268_435_456)?);
    let store=app.path().app_local_data_dir().map_err(|_|err("LAB_STORE","No local application directory"))?.join("neuronlab");
-   let r=Runner{python,entry,store,python_hash,manifest_hash:hash};verify_sources(&r)?;
-   confirm(&app,"Install local scientific worker",format!("Interpreter: {}\nSHA-256: {}\nWorker: {}\nSource manifest SHA-256: {}\nStore: {}\n\nThis explicitly trusts installed code and its scientific dependencies. It does NOT grant wallet keys or peer activation. OS sandbox and native platform qualification remain separate gates.",r.python.display(),r.python_hash,r.entry.display(),r.manifest_hash,r.store.display()))?;
+   let r=Runner{python,python_target,entry,store,python_hash,manifest_hash:hash};verify_sources(&r)?;
+   confirm(&app,"Install local scientific worker",format!("Interpreter: {}\nResolves to: {}\nSHA-256: {}\nWorker: {}\nSource manifest SHA-256: {}\nStore: {}\n\nThis explicitly trusts installed code and its scientific dependencies. It does NOT grant wallet keys or peer activation. OS sandbox and native platform qualification remain separate gates.",r.python.display(),r.python_target.display(),r.python_hash,r.entry.display(),r.manifest_hash,r.store.display()))?;
    CANCEL.fetch_add(1,Ordering::SeqCst);*lock(config())?=Some(r.clone());return run(&r,"status",json!({}),&operation_id);
   }
   let r=lock(config())?.clone().ok_or_else(||err("LAB_NOT_CONFIGURED","Configure an approved local research worker first"))?;
@@ -613,13 +744,12 @@ pub async fn atlas_neuronlab(
   }
   if action=="export"{only_keys(&p,&["profile_id"])?;digest(string(&p,"profile_id")?)?;let path=pick(&app,true,"Save capsule to a NEW .safetensors file")?;p["path"]=json!(path.to_string_lossy());}
   if !READS.contains(&action.as_str()){
-   let pretty=serde_json::to_string_pretty(&p).map_err(|_|err("LAB_JSON","Review serialization failed"))?;
-   let mut review=format!("Research action: {action}\nOperation ID: {operation_id}\n\n{pretty}\n\nNo wallet/host-tool authority is added. Profile signatures do not certify model behavior.");
+   let mut actual=None;
    if ["compare","generate","activate"].contains(&action.as_str()){
-    if let Some(id)=p.get("profile_id").and_then(Value::as_str){let actual=run(&r,"profile",json!({"profile_id":id}),&format!("{operation_id}-inspect"))?;
-     review.push_str(&format!("\n\nExact signed operators:\n{}",serde_json::to_string_pretty(&actual.pointer("/profile/operations")).unwrap_or_default()));}
+    if let Some(id)=p.get("profile_id").and_then(Value::as_str){actual=Some(run(&r,"profile",json!({"profile_id":id}),&format!("{operation_id}-inspect"))?);}
    }
-   if review.len()>1200{review=compact_review(&action,&operation_id,&p,&pretty);}
+   let operators=actual.as_ref().map(|a|a.pointer("/profile/operations").unwrap_or(&Value::Null));
+   let review=intervention_review(&action,&operation_id,&p,operators)?;
    confirm(&app,"Review local model intervention",review)?;
    if action=="revoke"||action=="deactivate"{CANCEL.fetch_add(1,Ordering::SeqCst);}
    h.audit(&operation_id,&format!("neuronlab.{action}"),"SUBMITTED")?;
@@ -628,4 +758,163 @@ pub async fn atlas_neuronlab(
   if !READS.contains(&action.as_str()){h.audit(&operation_id,&format!("neuronlab.{action}"),"SUCCEEDED")?;}
   Ok(result)
  }).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn operator(id: &str, layer: u64, indices: &[u64], coefficient_ppm: i64) -> Value {
+        // The shape of web/neuronlab/contract.js operation().
+        json!({"id":id,"kind":"neuron_scale","layer":layer,"indices":indices,"coefficient_ppm":coefficient_ppm,"normalization":"absolute","phase":"both","token_start":0,"token_end":-1,"tensor":null,"calibration":null,"bounds_ppm":null,"sae":null})
+    }
+    fn activate() -> Value {
+        json!({"profile_id":"a".repeat(96),"model_id":"b".repeat(96),"expected_generation":3})
+    }
+    #[cfg(unix)]
+    fn venv_fixture(tag: &str) -> PathBuf {
+        // A venv's bin/python is a symlink to the base interpreter.
+        let d = std::env::temp_dir().join(format!("atlas-venv-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        for dir in ["base", "other", "venv/bin"] {
+            std::fs::create_dir_all(d.join(dir)).unwrap();
+        }
+        std::fs::write(d.join("base/python3.12"), b"base interpreter").unwrap();
+        std::fs::write(d.join("other/python3.12"), b"other interpreter").unwrap();
+        std::fs::write(d.join("venv/pyvenv.cfg"), b"home = base\n").unwrap();
+        std::os::unix::fs::symlink(d.join("base/python3.12"), d.join("venv/bin/python")).unwrap();
+        d
+    }
+    #[cfg(unix)]
+    #[test]
+    fn a_venv_interpreter_runs_from_the_selected_path() {
+        // Python finds pyvenv.cfg from the path it was started with, so running the
+        // resolved target loses the venv's site-packages.
+        let d = venv_fixture("path");
+        let (python, target) = interpreter(&d.join("venv/bin/python")).unwrap();
+        assert_eq!(python, d.join("venv/bin/python"));
+        assert_eq!(target, d.join("base/python3.12").canonicalize().unwrap());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+    #[cfg(unix)]
+    #[test]
+    fn a_repointed_venv_interpreter_is_refused() {
+        let d = venv_fixture("repoint");
+        let (python, target) = interpreter(&d.join("venv/bin/python")).unwrap();
+        let hash = atlas_core::hash(&files::read_bounded(&target, 1024).unwrap());
+        assert!(verify_interpreter(&python, &target, &hash).is_ok());
+        std::fs::remove_file(d.join("venv/bin/python")).unwrap();
+        std::os::unix::fs::symlink(d.join("other/python3.12"), d.join("venv/bin/python")).unwrap();
+        let refused = verify_interpreter(&python, &target, &hash).unwrap_err();
+        assert_eq!(refused.code, "LAB_INTERPRETER_CHANGED");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+    fn lab_fixture(tag: &str) -> (PathBuf, Runner) {
+        let d = std::env::temp_dir().join(format!("atlas-lab-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        let root = d.join("neuronlab");
+        for dir in ["btx_neuronlab", "tests", "schemas"] {
+            std::fs::create_dir_all(root.join(dir)).unwrap();
+        }
+        let mut files = serde_json::Map::new();
+        for (name, body) in [
+            ("worker.py", "import btx_neuronlab\n"),
+            ("generate_adapter.py", "\n"),
+            ("btx_neuronlab/__init__.py", "\n"),
+        ] {
+            std::fs::write(root.join(name), body).unwrap();
+            files.insert(name.into(), json!(atlas_core::hash(body.as_bytes())));
+        }
+        for (name, body) in [
+            ("tests/test_codec.py", "\n"),
+            ("schemas/profile.schema.json", "{}\n"),
+            ("LICENSE", "MIT\n"),
+            ("pyproject.toml", "\n"),
+        ] {
+            std::fs::write(root.join(name), body).unwrap();
+        }
+        let manifest =
+            serde_json::to_vec(&json!({"schema":"btx.neuronlab.code-manifest/1","files":files}))
+                .unwrap();
+        std::fs::write(root.join("code-manifest.json"), &manifest).unwrap();
+        let python = d.join("python3");
+        std::fs::write(&python, b"interpreter").unwrap();
+        let r = Runner {
+            python_target: python.canonicalize().unwrap(),
+            python,
+            entry: root.join("worker.py"),
+            store: d.join("store"),
+            python_hash: atlas_core::hash(b"interpreter"),
+            manifest_hash: atlas_core::hash(&manifest),
+        };
+        (root, r)
+    }
+    #[test]
+    fn an_unlisted_module_beside_worker_py_is_refused() {
+        // worker.py puts its own directory first on sys.path, so a module there
+        // shadows the standard library and the reviewed package.
+        let (root, r) = lab_fixture("root");
+        verify_sources(&r).unwrap();
+        for planted in [
+            "hashlib.py",
+            "numpy.pyc",
+            "_ssl.cpython-312-x86_64-linux-gnu.so",
+            "zlib.pyd",
+            "json/__init__.py",
+            "__pycache__/generate_adapter.cpython-312.pyc",
+        ] {
+            let path = root.join(planted);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, b"print('planted')\n").unwrap();
+            let refused = verify_sources(&r).map(|_| ()).unwrap_err();
+            assert_eq!(refused.code, "LAB_SOURCE_UNREVIEWED", "{planted}");
+            let top = root.join(planted.split('/').next().unwrap());
+            if top.is_dir() {
+                std::fs::remove_dir_all(&top).unwrap();
+            } else {
+                std::fs::remove_file(&top).unwrap();
+            }
+            verify_sources(&r).unwrap();
+        }
+        let _ = std::fs::remove_dir_all(root.parent().unwrap());
+    }
+    #[test]
+    fn one_operator_review_is_complete() {
+        let ops = json!([operator("op-1", 2, &[4, 9], 1_500_000)]);
+        let review = intervention_review("activate", "op", &activate(), Some(&ops)).unwrap();
+        assert!(review.len() <= 1200, "{review}");
+        assert!(review.contains("\"coefficient_ppm\": 1500000"), "{review}");
+    }
+    #[test]
+    fn compact_review_keeps_signed_operators() {
+        let wide: Vec<u64> = (0..40).collect();
+        let ops = json!([
+            operator("op-1", 0, &[1, 2], 1_500_000),
+            operator("op-2", 5, &[7], -250_000),
+            operator("op-3", 11, &wide, 2_000_000)
+        ]);
+        let review = intervention_review("activate", "op", &activate(), Some(&ops)).unwrap();
+        assert!(review.contains("the dialog omitted the rest"), "{review}");
+        for shown in ["op-1", "op-2", "op-3", "-250000", "layer 11"] {
+            assert!(review.contains(shown), "{shown} missing from\n{review}");
+        }
+        let digest = atlas_core::hash(serde_json::to_string(&ops).unwrap().as_bytes());
+        assert!(review.contains(&digest), "{review}");
+        assert!(review.lines().count() <= 24, "{review}");
+    }
+    #[test]
+    fn compact_review_bounds_many_operators() {
+        let ops = Value::Array(
+            (0..64)
+                .map(|i| operator(&format!("op-{i}"), i, &[i], 1_000_000))
+                .collect(),
+        );
+        let review = intervention_review("activate", "op", &activate(), Some(&ops)).unwrap();
+        assert!(review.contains("Exact signed operators: 64"), "{review}");
+        assert!(
+            review.contains("op-7") && !review.contains("op-8 "),
+            "{review}"
+        );
+        assert!(review.contains("56 more"), "{review}");
+        assert!(review.lines().count() <= 24, "{review}");
+    }
 }

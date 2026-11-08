@@ -26,14 +26,30 @@ fn plugin_forwards(args: &[String]) -> bool {
     cfg!(any(windows, target_os = "linux"))
         && matches!(args, [_, arg] if scheme_arg(arg) && tauri::Url::parse(arg).is_ok())
 }
+/// A later instance's relative path names a file in that instance's working directory,
+/// not in this one's. Scheme URLs, file URLs and absolute paths are passed unchanged.
+fn second_instance_arg(arg: &str, cwd: &str) -> String {
+    let path = std::path::Path::new(arg);
+    if cwd.is_empty()
+        || path.is_absolute()
+        || scheme_arg(arg)
+        || arg.trim_start().to_ascii_lowercase().starts_with("file:")
+    {
+        return arg.to_owned();
+    }
+    std::path::Path::new(cwd)
+        .join(path)
+        .to_string_lossy()
+        .into_owned()
+}
 fn main() {
     let app = tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+        .plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
             if let Some(h) = app.try_state::<Arc<Host>>() {
                 // A sole scheme URL arrives through on_open_url. Everything else stays here.
                 if !plugin_forwards(&args) {
                     for arg in args.iter().skip(1) {
-                        h.receive_link(arg);
+                        h.receive_link(&second_instance_arg(arg, &cwd));
                     }
                 }
             }
@@ -69,7 +85,22 @@ fn main() {
         ])
         .setup(|app| {
             let dir = app.path().app_local_data_dir()?;
-            let host = Arc::new(Host::new(dir.join("audit/operations.jsonl"))?);
+            let journal = dir.join("audit/operations.jsonl");
+            let host = match Host::new(journal.clone()) {
+                Ok(host) => Arc::new(host),
+                // A setup error is a panic in tauri, an abort in a release build, and a
+                // Windows release or desktop launch shows no stderr. Show the refusal, then exit.
+                Err(e) => {
+                    let text = format!("{e}\nAudit journal: {}", journal.display());
+                    eprintln!("BTX Atlas failed closed during startup: {text}");
+                    let handle = app.handle().clone();
+                    std::thread::spawn(move || {
+                        host::refuse_startup(&handle, &text);
+                        handle.exit(1);
+                    });
+                    return Ok(());
+                }
+            };
             // The plugin copies one scheme argument into get_current. Skip those env args
             // when it already delivered a URL. Paths and file:// are still delivered.
             let mut plugin_delivered = false;
@@ -196,5 +227,25 @@ mod tests {
         ] {
             assert!(!plugin_forwards(&args(v)), "{v:?}");
         }
+    }
+    #[test]
+    fn a_later_instance_path_is_read_from_its_own_directory() {
+        let cwd = std::env::temp_dir().join("atlas-second-instance");
+        let text = cwd.to_string_lossy();
+        assert_eq!(
+            second_instance_arg("Atlas Request.btx", &text),
+            cwd.join("Atlas Request.btx").to_string_lossy()
+        );
+        let absolute = cwd.join("elsewhere.btx");
+        let absolute = absolute.to_string_lossy();
+        assert_eq!(second_instance_arg(&absolute, &text), absolute);
+        for kept in [
+            "btx:addr?amount=0.2",
+            "BTX-P2P://x.onion:8333",
+            "file:///tmp/Atlas%20Request.btx",
+        ] {
+            assert_eq!(second_instance_arg(kept, &text), kept);
+        }
+        assert_eq!(second_instance_arg("a.btx", ""), "a.btx");
     }
 }
