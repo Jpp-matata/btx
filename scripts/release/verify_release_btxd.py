@@ -919,7 +919,7 @@ def _search_dirs(path: Path, info: ElfDynamic) -> list[Path]:
     dirs = []
     for entry in info.search:
         entry = entry.replace("${ORIGIN}", "$ORIGIN")
-        if entry.startswith("$ORIGIN"):
+        if entry == "$ORIGIN" or entry.startswith("$ORIGIN/"):
             dirs.append(Path(os.path.normpath(str(path.parent) + entry[len("$ORIGIN"):])))
     if info.executable:
         wrapper_lib = packaged_openssl_libdir(path)
@@ -935,6 +935,7 @@ def linux_elf_problems(root: Path, files: list[Path], floor: dict[str, str]) -> 
         if path.is_file():
             shipped.setdefault(path.name, []).append(path)
     problems = []
+    resolved_root = root.resolve()
     for path in files:
         rel = path.relative_to(root)
         try:
@@ -945,9 +946,16 @@ def linux_elf_problems(root: Path, files: list[Path], floor: dict[str, str]) -> 
         dirs = [d for d in _search_dirs(path, info) if d == root or root in d.parents]
 
         def reaches(soname: str) -> bool:
-            if not info.executable:  # libraries: optimistic, a shipped copy wins
-                return soname in shipped
-            return any((d / soname).is_file() for d in dirs)
+            # An ELF's RUNPATH locates its direct dependencies. A file with
+            # the same name in an unrelated directory proves nothing.
+            if Path(soname).name != soname:
+                return False
+            for directory in dirs:
+                candidate = directory / soname
+                if (candidate.is_file() and resolved_root in candidate.resolve().parents
+                        and classify(candidate) == "elf"):
+                    return True
+            return False
 
         if info.executable:
             stranded = [name for name in info.needed if name in shipped and not reaches(name)]
