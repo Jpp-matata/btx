@@ -70,6 +70,14 @@ class WalletLockedFundingTest(BitcoinTestFramework):
         preselected = wallet.createrawtransaction([{"txid": coin["txid"], "vout": coin["vout"]}], [{dest: 1}])
         assert_raises_rpc_error(-13, UNLOCK_NEEDED, wallet.fundrawtransaction, preselected)
 
+        self.log.info("A request above the wallet's total value stays a funding error while locked")
+        assert_raises_rpc_error(-4, "Insufficient funds", wallet.send, [{dest: 10}])
+        assert_raises_rpc_error(-4, "Insufficient funds", wallet.walletcreatefundedpsbt, [], [{dest: 10}])
+        oversized = wallet.createrawtransaction([], [{dest: 10}])
+        assert_raises_rpc_error(-4, "Insufficient funds", wallet.fundrawtransaction, oversized)
+        oversized_preselected = wallet.createrawtransaction([{"txid": coin["txid"], "vout": coin["vout"]}], [{dest: 10}])
+        assert_raises_rpc_error(-4, "Not solvable pre-selected input", wallet.fundrawtransaction, oversized_preselected)
+
         self.log.info("A locked wallet with no coins of its own still reports the shortfall")
         node.createwallet(wallet_name="empty", descriptors=True, passphrase=PASSPHRASE)
         empty = node.get_wallet_rpc("empty")

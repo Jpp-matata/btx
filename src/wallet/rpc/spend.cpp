@@ -21,6 +21,7 @@
 #include <wallet/scriptpubkeyman.h>
 #include <wallet/feebumper.h>
 #include <wallet/fees.h>
+#include <wallet/receive.h>
 #include <wallet/rpc/util.h>
 #include <wallet/bcp1_watchonly.h>
 #include <wallet/spend.h>
@@ -814,6 +815,19 @@ static bool LockedWalletLeftOutOwnCoins(const CWallet& wallet, const CCoinContro
     return false;
 }
 
+/** A conservative face-value bound for a request without external inputs. */
+static bool ExceedsWalletFundingValue(const CWallet& wallet, const std::vector<CRecipient>& recipients) EXCLUSIVE_LOCKS_REQUIRED(wallet.cs_wallet)
+{
+    const auto balance = GetBalance(wallet, /*min_depth=*/0, /*avoid_reuse=*/false);
+    CAmount remaining = balance.m_mine_trusted + balance.m_mine_untrusted_pending + balance.m_mine_immature +
+                        balance.m_watchonly_trusted + balance.m_watchonly_untrusted_pending + balance.m_watchonly_immature;
+    for (const auto& recipient : recipients) {
+        if (recipient.nAmount > remaining) return true;
+        remaining -= recipient.nAmount;
+    }
+    return false;
+}
+
 CreatedTransactionResult FundTransaction(CWallet& wallet, const CMutableTransaction& tx, const std::vector<CRecipient>& recipients, const UniValue& options, CCoinControl& coinControl, bool override_min_fee)
 {
     // We want to make sure tx.vout is not used now that we are passing outputs as a vector of recipients.
@@ -1059,8 +1073,20 @@ CreatedTransactionResult FundTransaction(CWallet& wallet, const CMutableTransact
     LOCK(wallet.cs_wallet);
     auto txr = FundTransaction(wallet, tx, recipients, change_position, lockUnspents, coinControl);
     if (!txr) {
-        // The failure says nothing about the coins the lock hid: ask for the unlock instead.
-        if (LockedWalletLeftOutOwnCoins(wallet, coinControl)) EnsureWalletIsUnlocked(wallet);
+        if (LockedWalletLeftOutOwnCoins(wallet, coinControl)) {
+            // If even the entire wallet cannot cover the recipients, unlocking
+            // cannot fix this failure. External inputs can contribute more.
+            bool has_external_inputs{false};
+            for (const auto& input : tx.vin) {
+                if (!wallet.IsMine(input.prevout)) {
+                    has_external_inputs = true;
+                    break;
+                }
+            }
+            if (has_external_inputs || !ExceedsWalletFundingValue(wallet, recipients)) {
+                EnsureWalletIsUnlocked(wallet);
+            }
+        }
         throw JSONRPCError(RPC_WALLET_ERROR, ErrorString(txr).original);
     }
     return *txr;
