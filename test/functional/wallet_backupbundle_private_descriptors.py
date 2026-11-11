@@ -37,6 +37,24 @@ class WalletBackupBundlePrivateDescriptorsTest(BitcoinTestFramework):
 
     def run_test(self):
         node = self.nodes[0]
+        self.log.info("A blank encrypted wallet exports an empty descriptor file without a seed warning")
+        node.createwallet(wallet_name="blank", descriptors=True, blank=True, passphrase=PASSPHRASE)
+        blank = node.get_wallet_rpc("blank")
+        blank_dir = blank.backupwalletbundle(node.datadir_path / "blank.bundle", PASSPHRASE)
+        blank_path = Path(blank_dir["bundle_dir"])
+        assert_equal(json.loads((blank_path / "listdescriptors_private.json").read_text(encoding="utf-8"))["descriptors"], [])
+        assert_equal(blank_dir["wallet_passphrase_required_to_spend"], True)
+        manifest = json.loads((blank_path / "manifest.json").read_text(encoding="utf-8"))
+        assert_equal(manifest["private_descriptors_exported"], True)
+        assert_equal(manifest["wallet_passphrase_required_to_spend"], True)
+        for warnings in (blank_dir["warnings"], manifest["warnings"]):
+            assert not any("listdescriptors_private.json" in warning for warning in warnings), warnings
+
+        blank_archive = blank.backupwalletbundlearchive(node.datadir_path / "blank.bundle.btx", ARCHIVE_PASSPHRASE, PASSPHRASE)
+        assert "listdescriptors_private.json" in blank_archive["bundle_files"]
+        assert_equal(blank_archive["wallet_passphrase_required_to_spend"], True)
+        assert not any("listdescriptors_private.json" in warning for warning in blank_archive["warnings"])
+
         node.createwallet(wallet_name="source", descriptors=True, passphrase=PASSPHRASE)
         source = node.get_wallet_rpc("source")
         source_addr = source.getnewaddress()
