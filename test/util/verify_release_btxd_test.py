@@ -649,6 +649,20 @@ class ArchiveContentGateTest(unittest.TestCase):
         self.assertEqual(self.mod.main(["--no-launch", "--archive", str(archive)]), 1)
         self.assertEqual(self.mod.main(["--no-launch", "--floor", "GLIBCXX=3.4.33", "--archive", str(archive)]), 0)
 
+    def test_shared_library_needs_reachable_bundled_dependency(self) -> None:
+        plugin = "btx-0.35.0/plugins/libexample.so"
+        files = {"btx-0.35.0/bin/btxd": self._btxd(openssl="OPENSSL_3.0.0"),
+                 "btx-0.35.0/unrelated/libstdc++.so.6": make_elf(executable=False)}
+
+        def payload(runpath):
+            return make_elf(["libstdc++.so.6"], runpath=runpath, executable=False,
+                            verneed={"libstdc++.so.6": ["GLIBCXX_3.4.33"]})
+
+        files[plugin] = payload("$ORIGIN/../lib")
+        self.assertIn("plugins/libexample.so: needs GLIBCXX_3.4.33", self._problems(files))
+        files["btx-0.35.0/lib/libstdc++.so.6"] = files.pop("btx-0.35.0/unrelated/libstdc++.so.6")
+        self._gate(files)
+
     def test_glibc_ceiling_is_reported_with_the_rest_and_blocks_launch(self) -> None:
         files = {"btx-0.35.0/bin/btxd": self._btxd(openssl="OPENSSL_3.0.0"),
                  "btx-0.35.0/lib/libgnutls.so.30": make_elf(["libc.so.6"], executable=False)}
