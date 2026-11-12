@@ -1,0 +1,47 @@
+# Known failures of the fork CI on release-0.34.16. The list only shrinks.
+#
+# Format: kind | name | class | first failing line | seen on
+#   kind: unit (a test_btx suite), ctest (a ctest entry outside test_btx), functional (a test_runner.py
+#   script with its arguments) or lint (a check of contrib/ci-fork/lint.sh, or release:<test> of release-gate).
+#   A failure that is not listed is red. A listed entry that passes is reported so it can be removed.
+#   A listed lint still fails the job when the branch adds output lines to it (btx_ci.py lint-diff).
+#
+# Classes:
+#   fails-plain-gcc  fails on a plain gcc 13.3 RelWithDebInfo build of the base commit; not triaged yet
+#   timeout-900      ran longer than 900 s at 2 threads on the measuring machine; rerun alone in CI first
+#   exactreplay-stall  functional script whose node logs say "ExactReplay required" (dev hub 03 section 7)
+#   lint-base        the lint fails on the base commit itself (the count is the number of hits there)
+#   lint-timeout     the lint did not finish within LINT_TIMEOUT (900 s) on the measuring machine
+#
+# Source of every entry below: the 12 Nov 2026 box measurement at 4c7840e9 (Ubuntu 24.04, gcc 13.3,
+# RelWithDebInfo, BTX_HWC=2 OMP_NUM_THREADS=2; unit: btx_ci.py suites --jobs 10 --timeout 900; functional:
+# btx_ci.py functional --jobs 12). The first hosted run replaces it with known-failing.next.txt from the
+# summary job (hosted runners are slower: expect more timeout-900 entries, never fewer checks).
+
+# ---- unit (test_btx suites; 2,426 run, 2,421 passed)
+unit | validation_chainstate_tests | fails-plain-gcc | chainstate_signer_progress_child_when_best_header_is_competing_fork: critical check (lock assertion on cs_main) | 4c7840e9
+unit | matmul_v4_rc_air_episode_tests | timeout-900 | still running at 900 s (2 threads) | 4c7840e9
+unit | matmul_v4_rc_gkr_tests | timeout-900 | still running at 900 s (2 threads) | 4c7840e9
+unit | smile2_audit_tests | timeout-900 | still running at 900 s (2 threads) | 4c7840e9
+unit | smile2_membership_tests | timeout-900 | still running at 900 s (2 threads) | 4c7840e9
+
+# ---- lint (contrib/ci-fork/lint.sh; 33 checks, 19 fail on the base). Counts are hits on 4c7840e9.
+lint | doc | lint-base | 3 command-line arguments not documented | 4c7840e9
+lint | includes_build_config | lint-base | 15 files use a build-config symbol without the header | 4c7840e9
+lint | py_lint | lint-base | ruff: 1,834 errors in the selected rules | 4c7840e9
+lint | std_filesystem | lint-base | 157 direct std::filesystem uses | 4c7840e9
+lint | rpc_assert | lint-base | 3 assert() calls in RPC code | 4c7840e9
+lint | tabs_whitespace | lint-base | 124 lines indented with tabs | 4c7840e9
+lint | trailing_whitespace | lint-base | 4,185 lines with trailing whitespace | 4c7840e9
+lint | lint-circular-dependencies.py | lint-timeout | fails on the base after 1,549 s; over LINT_TIMEOUT (900 s) in CI | 4c7840e9
+lint | lint-files.py | lint-base | shebang and permission mismatches (133 output lines) | 4c7840e9
+lint | lint-include-guards.py | lint-base | headers without the expected include guard (9,235 output lines) | 4c7840e9
+lint | lint-includes.py | lint-base | duplicate and disallowed includes (61 output lines) | 4c7840e9
+lint | lint-locale-dependence.py | lint-base | locale-dependent calls (1,897 output lines) | 4c7840e9
+lint | lint-python-utf8-encoding.py | lint-base | open() without an explicit encoding (43 output lines) | 4c7840e9
+lint | lint-python.py | lint-base | mypy errors in test/functional (12 output lines) | 4c7840e9
+lint | lint-qt-translation.py | lint-base | leading whitespace in translated strings (11 output lines) | 4c7840e9
+lint | lint-shell-locale.py | lint-base | shell scripts without export LC_ALL=C (50 output lines) | 4c7840e9
+lint | lint-shell.py | lint-base | shellcheck findings (204 output lines) | 4c7840e9
+lint | lint-shielded-functional-wallets.py | lint-base | shielded functional tests without encrypted wallets (8 output lines) | 4c7840e9
+lint | lint-tests.py | lint-base | test suites not named after their file (68 output lines) | 4c7840e9
