@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "coverage.schema.json",
+  "title": "BTX fork coverage summary (coverage.json), schema version 1",
+  "description": "Product-code coverage of one measured run. Every number is a floor: a killed or timed-out test writes no counters. contrib/ci-fork/coverage_check.py adds the arithmetic and privacy checks a schema cannot express.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "repository", "branch", "commit", "measured_at", "generated_at", "build", "suites", "floors", "scope", "totals", "areas", "notes"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "repository": {"type": "string", "pattern": "^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$"},
+    "branch": {"type": "string", "pattern": "^[A-Za-z0-9._/-]{1,100}$"},
+    "commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "measured_at": {"$ref": "#/$defs/utc"},
+    "generated_at": {"$ref": "#/$defs/utc"},
+    "produced_by": {"type": "string", "maxLength": 200},
+    "build": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "compiler", "flags", "gcovr", "counters_cleared_before_run", "thread_shim"],
+      "properties": {
+        "type": {"$ref": "#/$defs/text"},
+        "compiler": {"$ref": "#/$defs/text"},
+        "flags": {"$ref": "#/$defs/text"},
+        "gcovr": {"$ref": "#/$defs/text"},
+        "counters_cleared_before_run": {"const": true},
+        "thread_shim": {"$ref": "#/$defs/text"}
+      }
+    },
+    "suites": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "unit": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["run", "passed", "failed", "skipped", "timed_out", "timeout_s", "excluded"],
+          "properties": {
+            "run": {"$ref": "#/$defs/count"},
+            "passed": {"$ref": "#/$defs/count"},
+            "failed": {"$ref": "#/$defs/count"},
+            "skipped": {"$ref": "#/$defs/count"},
+            "timed_out": {"$ref": "#/$defs/count"},
+            "timeout_s": {"$ref": "#/$defs/count"},
+            "excluded": {"type": "array", "items": {"type": "string"}}
+          }
+        },
+        "functional": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["run", "passed", "failed", "skipped", "stalled_exactreplay", "timeout_factor"],
+          "properties": {
+            "run": {"$ref": "#/$defs/count"},
+            "passed": {"$ref": "#/$defs/count"},
+            "failed": {"$ref": "#/$defs/count"},
+            "skipped": {"$ref": "#/$defs/count"},
+            "stalled_exactreplay": {"$ref": "#/$defs/count"},
+            "timeout_factor": {"$ref": "#/$defs/count"}
+          }
+        }
+      }
+    },
+    "floors": {"const": true},
+    "scope": {"type": "string", "minLength": 1, "maxLength": 400},
+    "totals": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["files", "lines", "branches", "functions"],
+      "properties": {
+        "files": {"type": "integer", "minimum": 1},
+        "lines": {"$ref": "#/$defs/ratio"},
+        "branches": {"$ref": "#/$defs/ratio"},
+        "functions": {"$ref": "#/$defs/ratio"},
+        "unit_only_lines_percent": {"$ref": "#/$defs/percent"}
+      }
+    },
+    "areas": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 40,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "label", "paths", "lines_percent"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z0-9_]{1,40}$"},
+          "label": {"type": "string", "minLength": 1, "maxLength": 80},
+          "paths": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+          "files": {"$ref": "#/$defs/count"},
+          "lines_covered": {"$ref": "#/$defs/count"},
+          "lines_total": {"type": "integer", "minimum": 1},
+          "lines_percent": {"$ref": "#/$defs/percent"},
+          "branches_percent": {"$ref": "#/$defs/percent_or_null"},
+          "functions_percent": {"$ref": "#/$defs/percent_or_null"},
+          "unit_only_lines_percent": {"$ref": "#/$defs/percent_or_null"},
+          "note": {"type": "string", "maxLength": 300}
+        }
+      }
+    },
+    "notes": {"type": "array", "maxItems": 20, "items": {"type": "string", "maxLength": 300}}
+  },
+  "$defs": {
+    "utc": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"},
+    "text": {"type": "string", "minLength": 1, "maxLength": 200},
+    "count": {"type": "integer", "minimum": 0},
+    "percent": {"type": "number", "minimum": 0, "maximum": 100},
+    "percent_or_null": {"anyOf": [{"type": "null"}, {"type": "number", "minimum": 0, "maximum": 100}]},
+    "ratio": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["covered", "total", "percent"],
+      "properties": {
+        "covered": {"type": "integer", "minimum": 0},
+        "total": {"type": "integer", "minimum": 1},
+        "percent": {"$ref": "#/$defs/percent"}
+      }
+    }
+  }
+}

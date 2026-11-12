@@ -1,0 +1,211 @@
+# Seconds per functional script (test_runner.py name with its arguments), for cost-balanced shards
+# (btx_ci.py functional --shard K/N --costs). DRAFT: the coverage run at c6f9678d (12 Nov), to be replaced.
+# Format: seconds<TAB>script
+11	feature_attested_utxo_snapshot_offer_restart.py
+8	feature_attested_utxo_snapshot_p2p.py
+47	feature_autoupdate_installer.py
+17	feature_bcp1.py --descriptors
+2	feature_btx_dgw_convergence.py
+3	feature_btx_matmul_consensus.py
+9	feature_btx_multinode_genesis.py
+2	feature_btx_pq_wallet_enforcement.py
+1	feature_btx_subsidy_schedule.py
+4	feature_btx_validation_mode_safety.py --descriptors
+1	feature_capabilityd_file_modes.py
+4	feature_deep_reorg_warning.py
+24	feature_deepfork_autoresolve.py
+9	feature_hcp_remaining.py --descriptors
+3	feature_issue_116_mmattest_wire.py
+5	feature_lightwatch.py
+2	feature_lightwatch_concurrent.py
+3	feature_matmul_activation_rehearsal.py
+2	feature_matmul_bmx4c_activation.py
+13	feature_matmul_heard_serve.py
+4	feature_matmul_signer_node_ibd.py
+10	feature_matmul_signer_wif_only_start.py
+27	feature_matmul_trusted_mirror_backfill.py
+19	feature_matmul_trusted_mirror_follow_forward.py
+15	feature_matmul_trusted_mirror_no_attestation_peer.py
+8	feature_matmul_trusted_mirror_snapshot_backfill.py
+17	feature_matmul_trusted_mirrors.py
+4	feature_matmul_v47_epoch_a_activation.py
+3	feature_matmul_v4_activation.py
+3	feature_model_security_v2.py
+4	feature_modelbind_privacy.py
+3	feature_modelnet_0348.py
+15	feature_modelnet_bounty_lifecycle.py --descriptors
+3	feature_modelnet_compute_economy.py --descriptors
+2	feature_modelnet_cr11.py
+2	feature_modelnet_cr11_journeys.py
+0	feature_modelnet_cr12_scale.py
+1	feature_modelnet_cr12_stage_chunk.py
+1	feature_modelnet_events.py
+2	feature_modelnet_firstrun.py
+2	feature_modelnet_hcp.py
+2	feature_modelnet_hcp_journeys.py
+6	feature_modelnet_hcpd_slow_client.py
+1	feature_modelnet_helper.py
+2	feature_modelnet_helper_after_kill.py
+3	feature_modelnet_helper_busy.py
+16	feature_modelnet_helper_long_calls.py
+1	feature_modelnet_lab_peer_auth.py
+2	feature_modelnet_lan_stampede.py
+5	feature_modelnet_listen.py
+68	feature_modelnet_proxy.py
+8	feature_modelnet_proxy_fetch.py
+25	feature_modelnet_retrieve_regressions.py
+2	feature_modelnet_search.py
+2	feature_modelnet_search_lock.py
+4	feature_pay_with_compute.py --descriptors
+5	feature_pay_with_compute_review.py --descriptors
+4	feature_shieldedv2dev_datadir_isolation.py
+18	feature_swarm_catalog.py
+12	feature_swarm_funded_objective.py --descriptors
+17	feature_swarm_lan_discover.py
+51	feature_swarm_lan_discover.py --onlynet=ipv4
+8	feature_swarm_model_settlement.py
+3	feature_swarm_profile_overrides.py
+8	feature_swarm_regtest_spend.py
+2	feature_swarm_three_local.py
+9	feature_torcontrol.py
+13	feature_validation_epoch_heal.py
+5	feature_whitelist_noban_guardrails.py
+196	mining_getblocktemplate_longpoll.py
+1	mining_mainnet.py
+3	mining_matmul_basic.py
+8	p2p_announce_after_handshake.py
+4	p2p_archive_requested_body_no_punish.py
+2	p2p_authority_serves_headers.py
+3	p2p_connect_strict_inbound.py
+32	p2p_dandelion_acc_below_activation.py
+2	p2p_dandelion_nondandelion_relay.py
+6	p2p_dandelion_originator.py
+8	p2p_handshake.py
+8	p2p_handshake.py --v2transport
+22	p2p_matmul_admission_precheck.py
+6	p2p_matmul_budget_reconnect.py
+23	p2p_matmul_compact_admission.py
+3	p2p_matmul_dos_mitigation.py
+9	p2p_matmul_handoff_budget_retain.py
+3	p2p_matmul_inbound_punishment.py
+7	p2p_mirror_relay_to_signer.py
+2	p2p_noconnect_inbound_relay.py
+1	p2p_strict_connect_inbound_punished.py
+17	p2p_unconnected_block_relay.py
+9	p2p_unconnected_block_relay_catchup.py
+14	p2p_v2pqonly.py
+14	rpc_btx_difficulty_health.py
+3	rpc_btx_help_summary.py
+1	rpc_btx_preparereorg_cli.py
+3	rpc_compute_qualification.py
+192	rpc_getblockstats_shielded.py
+2	rpc_getfinalityinfo.py
+9	rpc_getfinalityinfo_pq_pin_warnings.py
+1	rpc_getshieldedstateinfo.py
+1	rpc_matmul_attestation_aliases.py
+10	rpc_modelnet_wallet_restriction.py --descriptors
+2	rpc_modelsecurity_wallet_restriction.py
+2	rpc_pq_multisig.py
+1	rpc_resource_governor_info.py
+9	rpc_wallet_file_rpc_restriction.py --descriptors
+36	wallet_bcp1_depositpool_rescan.py --descriptors
+8	wallet_bcp1_object_form.py --descriptors
+10	wallet_bcp1_plan_inputs.py --descriptors
+12	wallet_bounty_funding_fee_bound.py --descriptors
+228	wallet_encrypted_backup_recovery.py --descriptors
+11	wallet_locked_funding.py --descriptors
+12	wallet_locked_funding_more.py --descriptors
+11	wallet_modelnet_funding.py --descriptors
+10	wallet_p2mr_external_parent.py --descriptors
+14	wallet_p2mr_locked_key_lookup.py --descriptors
+20	wallet_p2mr_multiparty_psbt.py --descriptors
+17	wallet_pq_cache_mismatch_load.py --descriptors
+61	wallet_pq_sigop_fee.py
+453	wallet_sendall_pq.py
+3	wallet_shielded_sunset_rpc_guards.py
+19	wallet_sweeptoself.py
+10	wallet_unlock_cache_upgrade.py --descriptors
+0	feature_btx_matmul_metal_high_hash_repro.py
+0	feature_modelnet_jit_remaining.py
+243	feature_block_download_slot_reclaim.py
+1203	feature_btx_block_capacity.py --descriptors
+213	feature_btx_fast_mining_phase.py
+4798	feature_btx_genesis_readiness.py
+721	feature_matmul_drlt_activation.py
+721	feature_matmul_drlt_sealaspow.py
+1252	feature_matmul_rc_activation.py
+742	feature_matmul_trusted_mirror_bounded_park.py
+737	feature_matmul_trusted_mirror_bounded_stall_open.py
+63	feature_matmul_trusted_mirror_convergence.py
+5	feature_matmul_unrequested_followed_persist.py
+1	feature_modelnet_0348_ops.py
+1	feature_modelnet_btx_model.py
+1	feature_modelnet_cr12.py
+1	feature_modelnet_jit_capability.py
+4	feature_modelnet_minio.py
+1	feature_modelnet_packages.py
+9	feature_modelnet_release_cards.py --descriptors
+1	feature_modelnet_security_r10.py
+2	feature_modelnet_swarm_live.py
+1	feature_modelnet_unique_todos.py
+362	feature_p2mr_end_to_end.py
+640	feature_pq_multisig.py --descriptors
+1202	feature_shielded_prune_reorg.py
+1206	feature_shielded_v2_multinode_validation.py
+1207	mempool_limit.py
+1201	mempool_package_limits.py
+4794	mining_basic.py
+2974	mining_shielded_exit_velocity_template.py
+363	p2mr_end_to_end.py
+19	p2p_addr_relay.py
+241	p2p_dandelion_restart.py
+241	p2p_matmul_encdr_pending_cap_retain.py
+2	p2p_matmul_encdr_sketch_cache.py
+1414	p2p_matmul_ibd_budget_enforcement.py
+1202	p2p_shielded_relay.py
+1	rpc_bounty_secret_ref_wallet_restriction.py --descriptors
+447	rpc_pq_wallet.py
+0	wallet_bcp1_consolidation_target.py
+0	wallet_bcp1_deposit_notify_confirmed.py
+0	wallet_bcp1_deposit_notify_conflicted.py
+1	wallet_bcp1_deposit_notify_spent.py
+0	wallet_bcp1_omnibus_change.py
+0	wallet_bcp1_pool_change_branch.py
+0	wallet_bcp1_pool_entry_fields.py
+0	wallet_bcp1_pool_slot_unique.py
+0	wallet_bcp1_prepare_package.py
+454	wallet_bridge_egress_build.py
+449	wallet_bridge_rebalance.py --descriptors
+456	wallet_bridge_viewgrant.py --descriptors
+482	wallet_c002_slh_mempool_boundary.py
+1204	wallet_shielded_anchor_window.py
+2402	wallet_shielded_autoshield_optin.py
+3608	wallet_shielded_c002_sunset_lifecycle.py
+602	wallet_shielded_chunking.py
+0	wallet_shielded_concurrent_sends.py
+0	wallet_shielded_concurrent_shieldcoinbase.py
+0	wallet_shielded_concurrent_shieldfunds.py
+1205	wallet_shielded_cross_wallet.py
+1202	wallet_shielded_encrypted_persistence.py
+1	wallet_shielded_lock_order.py --descriptors
+364	wallet_shielded_longhaul_sim.py
+2403	wallet_shielded_matrict_disable_transition.py
+0	wallet_shielded_mempool_note_reload.py
+1203	wallet_shielded_mixed_stress.py
+679	wallet_shielded_postfork_coinbase_autoshield.py
+603	wallet_shielded_psbt.py --descriptors
+242	wallet_shielded_randomized_sim.py
+1204	wallet_shielded_reorg_recovery.py
+1204	wallet_shielded_replacement.py
+1203	wallet_shielded_restart_persistence.py
+1204	wallet_shielded_ring_size_policy.py
+445	wallet_shielded_rpc_surface.py
+3607	wallet_shielded_send_flow.py
+363	wallet_shielded_sendmany_stress.py
+1	wallet_shielded_shieldfunds_shortfall.py
+726	wallet_shielded_topology_sim.py
+458	wallet_shielded_unlock_rehydrate_autoshield.py
+2146	wallet_shielded_velocity_cap.py
+1202	wallet_shielded_viewingkey_rescan.py
+1203	wallet_smile_v2_benchmark.py
+1204	wallet_smile_v2_full_lifecycle.py --descriptors

@@ -1,0 +1,192 @@
+# Coverage publisher for the fork CI of release-0.34.16 (branches coverage and coverage-probe of a fork).
+#
+# Not proposed upstream (upstream runs no GitHub-hosted CI, .github/workflows/README.md).
+#
+# - publish (branch coverage): a full coverage run does not fit a hosted runner (the 12 Nov tree was
+#   27 GB; unit + functional took a 128-thread machine most of a day), so it runs on a dedicated
+#   machine with contrib/ci-fork/coverage_json.py. Its coverage.json is committed at the root of the
+#   branch coverage; this job checks it (contrib/ci-fork/coverage_check.py: format, arithmetic, no
+#   private data, at most 30 days old, a commit of release-0.34.16) and replaces coverage.json and
+#   coverage.json.sha256 on the rolling pre-release coverage-latest. Stable URL:
+#   https://github.com/<owner>/btx/releases/download/coverage-latest/coverage.json
+#   The fork owner creates that pre-release once in the web UI; the job never creates tags or releases.
+# - probe (branch coverage-probe): does a coverage build fit a hosted runner's disk and 6 hours?
+#   Configure and build -DCMAKE_BUILD_TYPE=Coverage, record free disk once a minute, stop at the first
+#   "No space left". Measurement only.
+#
+# Rules: no pull_request trigger; the job token can write contents only in publish; nothing else is
+# needed; actions/* pinned to full commit SHAs.
+
+name: btx-0.34.16 coverage
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [coverage, coverage-probe]
+
+concurrency:
+  group: btx-0.34.16-coverage-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  RELEASE_BRANCH: "release-0.34.16"
+  UPSTREAM_REPO: "btxchain/btx"
+  OSSL_VER: "3.5.4"
+  OSSL_SHA256: "967311f84955316969bdb1d8d4b983718ef42338639c621ec4c34fddef355e99"
+  PYTHONUNBUFFERED: "1"
+
+jobs:
+  publish:
+    name: publish coverage.json
+    if: ${{ github.repository_owner != 'btxchain' && github.ref_name == 'coverage' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - name: Is there a coverage.json to publish?
+        id: have
+        run: |
+          if [ -f coverage.json ]; then
+            echo "file=yes" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice title=RESULT::no coverage.json at the root of branch coverage yet: nothing to publish"
+            echo "file=no" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Check coverage.json
+        if: steps.have.outputs.file == 'yes'
+        run: |
+          python3 contrib/ci-fork/coverage_check.py --selftest
+          python3 contrib/ci-fork/coverage_check.py coverage.json --repository "$UPSTREAM_REPO" --branch "$RELEASE_BRANCH" \
+            --max-age-days 30 | tee "$RUNNER_TEMP/check.txt"
+          echo "::notice title=RESULT::$(cat "$RUNNER_TEMP/check.txt")"
+      - name: The measured commit is on release-0.34.16
+        if: steps.have.outputs.file == 'yes'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          c=$(python3 -c 'import json; print(json.load(open("coverage.json", encoding="utf-8"))["commit"])')
+          st=$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$UPSTREAM_REPO/compare/$c...$RELEASE_BRANCH" \
+            | python3 -c 'import json, sys; print(json.load(sys.stdin)["status"])')
+          echo "compare $c...$RELEASE_BRANCH: $st"
+          case "$st" in
+            identical|ahead) echo "::notice title=RESULT::commit=${c:0:12} is on $UPSTREAM_REPO $RELEASE_BRANCH ($st)" ;;
+            *) echo "::error title=RESULT::commit=${c:0:12} is not on $UPSTREAM_REPO $RELEASE_BRANCH (compare status $st)"; exit 1 ;;
+          esac
+      - name: Job summary
+        if: steps.have.outputs.file == 'yes'
+        run: |
+          python3 - <<'PY'
+          import json, os
+          d = json.load(open("coverage.json", encoding="utf-8"))
+          t = d["totals"]
+          out = [f"### Coverage of {d['repository']} {d['branch']} at `{d['commit'][:12]}` (measured {d['measured_at']})", "",
+                 "Every number is a floor: a killed or timed-out test writes no counters.", "",
+                 "| | covered | total | % |", "|---|---:|---:|---:|"]
+          for k in ("lines", "branches", "functions"):
+              out.append(f"| {k} | {t[k]['covered']} | {t[k]['total']} | {t[k]['percent']} |")
+          out += ["", "| area | lines % | branches % | functions % | unit-only lines % |", "|---|---:|---:|---:|---:|"]
+          for a in d["areas"]:
+              out.append(f"| {a['label']} | {a['lines_percent']} | {a.get('branches_percent')} | "
+                         f"{a.get('functions_percent')} | {a.get('unit_only_lines_percent')} |")
+          out += ["", "Suites: `" + json.dumps(d["suites"]) + "`", ""] + [f"- {n}" for n in d["notes"]]
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as f:
+              f.write("\n".join(out) + "\n")
+          PY
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        if: steps.have.outputs.file == 'yes'
+        with:
+          name: coverage-json
+          path: coverage.json
+          retention-days: 90
+          overwrite: true
+      - name: Replace coverage.json on the rolling pre-release coverage-latest
+        if: steps.have.outputs.file == 'yes'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          if ! gh release view coverage-latest --repo "$REPO" > /dev/null 2>&1; then
+            echo "::error title=RESULT::no release coverage-latest on $REPO: create it once in the web UI (pre-release, tag coverage-latest)"
+            exit 1
+          fi
+          sha256sum coverage.json > coverage.json.sha256
+          gh release upload coverage-latest coverage.json coverage.json.sha256 --repo "$REPO" --clobber
+          python3 - > "$RUNNER_TEMP/notes.md" <<'PY'
+          import json, os
+          d = json.load(open("coverage.json", encoding="utf-8"))
+          t = d["totals"]
+          print(f"coverage.json for {d['repository']} {d['branch']} at {d['commit']}, measured {d['measured_at']}: "
+                f"lines {t['lines']['percent']}%, branches {t['branches']['percent']}%, functions {t['functions']['percent']}% "
+                f"(floors: a killed or timed-out test writes no counters). Published by run {os.environ['GITHUB_RUN_ID']} "
+                f"from {os.environ['GITHUB_SHA'][:12]}.")
+          PY
+          gh release edit coverage-latest --repo "$REPO" --notes-file "$RUNNER_TEMP/notes.md"
+          echo "::notice title=RESULT::published coverage.json sha256=$(cut -d' ' -f1 coverage.json.sha256) to $REPO release coverage-latest"
+
+  probe:
+    name: coverage-probe (disk and time of a hosted coverage build)
+    if: ${{ github.repository_owner != 'btxchain' && github.ref_name == 'coverage-probe' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - name: Disk before and after freeing the preinstalled toolchains
+        run: |
+          df -h / | tail -n 1 | tee "$RUNNER_TEMP/disk.txt"
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache /usr/share/swift \
+            /usr/local/share/powershell /usr/local/share/chromium /usr/lib/jvm || true
+          df -h / | tail -n 1 | tee -a "$RUNNER_TEMP/disk.txt"
+          echo "::notice title=RESULT::probe disk before/after freeing: $(awk '{print $4}' "$RUNNER_TEMP/disk.txt" | paste -sd/ -) free"
+      - name: Build dependencies and OpenSSL 3.5
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends build-essential cmake ninja-build pkgconf python3 \
+            libevent-dev libboost-dev libsqlite3-dev libzmq3-dev
+          cd "$RUNNER_TEMP"
+          curl -fsSL --retry 3 -o ossl.tar.gz "https://github.com/openssl/openssl/releases/download/openssl-$OSSL_VER/openssl-$OSSL_VER.tar.gz"
+          [ "$(sha256sum ossl.tar.gz | cut -d' ' -f1)" = "$OSSL_SHA256" ]
+          tar xzf ossl.tar.gz
+          cd "openssl-$OSSL_VER"
+          ./Configure --prefix="$HOME/ossl35" --libdir=lib no-shared no-tests no-docs -fPIC > /dev/null
+          make -j"$(nproc)" > /dev/null
+          make install_sw install_ssldirs > /dev/null
+      - name: Coverage build until it finishes or the disk is full (free space logged every minute)
+        timeout-minutes: 330
+        run: |
+          (while sleep 60; do echo "$(date -u +%H:%M:%S) $(df -B1M --output=avail / | tail -n 1)"; done) > "$RUNNER_TEMP/df.log" &
+          t0=$(date +%s)
+          cmake -S . -B build-cov -G Ninja -DCMAKE_BUILD_TYPE=Coverage -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++ \
+            -DOPENSSL_ROOT_DIR="$HOME/ossl35" -DOPENSSL_USE_STATIC_LIBS=ON -DBUILD_GUI=OFF -DBUILD_TESTS=ON -DWITH_MODELNET=ON \
+            -DWITH_ZMQ=ON -DBUILD_BENCH=OFF -DBTX_ENABLE_CUDA_EXPERIMENTAL=OFF > "$RUNNER_TEMP/configure.log" 2>&1
+          rc=0
+          ninja -C build-cov -j"$(nproc)" > "$RUNNER_TEMP/build.log" 2>&1 || rc=$?
+          secs=$(( $(date +%s) - t0 ))
+          nospace=$(grep -c 'No space left' "$RUNNER_TEMP/build.log" || true)
+          low=$(awk '{print $2}' "$RUNNER_TEMP/df.log" | sort -n | head -n 1)
+          size=$(du -sm build-cov | cut -f1)
+          tail -n 20 "$RUNNER_TEMP/build.log"
+          echo "::notice title=RESULT::probe coverage build rc=$rc secs=$secs build_dir_mb=$size lowest_free_mb=${low:-?} no_space_lines=$nospace nproc=$(nproc)"
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        if: ${{ !cancelled() }}
+        with:
+          name: coverage-probe-logs
+          path: |
+            ${{ runner.temp }}/disk.txt
+            ${{ runner.temp }}/df.log
+            ${{ runner.temp }}/configure.log
+          retention-days: 7
+          if-no-files-found: ignore
