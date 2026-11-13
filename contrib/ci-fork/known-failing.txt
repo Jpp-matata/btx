@@ -8,22 +8,25 @@
 #
 # Classes:
 #   fails-plain-gcc  fails on a plain gcc 13.3 RelWithDebInfo build of the base commit; not triaged yet
-#   timeout-900      ran longer than 900 s at 2 threads on the measuring machine; rerun alone in CI first
+#   fork-choice-test a fork-choice unit test whose expected tip no longer holds on the base; cause in the row
+#   timeout-900      ran longer than 900 s at 2 threads on the measuring machine; rerun alone in CI first.
+#                    Covers status timeout only: a fail or crash of the same name is a new failure
 #   exactreplay-stall  functional script whose node logs say "ExactReplay required" (dev hub 03 section 7)
 #   lint-base        the lint fails on the base commit itself (the count is the number of hits there)
 #   lint-timeout     the lint did not finish within LINT_TIMEOUT (900 s) on the measuring machine
 #   The next list a run writes (known-failing.next.txt) marks failures it has not seen as class new, or
 #   new:exactreplay-stall when a node log of the failed script holds "ExactReplay required". Those rows are
-#   not reviewed: an entry moves here only with a cause in its class or first-line column.
+#   not reviewed: an entry moves here only with a cause in its class or first-line column. read_known
+#   rejects any class starting with new, so copying that file here wholesale fails the gate by name.
 #
 # Source of every entry below: the 12 Nov 2026 box measurement at 4c7840e9 (Ubuntu 24.04, gcc 13.3,
 # RelWithDebInfo, BTX_HWC=2 OMP_NUM_THREADS=2; unit: btx_ci.py suites --jobs 10 --timeout 900; functional:
-# btx_ci.py functional --jobs 12). The first hosted run replaces it with known-failing.next.txt from the
-# summary job (hosted runners are slower: expect more timeout-900 entries, never fewer checks).
+# btx_ci.py functional --jobs 12). The summary job writes known-failing.next.txt; reviewed rows with a cause
+# are moved here by hand.
 
 # ---- unit (test_btx suites; 2,426 run, 2,421 passed). Hosted run 43300390698 (4c7840e9) passed
 #      matmul_v4_rc_gkr_tests, smile2_audit_tests and smile2_membership_tests within 900 s: removed.
-unit | validation_chainstate_tests | fails-plain-gcc | chainstate_signer_progress_child_when_best_header_is_competing_fork: critical check (lock assertion on cs_main) | 4c7840e9
+unit | validation_chainstate_tests | fork-choice-test | chainstate_signer_progress_child_when_best_header_is_competing_fork: tip check at :3560 after ActivateBestChain fails since 28fefe91; stale-test evidence on #464 | 88c9b49c
 unit | matmul_v4_rc_air_episode_tests | timeout-900 | still running at 900 s (2 threads) | 4c7840e9
 
 # ---- lint (contrib/ci-fork/lint.sh; 33 checks, 19 fail on the base). Counts are hits on 4c7840e9.

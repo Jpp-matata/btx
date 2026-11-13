@@ -1187,6 +1187,12 @@ def selftest_additions():
     new, still, fixed, unmeasured, nxt = known_gate(res, known, "abc")
     assert [n[1] for n in new] == ["u3"] and len(still) == 2 and [f[1] for f in fixed] == ["u2"]
     assert [u[1] for u in unmeasured] == ["u4"] and sorted(r[1] for r in nxt) == ["f1.py", "u1", "u3"]
+    res = {k: {} for k in KNOWN_KINDS}
+    res["unit"] = {"t1": ("timeout", 900.0, ""), "t2": ("fail", 1.0, "boom"), "t3": ("crash", 1.0, "")}
+    known = {("unit", n): ["unit", n, "timeout-900", "l", "s"] for n in ("t1", "t2", "t3")}
+    new, still, fixed, _, nxt = known_gate(res, known, "abc")
+    assert [n[1] for n in new] == ["t2", "t3"] and [s[1] for s in still] == ["t1"] and not fixed
+    assert sorted((r[1], r[2]) for r in nxt) == [("t1", "timeout-900"), ("t2", "new"), ("t3", "new")]
     pem = "-----BEGIN " + "PRIVATE KEY-----"  # split so this file never holds the marker itself
     diff = ("+++ b/src/a.cpp\n@@ -1,0 +5,2 @@\n+int x;\n+// " + pem.replace("BEGIN ", "BEGIN EC ") + "\n"
             "+++ b/src/test/data/k.pem\n@@ -0,0 +1 @@\n+" + pem + "\n"
@@ -1236,6 +1242,14 @@ def selftest_functional_classes():
         res["functional"] = got
         nxt = known_gate(res, {}, "abc")[4]
         assert [r[2] for r in nxt] == ["new:" + STALL_CLASS, "new"]
+        kf = os.path.join(tmp, "known.txt")
+        for cls, ok in (("fails-plain-gcc", True), ("new", False), ("new:" + STALL_CLASS, False)):
+            with open(kf, "w", encoding="utf-8") as f:
+                f.write(f"# c\n\nunit | u1 | {cls} | l | abc\n")
+            try:
+                assert read_known(kf)[("unit", "u1")][2] == cls and ok
+            except ValueError:
+                assert not ok, cls
     assert list_chunks(["aaa", "bb", "cccc", "d"], 7) == ["aaa,bb", "cccc,d"] and list_chunks([], 5) == []
 
 
@@ -1341,6 +1355,17 @@ KNOWN_KINDS = ("unit", "ctest", "functional", "lint")
 FAIL_STATUS = {"unit": ("fail", "crash", "timeout"), "ctest": ("fail", "timeout"), "functional": ("Failed",),
                "lint": ("fail", "timeout")}
 UNMEASURED_STATUS = ("deadline", "not_run")
+# A known entry whose class starts with one of these prefixes covers only that observed status; any other
+# failing status of the same name is a new failure.
+CLASS_STATUS = {"timeout-": "timeout"}
+
+
+def known_covers(entry, status):
+    """True when the known entry covers a failure with this status."""
+    for prefix, want in CLASS_STATUS.items():
+        if entry[2].startswith(prefix):
+            return status == want
+    return True
 
 
 def read_known(path):
@@ -1353,6 +1378,10 @@ def read_known(path):
             parts = [p.strip() for p in line.rstrip("\n").split(" | ")]
             if len(parts) != 5 or parts[0] not in KNOWN_KINDS or not parts[1]:
                 raise ValueError(f"{path}:{no}: want 'kind | name | class | first failing line | seen on'")
+            if parts[2].startswith("new"):
+                # Rows of known-failing.next.txt that nobody reviewed; copying that file wholesale fails here.
+                raise ValueError(f"{path}:{no}: class {parts[2]!r} is an unreviewed row of known-failing.next.txt; "
+                                 "give it a cause before listing it")
             known[(parts[0], parts[1])] = parts
     return known
 
@@ -1472,7 +1501,7 @@ def known_gate(res, known, sha):
         for name, (status, secs, first) in sorted(res[kind].items()):
             entry = known.get((kind, name))
             if status in FAIL_STATUS[kind]:
-                if entry:
+                if entry and known_covers(entry, status):
                     still.append((kind, name, status))
                     next_rows.append(entry)
                 else:
