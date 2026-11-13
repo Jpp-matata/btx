@@ -1204,6 +1204,41 @@ def selftest_additions():
     assert grown == [(("nullPointer", "a.cpp"), 2, 1)] and shrunk == [(("uninitMemberVar", "b.h"), 1, 2)]
 
 
+def selftest_functional_classes():
+    """test_dirs, functional_failure, the classes file and the gate's class column, on a temporary tree."""
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        root = os.path.join(tmp, "ft", "test_runner_x")
+        tf = ("2026-11-12T22:20:01Z TestFramework (ERROR): Assertion failed\nTraceback (most recent call last):\n"
+              '  File "x.py", line 9, in run_test\nAssertionError: not(99 == 105)\n')
+        for d, log, dbg in (("p2p_addr_relay_17", tf, "ConnectTip: defer ... ExactReplay required"),
+                            ("p2p_addr_relay_privacy_18", "", "ExactReplay required"),
+                            ("wallet_x_19", "x (ERROR): Unexpected exception\nboom\n", "")):
+            os.makedirs(os.path.join(root, d, "node0", "regtest"))
+            with open(os.path.join(root, d, "test_framework.log"), "w", encoding="utf-8") as f:
+                f.write(log)
+            with open(os.path.join(root, d, "node0", "regtest", "debug.log"), "w", encoding="utf-8") as f:
+                f.write(dbg)
+        ft = os.path.join(tmp, "ft")
+        assert [os.path.basename(d) for d in test_dirs(ft, "p2p_addr_relay.py")] == ["p2p_addr_relay_17"]
+        assert functional_failure(test_dirs(ft, "p2p_addr_relay.py")) == (STALL_CLASS, "AssertionError: not(99 == 105)")
+        assert functional_failure(test_dirs(ft, "wallet_x.py --descriptors")) == ("unclassified", "Unexpected exception")
+        assert functional_failure(test_dirs(ft, "absent.py")) == ("no-test-dir", "")
+        csvf = os.path.join(tmp, "functional-results.csv")
+        with open(csvf, "w", encoding="utf-8") as f:
+            f.write("test,status,duration(seconds)\np2p_addr_relay.py,Failed,9\nwallet_x.py,Failed,3\nALL,Failed,12\n")
+        with open(os.path.join(tmp, FUNC_CLASSES), "w", encoding="utf-8") as f:
+            f.write(f"p2p_addr_relay.py\t{STALL_CLASS}\tAssertionError: x\n")
+        got = read_functional_csv([csvf])
+        assert got == {"p2p_addr_relay.py": ("Failed", 9.0, f"[{STALL_CLASS}] AssertionError: x"),
+                       "wallet_x.py": ("Failed", 3.0, "")}
+        res = {k: {} for k in KNOWN_KINDS}
+        res["functional"] = got
+        nxt = known_gate(res, {}, "abc")[4]
+        assert [r[2] for r in nxt] == ["new:" + STALL_CLASS, "new"]
+    assert list_chunks(["aaa", "bb", "cccc", "d"], 7) == ["aaa,bb", "cccc,d"] and list_chunks([], 5) == []
+
+
 def cmd_selftest(a):
     assert esc("a%b\nc") == "a%25b%0Ac"
     names = [f"s{i:03d}" for i in range(23)][::-1]
@@ -1240,6 +1275,7 @@ def cmd_selftest(a):
     assert first_compile_error(msvc) == "y.cpp:12: C3861: 'ReplaceAll': identifier not found"
     assert first_compile_error("[1/2] ok\nwarning: unused\n") == ""
     selftest_additions()
+    selftest_functional_classes()
     Ann().emit("notice", f"job={a.job} step=tools status=ok python={sys.version.split()[0]} sha={os.environ.get('GITHUB_SHA', '?')[:12]} "
                          f"ref={os.environ.get('GITHUB_REF_NAME', '?')}")
     return 0
@@ -1368,6 +1404,13 @@ def read_functional_csv(files):
                 except ValueError:
                     secs = 0.0
                 out[name] = (row.get("status") or "", secs, "")
+        classes = os.path.join(os.path.dirname(fn), FUNC_CLASSES)
+        for line in read(classes).splitlines():
+            name, _, rest = line.partition("\t")
+            cls, _, first = rest.partition("\t")
+            if name in out and cls:
+                st, secs, _ = out[name]
+                out[name] = (st, secs, f"[{cls}] {first}".strip())
     return out
 
 
@@ -1410,6 +1453,18 @@ def gate_results(a):
     return res
 
 
+def list_chunks(items, width):
+    """Comma-joined chunks of items, each at most width characters (an item longer than width is cut)."""
+    chunks, cur = [], ""
+    for it in items:
+        it = it[:width]
+        if cur and len(cur) + 1 + len(it) > width:
+            chunks.append(cur)
+            cur = ""
+        cur = f"{cur},{it}" if cur else it
+    return chunks + ([cur] if cur else [])
+
+
 def known_gate(res, known, sha):
     """Compare results with the known-failing list. Returns (new, still, fixed, unmeasured, next_rows)."""
     new, still, fixed, unmeasured, next_rows = [], [], [], [], []
@@ -1422,7 +1477,8 @@ def known_gate(res, known, sha):
                     next_rows.append(entry)
                 else:
                     new.append((kind, name, status, first))
-                    next_rows.append([kind, name, "new", (first or status).replace("|", "/")[:200], sha])
+                    cls = "new:" + STALL_CLASS if first.startswith(f"[{STALL_CLASS}]") else "new"
+                    next_rows.append([kind, name, cls, (first or status).replace("|", "/")[:200], sha])
             elif status in UNMEASURED_STATUS:
                 unmeasured.append((kind, name, status))
                 if entry:
@@ -1477,6 +1533,11 @@ def cmd_known(a):
     if fixed:
         ann.emit("notice", f"label={a.label} known_now_passing={len(fixed)}: shrink known-failing.txt: "
                            + ",".join(n for _, n, _ in fixed[:30]))
+    if new and a.list_notices > 0:
+        tags = [f"{n}{'[stall]' if f.startswith(f'[{STALL_CLASS}]') else ''}" for _, n, _, f in new]
+        chunks = list_chunks(tags, MAX_MSG - 60)
+        for i, chunk in enumerate(chunks[:a.list_notices], 1):
+            ann.emit("notice", f"label={a.label} new_list {i}/{len(chunks)}: {chunk}")
     summary = os.environ.get("GITHUB_STEP_SUMMARY")
     if summary:
         with open(summary, "a", encoding="utf-8") as f:
@@ -1524,6 +1585,48 @@ def functional_args(shard_names, all_scripts):
     if bad or missing:
         raise ValueError("cannot select exactly: exclude=" + ",".join(bad) + " missing=" + ",".join(missing))
     return args, extra
+
+
+FUNC_CLASSES = "functional-classes.tsv"
+STALL_CLASS = "exactreplay-stall"
+RE_TF_ERROR = re.compile(r"\((?:ERROR|CRITICAL)\): (.*)$")
+RE_EXC_LINE = re.compile(r"^[A-Za-z_][\w.]*(?:Error|Exception|Timeout|Exit)\b.*$")
+
+
+def test_dirs(tmp, script):
+    """The test_runner.py directories of a script: <tmp>/test_runner_*/<stem>_<portseed> (test_runner.py strips
+    '.py' from the first word). Exact, so 'p2p_addr_relay.py' never picks 'p2p_addr_relay_privacy_<seed>'; the
+    variants of one script ('x.py', 'x.py --descriptors') share a stem and so share their directories."""
+    stem = re.sub(r"\.py$", "", script.split(" ")[0])
+    want = re.compile(re.escape(stem) + r"_\d+")
+    return sorted(d for d in glob.glob(os.path.join(tmp, "test_runner_*", stem + "_*"))
+                  if want.fullmatch(os.path.basename(d)))
+
+
+def first_test_error(text):
+    """The exception line that follows the first '(ERROR)' line of a test_framework.log, or that line itself."""
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        m = RE_TF_ERROR.search(line)
+        if not m:
+            continue
+        exc = next((x.strip() for x in lines[i + 1:i + 80] if RE_EXC_LINE.match(x.strip())), "")
+        return " ".join((exc or m.group(1)).split())[:200]
+    return ""
+
+
+def functional_failure(dirs):
+    """(class, first error) of a failed functional script from its test directories. The class is
+    exactreplay-stall when a node's debug.log holds 'ExactReplay required' (the ConnectTip defer of a
+    DIGEST_RECOMPUTE block, dev hub 03 section 7), 'unclassified' otherwise, 'no-test-dir' without a directory."""
+    if not dirs:
+        return "no-test-dir", ""
+    stall = any("ExactReplay required" in read(h)
+                for d in dirs for h in glob.glob(os.path.join(d, "node*", "regtest", "debug.log")))
+    first = ""
+    for d in dirs:
+        first = first or first_test_error(read(os.path.join(d, "test_framework.log")))
+    return (STALL_CLASS if stall else "unclassified"), first.replace("\t", " ")
 
 
 def cmd_functional(a):
@@ -1583,12 +1686,12 @@ def cmd_functional(a):
         count[st] = count.get(st, 0) + 1
     missing = [s for s in sel if s not in got]
     stall = []
-    for s, (st, _, _) in got.items():
-        if st == "Failed":
-            base = s.split(" ")[0].replace(".py", "")
-            hits = glob.glob(os.path.join(tmp, "test_runner_*", f"{base}_*", "node*", "regtest", "debug.log"))
-            if any("ExactReplay required" in read(h) for h in hits):
+    with open(os.path.join(a.out, FUNC_CLASSES), "w", encoding="utf-8") as f:
+        for s in sorted(n for n, (st, _, _) in got.items() if st == "Failed"):
+            cls, first = functional_failure(test_dirs(tmp, s))
+            if cls == STALL_CLASS:
                 stall.append(s)
+            f.write(f"{s}\t{cls}\t{first}\n")
     with open(os.path.join(a.out, "stall.txt"), "w", encoding="utf-8") as f:
         f.write("".join(x + "\n" for x in sorted(stall)))
     tail(os.path.join(a.out, "functional.log"), 40)
@@ -2002,6 +2105,8 @@ def main():
     p.add_argument("--allow-unmeasured", action="store_true", help="budget-cut suites are a notice, not an error")
     p.add_argument("--max-notices", type=int, default=9)
     p.add_argument("--max-errors", type=int, default=9)
+    p.add_argument("--list-notices", type=int, default=0,
+                   help="also list every new failure in up to N notices ('[stall]' marks exactreplay-stall)")
     p = sp.add_parser("functional")
     p.add_argument("--builddir", required=True)
     p.add_argument("--label", required=True)

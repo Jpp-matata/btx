@@ -675,7 +675,7 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           python3 "$CIPY" known --label "linux-func-${{ matrix.shard }}" --known "$KNOWN" --out "$LOGS/gate" \
-            --functional "$LOGS/func/functional-results.csv"
+            --functional "$LOGS/func/functional-results.csv" --list-notices 4
       - name: Upload results and logs
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
@@ -2453,7 +2453,7 @@ jobs:
             --unit 'res/res-linux-unit-*/units/results.tsv' 'res/res-linux-unit-*/retry/results.tsv' \
             --junit 'res/res-linux-build/ctest-extra.xml' \
             --functional 'res/res-linux-func-*/func/functional-results.csv' \
-            --lint 'res/res-lint/lint/lint-results.tsv' 'res/res-release-gate/release/lint-results.tsv'
+            --lint 'res/res-lint/lint/lint-results.tsv' 'res/res-release-gate/release/lint-results.tsv' --list-notices 7
       - name: Upload the verdict and the next known-failing list
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
