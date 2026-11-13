@@ -12,6 +12,9 @@
 #   exactreplay-stall  functional script whose node logs say "ExactReplay required" (dev hub 03 section 7)
 #   lint-base        the lint fails on the base commit itself (the count is the number of hits there)
 #   lint-timeout     the lint did not finish within LINT_TIMEOUT (900 s) on the measuring machine
+#   The next list a run writes (known-failing.next.txt) marks failures it has not seen as class new, or
+#   new:exactreplay-stall when a node log of the failed script holds "ExactReplay required". Those rows are
+#   not reviewed: an entry moves here only with a cause in its class or first-line column.
 #
 # Source of every entry below: the 12 Nov 2026 box measurement at 4c7840e9 (Ubuntu 24.04, gcc 13.3,
 # RelWithDebInfo, BTX_HWC=2 OMP_NUM_THREADS=2; unit: btx_ci.py suites --jobs 10 --timeout 900; functional:
