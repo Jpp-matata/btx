@@ -118,6 +118,23 @@ def cmd_ann(a):
 
 
 # ---------------------------------------------------------------- configure
+RE_CONFIGURE_ERROR = re.compile(r"^(CMake Error\b|error:|fatal error\b|-- Running vcpkg install - failed)", re.I)
+
+
+def first_configure_error(txt):
+    """The first error line of a CMake (and vcpkg manifest install) log, with the line that explains a CMake
+    Error header; '' when there is none."""
+    lines = txt.splitlines()
+    for i, line in enumerate(lines):
+        s = line.strip()
+        if not RE_CONFIGURE_ERROR.match(s):
+            continue
+        if s.startswith("CMake Error"):
+            s += " " + next((x.strip() for x in lines[i + 1:i + 8] if x.strip()), "")
+        return s[:300]
+    return ""
+
+
 def cmd_configure(a):
     os.makedirs(a.logs, exist_ok=True)
     log = os.path.join(a.logs, f"cmake-{a.name}.log")
@@ -145,6 +162,8 @@ def cmd_configure(a):
         m = re.search(r"^" + key + r":[A-Z]+=(.*)$", cache, re.M)
         if m:
             info.append(f"{key}={m.group(1)}")
+    if rc != 0:
+        info.append("first_error=" + (first_configure_error(txt) or "none-in-log"))
     Ann().emit("notice" if rc == 0 else "error", " ".join(info))
     return rc
 
@@ -198,6 +217,9 @@ def cmd_build_summary(a):
     msg += exes
     if failed:
         msg.append("first_failed=" + ",".join(os.path.basename(x) for x in failed[:4]))
+        err = first_compile_error(txt)
+        if err:
+            msg.append("first_error=" + err)
     codes = error_codes(txt)
     if codes:
         msg.append("msvc_error_codes=" + codes)
@@ -205,6 +227,20 @@ def cmd_build_summary(a):
         msg.append("note=step-timeout:ccache-saved,re-run-continues")
     Ann().emit("notice" if rc == "0" else "error", " ".join(msg))
     return 0
+
+
+RE_COMPILE_ERROR = re.compile(r"^((?:[A-Za-z]:)?[^\s:()]+)(?::(\d+)(?::\d+)?|\((\d+)(?:,\d+)?\)):? "
+                              r"(?:fatal )?error:? ?(C\d{4}:)? ?(.*)$", re.M)
+
+
+def first_compile_error(txt):
+    """'file:line: message' of the first gcc, clang or MSVC compile error in a ninja log, '' if none."""
+    m = RE_COMPILE_ERROR.search(txt)
+    if not m:
+        return ""
+    where = f"{os.path.basename(m.group(1).replace(chr(92), '/'))}:{m.group(2) or m.group(3)}"
+    code = (m.group(4) + " ") if m.group(4) else ""
+    return f"{where}: {code}{m.group(5)}".strip()[:240]
 
 
 def error_codes(txt, top=8):
@@ -1190,6 +1226,19 @@ def cmd_selftest(a):
     assert parse_set_output("Path=C:\\a;C:\\b\r\nVCToolsVersion=14.44.35207\r\n=C:=C:\\x") == {
         "PATH": "C:\\a;C:\\b", "VCTOOLSVERSION": "14.44.35207"}
     assert edit_path("C:\\x;C:\\Strawberry\\c\\bin;;C:\\y", ["C:\\L"], ["\\strawberry\\"]) == "C:\\L;C:\\x;C:\\y"
+    log = ("-- Running vcpkg install\nerror: building berkeleydb:x64-windows-static failed with: BUILD_FAILED\n"
+           "-- Running vcpkg install - failed\nCMake Error at D:/w/vcpkg/scripts/buildsystems/vcpkg.cmake:938 (message):\n"
+           "  vcpkg install failed.\n")
+    assert first_configure_error(log) == "error: building berkeleydb:x64-windows-static failed with: BUILD_FAILED"
+    assert first_configure_error("-- Performing Test HAVE_ERROR\nCMake Error at x.cmake:1 (message):\n\n  no cl\n") == \
+        "CMake Error at x.cmake:1 (message): no cl"
+    assert first_configure_error("-- Configuring done\n") == ""
+    gcc = ("[3297/3301] Building CXX object x.obj\nFAILED: x.obj\n/w/src/modelnet/realm_channel.cpp: In member function 'f':\n"
+           "/w/src/modelnet/realm_channel.cpp:887:5: error: 'ReplaceAll' was not declared in this scope\n")
+    assert first_compile_error(gcc) == "realm_channel.cpp:887: 'ReplaceAll' was not declared in this scope"
+    msvc = "FAILED: y.obj\nD:\\a\\btx\\src\\y.cpp(12,5): error C3861: 'ReplaceAll': identifier not found\n"
+    assert first_compile_error(msvc) == "y.cpp:12: C3861: 'ReplaceAll': identifier not found"
+    assert first_compile_error("[1/2] ok\nwarning: unused\n") == ""
     selftest_additions()
     Ann().emit("notice", f"job={a.job} step=tools status=ok python={sys.version.split()[0]} sha={os.environ.get('GITHUB_SHA', '?')[:12]} "
                          f"ref={os.environ.get('GITHUB_REF_NAME', '?')}")
