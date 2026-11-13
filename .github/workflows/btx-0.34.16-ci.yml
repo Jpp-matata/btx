@@ -151,18 +151,22 @@ jobs:
           python3 "$CIPY" ann notice "job=$GITHUB_JOB step=base base=${base:0:12} release_head=$(git rev-parse --short=12 "upstream/$RELEASE_BRANCH") commits_on_top=$(git rev-list --count "$base..HEAD")"
       - name: Install the lint tools (the pins of ci/lint/04_install.sh where Python 3.12 allows)
         run: |
+          # pyzmq: 04_install.sh pins 25.1.0, which has no CPython 3.12 wheel (its sdist does not build on 3.12);
+          # 25.1.2 is the first 25.1.x with cp312 wheels. --only-binary: a pin without a wheel fails here, by name.
+          fail() { python3 "$CIPY" ann error "job=$GITHUB_JOB step=lint-tools part=$1 status=failed"; exit 1; }
           python3 -m venv "$RUNNER_TEMP/lintvenv"
-          "$RUNNER_TEMP/lintvenv/bin/pip" install -q --disable-pip-version-check codespell==2.2.6 lief==0.14.1 mypy==1.4.1 \
-            pyzmq==25.1.0 ruff==0.5.5 vulture==2.6 yamllint==1.35.1
+          "$RUNNER_TEMP/lintvenv/bin/pip" install -q --disable-pip-version-check --only-binary=:all: codespell==2.2.6 \
+            lief==0.14.1 mypy==1.4.1 pyzmq==25.1.2 ruff==0.5.5 vulture==2.6 yamllint==1.35.1 || fail pip
           curl -fsSL --retry 3 -o "$RUNNER_TEMP/sc.tar.xz" \
-            "https://github.com/koalaman/shellcheck/releases/download/$SHELLCHECK_VER/shellcheck-$SHELLCHECK_VER.linux.x86_64.tar.xz"
-          echo "$SHELLCHECK_SHA256  $RUNNER_TEMP/sc.tar.xz" | sha256sum -c -
+            "https://github.com/koalaman/shellcheck/releases/download/$SHELLCHECK_VER/shellcheck-$SHELLCHECK_VER.linux.x86_64.tar.xz" \
+            || fail shellcheck-download
+          echo "$SHELLCHECK_SHA256  $RUNNER_TEMP/sc.tar.xz" | sha256sum -c - || fail shellcheck-sha256
           tar -xf "$RUNNER_TEMP/sc.tar.xz" -C "$RUNNER_TEMP"
           mkdir -p "$RUNNER_TEMP/lintbin"
           cp "$RUNNER_TEMP/shellcheck-$SHELLCHECK_VER/shellcheck" "$RUNNER_TEMP/lintbin/"
           echo "$RUNNER_TEMP/lintbin" >> "$GITHUB_PATH"
           echo "$RUNNER_TEMP/lintvenv/bin" >> "$GITHUB_PATH"
-          (cd test/lint/test_runner && CARGO_TARGET_DIR="$RUNNER_TEMP/lint-target" cargo build -q)
+          (cd test/lint/test_runner && CARGO_TARGET_DIR="$RUNNER_TEMP/lint-target" cargo build -q) || fail lint-runner-build
       - name: Every lint check on its own
         run: |
           shellcheck --version | sed -n 2p
