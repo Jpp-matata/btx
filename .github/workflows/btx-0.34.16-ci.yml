@@ -161,9 +161,9 @@ jobs:
             "https://github.com/koalaman/shellcheck/releases/download/$SHELLCHECK_VER/shellcheck-$SHELLCHECK_VER.linux.x86_64.tar.xz" \
             || fail shellcheck-download
           echo "$SHELLCHECK_SHA256  $RUNNER_TEMP/sc.tar.xz" | sha256sum -c - || fail shellcheck-sha256
-          tar -xf "$RUNNER_TEMP/sc.tar.xz" -C "$RUNNER_TEMP"
+          tar -xf "$RUNNER_TEMP/sc.tar.xz" -C "$RUNNER_TEMP" || fail shellcheck-unpack
           mkdir -p "$RUNNER_TEMP/lintbin"
-          cp "$RUNNER_TEMP/shellcheck-$SHELLCHECK_VER/shellcheck" "$RUNNER_TEMP/lintbin/"
+          cp "$RUNNER_TEMP/shellcheck-$SHELLCHECK_VER/shellcheck" "$RUNNER_TEMP/lintbin/" || fail shellcheck-unpack
           echo "$RUNNER_TEMP/lintbin" >> "$GITHUB_PATH"
           echo "$RUNNER_TEMP/lintvenv/bin" >> "$GITHUB_PATH"
           (cd test/lint/test_runner && CARGO_TARGET_DIR="$RUNNER_TEMP/lint-target" cargo build -q) || fail lint-runner-build
@@ -1086,8 +1086,8 @@ jobs:
         timeout-minutes: 30
         run: |
           ls -la bin
-          python "$CIPY" smoke --btxd bin/btxd.exe --cli bin/btx-cli.exe --datadir "$RUNNER_TEMP/smoke-mende" \
-            --label win-mende --job "$GITHUB_JOB" --port 38333 --rpcport 38332 --wallet --mine 101 --mine-budget 900 \
+          python "$CIPY" smoke --btxd bin/btxd.exe --cli bin/btx-cli.exe --datadir "$RUNNER_TEMP/smoke-tester-flags" \
+            --label win-tester-flags --job "$GITHUB_JOB" --port 38333 --rpcport 38332 --wallet --mine 101 --mine-budget 900 \
             --send --extra=-modelnet=0 --extra=-matmulvalidation=economic \
             --extra=-regtestmatmulbindingheight=2147483647 --extra=-regtestmatmulproductdigestheight=2147483647 \
             --extra=-regtestmatmulv4height=2147483647 --extra=-regtestmatmulrequireproductpayload=0 --out "$LOGS"
