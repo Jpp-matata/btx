@@ -1218,7 +1218,8 @@ jobs:
         run: |
           z="ccache-$CCACHE_WIN_VER-windows-x86_64"
           curl -fsSL --retry 3 -o "$RUNNER_TEMP/$z.zip" "https://github.com/ccache/ccache/releases/download/v$CCACHE_WIN_VER/$z.zip"
-          got=$(sha256sum "$RUNNER_TEMP/$z.zip" | cut -d' ' -f1)
+          # Hash stdin: GNU sha256sum starts its line with a backslash when the file name holds one (D:\a\_temp).
+          got=$(sha256sum < "$RUNNER_TEMP/$z.zip" | cut -d' ' -f1)
           if [ "$got" != "$CCACHE_WIN_SHA256" ]; then
             python "$CIPY" ann error "job=$GITHUB_JOB step=ccache sha256-mismatch got=$got"
             exit 1
@@ -1392,7 +1393,8 @@ jobs:
         run: |
           z="ccache-$CCACHE_WIN_VER-windows-x86_64"
           curl -fsSL --retry 3 -o "$RUNNER_TEMP/$z.zip" "https://github.com/ccache/ccache/releases/download/v$CCACHE_WIN_VER/$z.zip"
-          got=$(sha256sum "$RUNNER_TEMP/$z.zip" | cut -d' ' -f1)
+          # Hash stdin: GNU sha256sum starts its line with a backslash when the file name holds one (D:\a\_temp).
+          got=$(sha256sum < "$RUNNER_TEMP/$z.zip" | cut -d' ' -f1)
           if [ "$got" != "$CCACHE_WIN_SHA256" ]; then
             python "$CIPY" ann error "job=$GITHUB_JOB step=ccache sha256-mismatch got=$got"
             exit 1
