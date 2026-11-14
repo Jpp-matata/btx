@@ -1,16 +1,17 @@
-# Fork CI for btxchain/btx release-0.34.16, on a fork's branch ci-0.34.16 (and ci-0.34.16/<topic>).
+# Fork CI for btxchain/btx swapnet-v2 (#630), on a fork's branch ci-swapnet-v2 (and ci-swapnet-v2/<topic>).
+# The jobs are those of the release-0.34.16 fork CI (branch ci-0.34.16), re-applied on swapnet-v2.
 #
 # A fork-side gate for the release line. Not proposed upstream: upstream runs no GitHub-hosted CI
 # by policy (.github/workflows/README.md), so a fork run is the evidence a pull request carries.
-# The branch is release-0.34.16 plus one commit: this file, btx-0.34.16-coverage.yml and the helpers
-# in contrib/ci-fork/. A topic branch ci-0.34.16/<topic> is that branch plus a PR's commits.
+# The branch is swapnet-v2 plus the CI commits: this file, btx-0.34.16-coverage.yml and the helpers
+# in contrib/ci-fork/. A topic branch ci-swapnet-v2/<topic> is that branch plus a PR's commits.
 #
 # Jobs
 # - tools: selftests and shellcheck of contrib/ci-fork; hands btx_ci.py to every other job.
 # - lint: each check of the repo's lint runner (test/lint/test_runner) and each test/lint/lint-*.py on
 #   its own, yamllint on .github, and a scan of the lines the branch adds for keys and tokens.
 # - clang-tidy-diff: src/.clang-tidy with the bitcoin-tidy plugin (LLVM 19) on the C++ lines the branch
-#   changes against release-0.34.16; warnings are errors there.
+#   changes against swapnet-v2; warnings are errors there.
 # - cppcheck: cppcheck 2.13 on every product translation unit; red when an (id, file) count grows past
 #   contrib/ci-fork/cppcheck-baseline.tsv, which only shrinks.
 # - linux-build (all targets; the ctest entries outside test_btx; every test_btx suite registered in
@@ -30,7 +31,7 @@
 # Rules
 # - No secrets: the job token is read-only (permissions: contents: read); push and manual runs only,
 #   no pull_request trigger.
-# - Runs only outside btxchain/* and only on ci-0.34.16 and ci-0.34.16/* (guard on the tools job).
+# - Runs only outside btxchain/* and only on ci-swapnet-v2 and ci-swapnet-v2/* (guard on the tools job).
 # - Third-party code: only actions/* pinned to full commit SHAs; the OpenSSL, Boost, ccache and
 #   shellcheck downloads checked against fixed sha256 values; vcpkg at a pinned commit; the Python lint
 #   tools at pinned versions; Ubuntu packages; crates checked against gui/atlas/Cargo.lock (--locked).
@@ -40,15 +41,15 @@
 # - Every result is an annotation titled RESULT, readable without a token via
 #   GET /repos/{owner}/{repo}/check-runs/{id}/annotations.
 
-name: btx-0.34.16 CI
+name: btx swapnet-v2 CI
 
 on:
   workflow_dispatch:
   push:
-    branches: ['ci-0.34.16', 'ci-0.34.16/**']
+    branches: ['ci-swapnet-v2', 'ci-swapnet-v2/**']
 
 concurrency:
-  group: btx-0.34.16-ci-${{ github.ref }}
+  group: btx-swapnet-v2-ci-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -59,7 +60,7 @@ defaults:
     shell: bash
 
 env:
-  RELEASE_BRANCH: "release-0.34.16"
+  RELEASE_BRANCH: "swapnet-v2"
   UPSTREAM_URL: "https://github.com/btxchain/btx.git"
   OSSL_VER: "3.5.4"
   OSSL_SHA256: "967311f84955316969bdb1d8d4b983718ef42338639c621ec4c34fddef355e99"
@@ -95,8 +96,8 @@ jobs:
   tools:
     name: tools
     # Every other job needs this one, so this guard keeps the whole workflow off upstream and off every
-    # branch except ci-0.34.16 and ci-0.34.16/* (push or manual run).
-    if: ${{ github.repository_owner != 'btxchain' && (github.ref_name == 'ci-0.34.16' || startsWith(github.ref_name, 'ci-0.34.16/')) }}
+    # branch except ci-swapnet-v2 and ci-swapnet-v2/* (push or manual run).
+    if: ${{ github.repository_owner != 'btxchain' && (github.ref_name == 'ci-swapnet-v2' || startsWith(github.ref_name, 'ci-swapnet-v2/')) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
