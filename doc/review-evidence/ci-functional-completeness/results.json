@@ -1,0 +1,93 @@
+{
+  "base": "19b7ddecc25b14598d666cf5a2a4c59b4b9ddbab",
+  "code_commit": "cf8a6e13b3129f3caf8dcf716a8ccfea82eddc81",
+  "local_tested_commit": "6c28d7dc8bf0d1428351d95c31232b45c871f669",
+  "source_sha256": {
+    ".github/workflows/btx-0.34.16-ci.yml": "088880ccb29d68ee5199795ace5013a0ae7d1fb45bdf5610de5c522eb4691ead",
+    "contrib/ci-fork/btx_ci.py": "129c166ba1aa100036968399be4b1a21b37efe2cfebae0a739db3ec8e6ff359b",
+    "contrib/ci-fork/test_functional_completeness.py": "3cee7cf4f55fd0d46abc8068bc68b1505cd4c26a2a6b3f0dddfae66edded5649"
+  },
+  "platform": "macOS-26.5.1-arm64-arm-64bit",
+  "python": "3.9.6",
+  "cases": [
+    {
+      "case": "test_aggregate_row_does_not_count_as_a_test",
+      "before_wrapper": 1,
+      "before_gate": 1,
+      "after_wrapper": 1,
+      "after_gate": 1
+    },
+    {
+      "case": "test_complete_known_failure_remains_allowed",
+      "before_wrapper": 0,
+      "before_gate": 0,
+      "after_wrapper": 0,
+      "after_gate": 0
+    },
+    {
+      "case": "test_complete_new_failure_is_rejected_by_gate",
+      "before_wrapper": 0,
+      "before_gate": 1,
+      "after_wrapper": 0,
+      "after_gate": 1
+    },
+    {
+      "case": "test_complete_passes",
+      "before_wrapper": 0,
+      "before_gate": 0,
+      "after_wrapper": 0,
+      "after_gate": 0
+    },
+    {
+      "case": "test_complete_skip_keeps_existing_policy",
+      "before_wrapper": 0,
+      "before_gate": 0,
+      "after_wrapper": 0,
+      "after_gate": 0
+    },
+    {
+      "case": "test_empty_results_fail",
+      "before_wrapper": 1,
+      "before_gate": 1,
+      "after_wrapper": 1,
+      "after_gate": 1
+    },
+    {
+      "case": "test_known_failure_cannot_hide_another_missing_test",
+      "before_wrapper": 0,
+      "before_gate": 0,
+      "after_wrapper": 1,
+      "after_gate": 0
+    },
+    {
+      "case": "test_missing_variant_is_not_covered_by_base_name",
+      "before_wrapper": 0,
+      "before_gate": 0,
+      "after_wrapper": 1,
+      "after_gate": 0
+    },
+    {
+      "case": "test_partial_even_with_zero_runner_exit_fails",
+      "before_wrapper": 0,
+      "before_gate": 0,
+      "after_wrapper": 1,
+      "after_gate": 0
+    },
+    {
+      "case": "test_partial_with_runner_error_fails",
+      "before_wrapper": 0,
+      "before_gate": 0,
+      "after_wrapper": 1,
+      "after_gate": 0
+    }
+  ],
+  "helper_selftest": "passed",
+  "hosted_execution": false,
+  "runner": "simulated; actual helper CLI subprocesses",
+  "log_note": "Public copies replace local machine paths; original log hashes retained.",
+  "original_log_sha256": {
+    "before.log": "bbadf43061331720771958e2bb99415c8c530d6aa306a9bd2a49474c1ecfdb78",
+    "after.log": "e24b43aab4bfe7ff907777bb16f2a927396bef2c8daab56bafcfa43cb80e679e",
+    "helper-selftest.log": "d29f7693cebbd0a0b8943f58329c6cc92517de6bf38598d2ea1cff02572e5837"
+  }
+}
