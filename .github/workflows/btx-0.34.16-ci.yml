@@ -108,6 +108,7 @@ jobs:
           command -v shellcheck >/dev/null || { sudo apt-get update -q && sudo apt-get install -y -q shellcheck; }
           python3 -m py_compile contrib/ci-fork/*.py
           python3 contrib/ci-fork/btx_ci.py selftest --job tools
+          python3 contrib/ci-fork/test_functional_completeness.py
           python3 contrib/ci-fork/coverage_check.py --selftest
           shellcheck contrib/ci-fork/*.sh
           mkdir -p ci-tools

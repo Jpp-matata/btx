@@ -1,0 +1,81 @@
+......FFFF
+======================================================================
+FAIL: test_known_failure_cannot_hide_another_missing_test (__main__.FunctionalCompleteness)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<task>/source/contrib/ci-fork/test_functional_completeness.py", line 93, in test_known_failure_cannot_hide_another_missing_test
+    self.assertEqual((r["wrapper_exit"], r["gate_exit"]), (1, 0))
+AssertionError: Tuples differ: (0, 0) != (1, 0)
+
+First differing element 0:
+0
+1
+
+- (0, 0)
+?  ^
+
++ (1, 0)
+?  ^
+
+
+======================================================================
+FAIL: test_missing_variant_is_not_covered_by_base_name (__main__.FunctionalCompleteness)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<task>/source/contrib/ci-fork/test_functional_completeness.py", line 97, in test_missing_variant_is_not_covered_by_base_name
+    self.assertEqual((r["wrapper_exit"], r["gate_exit"]), (1, 0))
+AssertionError: Tuples differ: (0, 0) != (1, 0)
+
+First differing element 0:
+0
+1
+
+- (0, 0)
+?  ^
+
++ (1, 0)
+?  ^
+
+
+======================================================================
+FAIL: test_partial_even_with_zero_runner_exit_fails (__main__.FunctionalCompleteness)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<task>/source/contrib/ci-fork/test_functional_completeness.py", line 88, in test_partial_even_with_zero_runner_exit_fails
+    self.assertEqual((r["wrapper_exit"], r["gate_exit"]), (1, 0))
+AssertionError: Tuples differ: (0, 0) != (1, 0)
+
+First differing element 0:
+0
+1
+
+- (0, 0)
+?  ^
+
++ (1, 0)
+?  ^
+
+
+======================================================================
+FAIL: test_partial_with_runner_error_fails (__main__.FunctionalCompleteness)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "<task>/source/contrib/ci-fork/test_functional_completeness.py", line 83, in test_partial_with_runner_error_fails
+    self.assertEqual((r["wrapper_exit"], r["gate_exit"]), (1, 0))
+AssertionError: Tuples differ: (0, 0) != (1, 0)
+
+First differing element 0:
+0
+1
+
+- (0, 0)
+?  ^
+
++ (1, 0)
+?  ^
+
+
+----------------------------------------------------------------------
+Ran 10 tests in 1.077s
+
+FAILED (failures=4)

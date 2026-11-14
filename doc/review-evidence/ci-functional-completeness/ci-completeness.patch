@@ -1,0 +1,158 @@
+From cf8a6e13b3129f3caf8dcf716a8ccfea82eddc81 Mon Sep 17 00:00:00 2001
+From: sunnyriverr <255313950+sunnyriverr@users.noreply.github.com>
+Date: Sun, 15 Nov 2026 07:07:57 +1000
+Subject: [PATCH] ci: reject functional runs with missing selected results
+
+---
+ .github/workflows/btx-0.34.16-ci.yml          |   1 +
+ contrib/ci-fork/btx_ci.py                     |   5 +-
+ .../ci-fork/test_functional_completeness.py   | 109 ++++++++++++++++++
+ 3 files changed, 113 insertions(+), 2 deletions(-)
+ create mode 100644 contrib/ci-fork/test_functional_completeness.py
+
+diff --git a/.github/workflows/btx-0.34.16-ci.yml b/.github/workflows/btx-0.34.16-ci.yml
+index f89879e..2fe62b3 100644
+--- a/.github/workflows/btx-0.34.16-ci.yml
++++ b/.github/workflows/btx-0.34.16-ci.yml
+@@ -108,6 +108,7 @@ jobs:
+           command -v shellcheck >/dev/null || { sudo apt-get update -q && sudo apt-get install -y -q shellcheck; }
+           python3 -m py_compile contrib/ci-fork/*.py
+           python3 contrib/ci-fork/btx_ci.py selftest --job tools
++          python3 contrib/ci-fork/test_functional_completeness.py
+           python3 contrib/ci-fork/coverage_check.py --selftest
+           shellcheck contrib/ci-fork/*.sh
+           mkdir -p ci-tools
+diff --git a/contrib/ci-fork/btx_ci.py b/contrib/ci-fork/btx_ci.py
+index 3533560..b70f939 100755
+--- a/contrib/ci-fork/btx_ci.py
++++ b/contrib/ci-fork/btx_ci.py
+@@ -1731,8 +1731,9 @@ def cmd_functional(a):
+     failed = sorted(s for s, (st, _, _) in got.items() if st == "Failed")
+     if failed:
+         ann.emit("error", f"label={a.label} failed={len(failed)}: " + ",".join(failed[:60]))
+-    # The verdict is the known-failing gate's; this step fails only when the runner produced no results.
+-    return 0 if got else 1
++    # Complete runs delegate their verdict to the known-failing gate. Missing
++    # selected results cannot reach that gate, so reject them here.
++    return 0 if got and not missing else 1
+ 
+ 
+ # ---------------------------------------------------------------- cppcheck (product code)
+diff --git a/contrib/ci-fork/test_functional_completeness.py b/contrib/ci-fork/test_functional_completeness.py
+new file mode 100644
+index 0000000..f77095f
+--- /dev/null
++++ b/contrib/ci-fork/test_functional_completeness.py
+@@ -0,0 +1,109 @@
++#!/usr/bin/env python3
++"""CLI regressions for functional selection/result completeness (no BTX binary).
++
++Run: python3 contrib/ci-fork/test_functional_completeness.py
++BTX_CI_TEST_HELPER can select the unchanged baseline helper for a paired run.
++BTX_CI_TEST_OUTPUT optionally retains command output outside temporary fixtures.
++"""
++import json
++import os
++from pathlib import Path
++import subprocess
++import sys
++import tempfile
++import unittest
++
++HELPER = Path(os.environ.get("BTX_CI_TEST_HELPER", Path(__file__).with_name("btx_ci.py"))).resolve()
++
++
++class FunctionalCompleteness(unittest.TestCase):
++    def run_case(self, selected, rows, runner_exit=0, known=()):
++        with tempfile.TemporaryDirectory(prefix="btx-ci-completeness-") as scratch:
++            root = Path(scratch)
++            runner = root / "build/test/functional/test_runner.py"
++            runner.parent.mkdir(parents=True)
++            # Only the test runner is simulated. Both production helper commands
++            # run in subprocesses, including their actual CSV and known-list readers.
++            runner.write_text(
++                "import csv, sys\n"
++                f"BTX_BASE_SCRIPTS = {selected!r}\nALL_SCRIPTS = BTX_BASE_SCRIPTS\n"
++                "if __name__ == '__main__':\n"
++                "    path = next(a.split('=', 1)[1] for a in sys.argv if a.startswith('--resultsfile='))\n"
++                "    with open(path, 'w', newline='') as f:\n"
++                "        w = csv.writer(f)\n"
++                "        w.writerow(['test', 'status', 'duration(seconds)'])\n"
++                f"        w.writerows({rows!r})\n"
++                f"    sys.exit({runner_exit!r})\n",
++                encoding="utf-8",
++            )
++            known_path = root / "known.txt"
++            known_path.write_text("# kind | name | class | first failing line | seen on\n" + "".join(
++                f"functional | {name} | pre-existing | fixture failure | baseline\n" for name in known
++            ), encoding="utf-8")
++            out = root / "results"
++            command = [sys.executable, str(HELPER), "functional", "--builddir", str(root / "build"),
++                       "--label", "completeness", "--out", str(out), "--tmpdirprefix", str(root / "runtime")]
++            wrapper = subprocess.run(command, capture_output=True, text=True, check=False, timeout=30)
++            gate_command = [sys.executable, str(HELPER), "known", "--label", "completeness",
++                            "--known", str(known_path), "--out", str(root / "gate"),
++                            "--functional", str(out / "functional-results.csv")]
++            # The workflow runs this step even if the wrapper fails (!cancelled()).
++            gate = subprocess.run(gate_command, capture_output=True, text=True, check=False, timeout=30)
++            result = {"selected": (out / "selected.txt").read_text().splitlines(),
++                      "csv": (out / "functional-results.csv").read_text(),
++                      "wrapper_exit": wrapper.returncode, "gate_exit": gate.returncode,
++                      "wrapper_output": wrapper.stdout + wrapper.stderr,
++                      "gate_output": gate.stdout + gate.stderr}
++            if os.environ.get("BTX_CI_TEST_OUTPUT"):
++                logs = Path(os.environ["BTX_CI_TEST_OUTPUT"])
++                logs.mkdir(parents=True, exist_ok=True)
++                (logs / (self._testMethodName + ".json")).write_text(json.dumps(result, indent=2) + "\n")
++            self.assertEqual(result["selected"], selected)
++            return result
++
++    def test_complete_passes(self):
++        r = self.run_case(["alpha.py", "beta.py"], [("alpha.py", "Passed", 1), ("beta.py", "Passed", 1)])
++        self.assertEqual((r["wrapper_exit"], r["gate_exit"]), (0, 0))
++
++    def test_complete_known_failure_remains_allowed(self):
++        r = self.run_case(["alpha.py", "beta.py"], [("alpha.py", "Passed", 1), ("beta.py", "Failed", 1)],
++                          runner_exit=1, known=["beta.py"])
++        self.assertEqual((r["wrapper_exit"], r["gate_exit"]), (0, 0))
++
++    def test_complete_new_failure_is_rejected_by_gate(self):
++        r = self.run_case(["alpha.py", "beta.py"], [("alpha.py", "Passed", 1), ("beta.py", "Failed", 1)], runner_exit=1)
++        self.assertEqual((r["wrapper_exit"], r["gate_exit"]), (0, 1))
++
++    def test_complete_skip_keeps_existing_policy(self):
++        r = self.run_case(["alpha.py", "beta.py"], [("alpha.py", "Passed", 1), ("beta.py", "Skipped", 0)])
++        self.assertEqual((r["wrapper_exit"], r["gate_exit"]), (0, 0))
++
++    def test_partial_with_runner_error_fails(self):
++        r = self.run_case(["alpha.py", "beta.py"], [("alpha.py", "Passed", 1)], runner_exit=2)
++        self.assertEqual((r["wrapper_exit"], r["gate_exit"]), (1, 0))
++        self.assertIn("missing=1", r["wrapper_output"])
++
++    def test_partial_even_with_zero_runner_exit_fails(self):
++        r = self.run_case(["alpha.py", "beta.py"], [("alpha.py", "Passed", 1)])
++        self.assertEqual((r["wrapper_exit"], r["gate_exit"]), (1, 0))
++
++    def test_known_failure_cannot_hide_another_missing_test(self):
++        r = self.run_case(["alpha.py", "beta.py"], [("alpha.py", "Failed", 1)],
++                          runner_exit=1, known=["alpha.py", "beta.py"])
++        self.assertEqual((r["wrapper_exit"], r["gate_exit"]), (1, 0))
++
++    def test_missing_variant_is_not_covered_by_base_name(self):
++        r = self.run_case(["alpha.py", "alpha.py --descriptors"], [("alpha.py", "Passed", 1)])
++        self.assertEqual((r["wrapper_exit"], r["gate_exit"]), (1, 0))
++
++    def test_empty_results_fail(self):
++        r = self.run_case(["alpha.py"], [], runner_exit=2)
++        self.assertEqual((r["wrapper_exit"], r["gate_exit"]), (1, 1))
++
++    def test_aggregate_row_does_not_count_as_a_test(self):
++        r = self.run_case(["alpha.py"], [("ALL", "Passed", 1)])
++        self.assertEqual((r["wrapper_exit"], r["gate_exit"]), (1, 1))
++
++
++if __name__ == "__main__":
++    unittest.main()
+-- 
+2.50.1 (Apple Git-155)
+
