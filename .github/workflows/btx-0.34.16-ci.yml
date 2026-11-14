@@ -88,6 +88,13 @@ env:
   HOMEBREW_NO_ANALYTICS: "1"
   HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: "1"
   PYTHONUNBUFFERED: "1"
+  # SwapNet (cmake/SwapNet.cmake, new in swapnet-v2): Python >= 3.11 with its Development files, and the selected
+  # interpreter must import cryptography and sqlite3 under `python -I` (so a pip --user install does not count).
+  # Ubuntu jobs: python3-dev and python3-cryptography; runtime jobs libpython3.12t64. Windows and macOS: CPython
+  # SWAPNET_PY from actions/setup-python plus the cryptography pin of contrib/swapnet/requirements-tested-runtime.txt.
+  SWAPNET_PY: "3.12"
+  SWAPNET_CRYPTOGRAPHY: "46.0.4"
+  SWAPNET_PY_CHECK: "import sys,sqlite3,cryptography; from cryptography.hazmat.primitives.ciphers.aead import AESGCM; print('python=%s cryptography=%s sqlite=%s' % (sys.version.split()[0], cryptography.__version__, sqlite3.sqlite_version))"
   LINUX_TEST_TARGETS: "test_btx btxd btx-cli btx-open btx-modeld btx-wallet btx-util btx-hcpd btx-tx btx-hosted"
   CORE_SUITES: "util_tests,crypto_tests,hash_tests,key_tests,base58_tests,bech32_tests,uint256_tests,arith_uint256_tests,serialize_tests,streams_tests,script_tests,transaction_tests,sighash_tests,coins_tests,mempool_tests,validation_tests,blockchain_tests,net_tests,addrman_tests,getarg_tests,fs_tests,sock_tests,pq_crypto_tests,wallet_tests,lightwatch_tests,lab_lifecycle_tests,nif_sandbox_tests,guard_permit_tests,native_discovery_tests,cap02_tests,hire01_tests,acc07_tests,fixture_cleanup_tests"
   GUARD_SUITES: "guard_permit_tests,native_discovery_tests,cap02_tests,hire01_tests,acc07_tests"
@@ -239,7 +246,7 @@ jobs:
         run: |
           sudo apt-get update -q
           sudo apt-get install -y -q --no-install-recommends clang-19 clang-tidy-19 libclang-19-dev llvm-19-dev \
-            cmake ninja-build pkgconf python3 libevent-dev libboost-dev libsqlite3-dev libzmq3-dev
+            cmake ninja-build pkgconf python3 python3-dev python3-cryptography libevent-dev libboost-dev libsqlite3-dev libzmq3-dev
       - name: Restore OpenSSL
         if: env.CPP_CHANGED != '0'
         id: ossl-cache
@@ -333,7 +340,7 @@ jobs:
       - name: Install cppcheck and the build dependencies
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y -q --no-install-recommends cppcheck build-essential cmake ninja-build pkgconf python3 \
+          sudo apt-get install -y -q --no-install-recommends cppcheck build-essential cmake ninja-build pkgconf python3 python3-dev python3-cryptography \
             libevent-dev libboost-dev libsqlite3-dev libzmq3-dev
           cppcheck --version
       - name: Restore OpenSSL
@@ -424,7 +431,8 @@ jobs:
         run: |
           sudo apt-get update -q
           sudo apt-get install -y -q --no-install-recommends build-essential cmake ninja-build pkgconf python3 python3-zmq ccache \
-            libevent-dev libboost-dev libsqlite3-dev libzmq3-dev
+            libevent-dev libboost-dev libsqlite3-dev libzmq3-dev python3-dev python3-cryptography
+          python3 "$CIPY" ann notice "job=$GITHUB_JOB step=swapnet-python interpreter=/usr/bin/python3 $(/usr/bin/python3 -I -c "$SWAPNET_PY_CHECK" 2>&1 | tail -n 1)"
       - name: Restore OpenSSL
         id: ossl-cache
         uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
@@ -472,7 +480,7 @@ jobs:
           python3 "$CIPY" configure --name linux --job "$GITHUB_JOB" --logs "$LOGS" --builddir build -- \
             -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DWITH_MODELNET=ON -DBUILD_TESTS=ON -DBUILD_GUI=OFF \
             -DBUILD_BENCH=OFF -DWITH_ZMQ=ON -DWITH_CCACHE=ON -DOPENSSL_ROOT_DIR="$HOME/ossl35" -DOPENSSL_USE_STATIC_LIBS=ON \
-            -DBTX_ENABLE_CUDA_EXPERIMENTAL=OFF
+            -DBTX_ENABLE_CUDA_EXPERIMENTAL=OFF -DPython3_EXECUTABLE=/usr/bin/python3
           grep -E '^OPENSSL_(SSL|CRYPTO)_LIBRARY' build/CMakeCache.txt
       - name: Build every target (keep going)
         timeout-minutes: 320
@@ -569,7 +577,7 @@ jobs:
         run: |
           tar -xf "$RUNNER_TEMP/linux-bin.tar" && rm -f "$RUNNER_TEMP/linux-bin.tar"
           sudo apt-get update -q
-          sudo apt-get install -y -q --no-install-recommends libevent-dev libsqlite3-dev libzmq3-dev
+          sudo apt-get install -y -q --no-install-recommends libevent-dev libsqlite3-dev libzmq3-dev libpython3.12t64 python3-cryptography
           gcc -shared -fPIC -O2 -o "$RUNNER_TEMP/libhwc.so" contrib/ci-fork/hwc.c
       - name: Restore OpenSSL (tests that mint ML-DSA-44 certificates run its openssl)
         id: ossl-cache
@@ -656,7 +664,7 @@ jobs:
         run: |
           tar -xf "$RUNNER_TEMP/linux-bin.tar" && rm -f "$RUNNER_TEMP/linux-bin.tar"
           sudo apt-get update -q
-          sudo apt-get install -y -q --no-install-recommends libevent-dev libsqlite3-dev libzmq3-dev python3-zmq
+          sudo apt-get install -y -q --no-install-recommends libevent-dev libsqlite3-dev libzmq3-dev python3-zmq libpython3.12t64 python3-cryptography
           grep -E '^(SRCDIR|BUILDDIR)=' build/test/config.ini
       - name: Restore OpenSSL (tests that mint ML-DSA-44 certificates run its openssl)
         uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
@@ -717,7 +725,7 @@ jobs:
         run: |
           tar -xf "$RUNNER_TEMP/linux-bin.tar" && rm -f "$RUNNER_TEMP/linux-bin.tar"
           sudo apt-get update -q
-          sudo apt-get install -y -q --no-install-recommends libevent-dev libsqlite3-dev libzmq3-dev
+          sudo apt-get install -y -q --no-install-recommends libevent-dev libsqlite3-dev libzmq3-dev libpython3.12t64 python3-cryptography
       - name: Enable unprivileged user namespaces and check them with unshare -Ur true
         continue-on-error: true
         run: |
@@ -792,7 +800,7 @@ jobs:
         run: |
           sudo apt-get update -q
           sudo apt-get install -y -q --no-install-recommends g++-mingw-w64-x86-64-posix gcc-mingw-w64-x86-64-posix \
-            binutils-mingw-w64-x86-64 mingw-w64-x86-64-dev make cmake ninja-build curl patch pkgconf python3 ccache \
+            binutils-mingw-w64-x86-64 mingw-w64-x86-64-dev make cmake ninja-build curl patch pkgconf python3 python3-dev python3-cryptography ccache \
             xz-utils autoconf automake libtool
           for t in gcc g++; do
             if [ -e "/usr/bin/$HOSTW-$t-posix" ]; then
@@ -800,6 +808,8 @@ jobs:
             fi
           done
           tm=$("$HOSTW-g++" -v 2>&1 | grep -i 'thread model' | tr ' ' '-')
+          # The host interpreter passes SwapNet.cmake's import check; depends has no Python for the target.
+          python3 "$CIPY" ann notice "job=$GITHUB_JOB step=swapnet-python host-interpreter=/usr/bin/python3 $(/usr/bin/python3 -I -c "$SWAPNET_PY_CHECK" 2>&1 | tail -n 1) target-python-packages-in-depends=$(find depends/packages -iname '*python*' | wc -l | tr -d ' ')"
           python3 "$CIPY" ann notice "job=$GITHUB_JOB step=toolchain $("$HOSTW-g++" --version | head -n 1 | tr ' ' '-') $tm"
       - name: Restore depends prefix
         id: dep-cache
@@ -856,7 +866,7 @@ jobs:
           python3 "$CIPY" configure --name mingw --job "$GITHUB_JOB" --logs "$LOGS" --builddir build-win -- \
             -S . -B build-win -G Ninja --toolchain "$PFX/toolchain.cmake" -DCMAKE_BUILD_TYPE=Release \
             -DWITH_MODELNET=ON -DOPENSSL_ROOT_DIR="$PFX" -DOPENSSL_USE_STATIC_LIBS=ON -DBUILD_TESTS=ON -DBUILD_GUI=OFF \
-            -DBUILD_BENCH=OFF -DWITH_ZMQ=ON -DWITH_CCACHE=ON -DREDUCE_EXPORTS=ON -DBUILD_GUI_TESTS=OFF \
+            -DBUILD_BENCH=OFF -DWITH_ZMQ=ON -DWITH_CCACHE=ON -DREDUCE_EXPORTS=ON -DBUILD_GUI_TESTS=OFF -DPython3_EXECUTABLE=/usr/bin/python3 \
             "-DCMAKE_CXX_FLAGS=-Wno-error=maybe-uninitialized -Wno-error=array-bounds"
       - name: Build btxd.exe and btx-cli.exe
         timeout-minutes: 260
@@ -939,7 +949,7 @@ jobs:
         run: |
           sudo apt-get update -q
           sudo apt-get install -y -q --no-install-recommends g++-mingw-w64-x86-64-posix gcc-mingw-w64-x86-64-posix \
-            binutils-mingw-w64-x86-64 mingw-w64-x86-64-dev make cmake ninja-build curl patch pkgconf python3 ccache \
+            binutils-mingw-w64-x86-64 mingw-w64-x86-64-dev make cmake ninja-build curl patch pkgconf python3 python3-dev python3-cryptography ccache \
             xz-utils autoconf automake libtool
           for t in gcc g++; do
             if [ -e "/usr/bin/$HOSTW-$t-posix" ]; then
@@ -989,7 +999,7 @@ jobs:
           python3 "$CIPY" configure --name mingw --job "$GITHUB_JOB" --logs "$LOGS" --builddir build-win -- \
             -S . -B build-win -G Ninja --toolchain "$PFX/toolchain.cmake" -DCMAKE_BUILD_TYPE=Release \
             -DWITH_MODELNET=ON -DOPENSSL_ROOT_DIR="$PFX" -DOPENSSL_USE_STATIC_LIBS=ON -DBUILD_TESTS=ON -DBUILD_GUI=OFF \
-            -DBUILD_BENCH=OFF -DWITH_ZMQ=ON -DWITH_CCACHE=ON -DREDUCE_EXPORTS=ON -DBUILD_GUI_TESTS=OFF \
+            -DBUILD_BENCH=OFF -DWITH_ZMQ=ON -DWITH_CCACHE=ON -DREDUCE_EXPORTS=ON -DBUILD_GUI_TESTS=OFF -DPython3_EXECUTABLE=/usr/bin/python3 \
             "-DCMAKE_CXX_FLAGS=-Wno-error=maybe-uninitialized -Wno-error=array-bounds"
       - name: Build test_btx.exe, pass 1 (keep going)
         timeout-minutes: 230
@@ -1295,6 +1305,16 @@ jobs:
           restore-keys: |
             ccache-winnative-${{ github.run_id }}-
             ccache-winnative-
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: ${{ env.SWAPNET_PY }}
+      - name: SwapNet Python (CPython ${{ env.SWAPNET_PY }} plus cryptography ${{ env.SWAPNET_CRYPTOGRAPHY }}, what cmake/SwapNet.cmake checks)
+        run: |
+          python -m pip install --disable-pip-version-check --only-binary=:all: "cryptography==$SWAPNET_CRYPTOGRAPHY"
+          py=$(python -c "import sys; print(sys.executable)")
+          if command -v cygpath >/dev/null; then py=$(cygpath -m "$py"); fi
+          echo "SWAPNET_PYTHON=$py" >> "$GITHUB_ENV"
+          python "$CIPY" ann notice "job=$GITHUB_JOB step=swapnet-python $(python -I -c "$SWAPNET_PY_CHECK" 2>&1 | tail -n 1)"
       - name: Configure (preset windows-clangcl-static; tests, Modelnet, wallet, ZMQ ON)
         id: configure
         run: |
@@ -1306,7 +1326,7 @@ jobs:
             -DOPENSSL_ROOT_DIR=D:/w/ossl -DOPENSSL_USE_STATIC_LIBS=ON -DOPENSSL_MSVC_STATIC_RT=ON \
             -DOPENSSL_INCLUDE_DIR=D:/w/ossl/include -DOPENSSL_CRYPTO_LIBRARY=D:/w/ossl/lib/libcrypto.lib \
             -DOPENSSL_SSL_LIBRARY=D:/w/ossl/lib/libssl.lib "-DCMAKE_C_COMPILER_LAUNCHER=$CCACHE_EXE" \
-            "-DCMAKE_CXX_COMPILER_LAUNCHER=$CCACHE_EXE" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+            "-DCMAKE_CXX_COMPILER_LAUNCHER=$CCACHE_EXE" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON "-DPython3_EXECUTABLE=$SWAPNET_PYTHON"
       - name: Save vcpkg binary cache
         if: ${{ !cancelled() && steps.configure.outcome == 'success' }}
         uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
@@ -1443,6 +1463,16 @@ jobs:
           restore-keys: |
             ccache-winnative-${{ github.run_id }}-
             ccache-winnative-
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: ${{ env.SWAPNET_PY }}
+      - name: SwapNet Python (CPython ${{ env.SWAPNET_PY }} plus cryptography ${{ env.SWAPNET_CRYPTOGRAPHY }}, what cmake/SwapNet.cmake checks)
+        run: |
+          python -m pip install --disable-pip-version-check --only-binary=:all: "cryptography==$SWAPNET_CRYPTOGRAPHY"
+          py=$(python -c "import sys; print(sys.executable)")
+          if command -v cygpath >/dev/null; then py=$(cygpath -m "$py"); fi
+          echo "SWAPNET_PYTHON=$py" >> "$GITHUB_ENV"
+          python "$CIPY" ann notice "job=$GITHUB_JOB step=swapnet-python $(python -I -c "$SWAPNET_PY_CHECK" 2>&1 | tail -n 1)"
       - name: Configure (identical to win-native-build, so ccache hits)
         id: configure
         run: |
@@ -1454,7 +1484,7 @@ jobs:
             -DOPENSSL_ROOT_DIR=D:/w/ossl -DOPENSSL_USE_STATIC_LIBS=ON -DOPENSSL_MSVC_STATIC_RT=ON \
             -DOPENSSL_INCLUDE_DIR=D:/w/ossl/include -DOPENSSL_CRYPTO_LIBRARY=D:/w/ossl/lib/libcrypto.lib \
             -DOPENSSL_SSL_LIBRARY=D:/w/ossl/lib/libssl.lib "-DCMAKE_C_COMPILER_LAUNCHER=$CCACHE_EXE" \
-            "-DCMAKE_CXX_COMPILER_LAUNCHER=$CCACHE_EXE" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+            "-DCMAKE_CXX_COMPILER_LAUNCHER=$CCACHE_EXE" -DCMAKE_EXPORT_COMPILE_COMMANDS=ON "-DPython3_EXECUTABLE=$SWAPNET_PYTHON"
       - name: Build everything (default target, incl. test_btx; keep going)
         timeout-minutes: 300
         run: |
@@ -1526,6 +1556,16 @@ jobs:
         with:
           name: win-native-daemon
           path: bin
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: ${{ env.SWAPNET_PY }}
+      - name: SwapNet Python (CPython ${{ env.SWAPNET_PY }} plus cryptography ${{ env.SWAPNET_CRYPTOGRAPHY }}, what cmake/SwapNet.cmake checks)
+        run: |
+          python -m pip install --disable-pip-version-check --only-binary=:all: "cryptography==$SWAPNET_CRYPTOGRAPHY"
+          py=$(python -c "import sys; print(sys.executable)")
+          if command -v cygpath >/dev/null; then py=$(cygpath -m "$py"); fi
+          echo "SWAPNET_PYTHON=$py" >> "$GITHUB_ENV"
+          python "$CIPY" ann notice "job=$GITHUB_JOB step=swapnet-python $(python -I -c "$SWAPNET_PY_CHECK" 2>&1 | tail -n 1)"
       - name: Regtest smoke with -modelnet=0 (start, wallet, 101 blocks, send to self, stop)
         timeout-minutes: 30
         run: |
@@ -1591,6 +1631,9 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: ${{ env.SWAPNET_PY }}
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: ci-tools
@@ -1646,6 +1689,9 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: ${{ env.SWAPNET_PY }}
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: ci-tools
@@ -1782,6 +1828,16 @@ jobs:
           restore-keys: |
             vcpkg-bin-win-static-${{ env.VCPKG_COMMIT }}-${{ hashFiles('vcpkg.json') }}-
             vcpkg-bin-win-static-
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: ${{ env.SWAPNET_PY }}
+      - name: SwapNet Python (CPython ${{ env.SWAPNET_PY }} plus cryptography ${{ env.SWAPNET_CRYPTOGRAPHY }}, what cmake/SwapNet.cmake checks)
+        run: |
+          python -m pip install --disable-pip-version-check --only-binary=:all: "cryptography==$SWAPNET_CRYPTOGRAPHY"
+          py=$(python -c "import sys; print(sys.executable)")
+          if command -v cygpath >/dev/null; then py=$(cygpath -m "$py"); fi
+          echo "SWAPNET_PYTHON=$py" >> "$GITHUB_ENV"
+          python "$CIPY" ann notice "job=$GITHUB_JOB step=swapnet-python $(python -I -c "$SWAPNET_PY_CHECK" 2>&1 | tail -n 1)"
       - name: Configure with cl.exe (Ninja, x64-windows-static, Modelnet and ZMQ OFF)
         id: configure
         run: |
@@ -1792,7 +1848,7 @@ jobs:
             '-DCMAKE_TOOLCHAIN_FILE=D:\w\vcpkg\scripts\buildsystems\vcpkg.cmake' -DVCPKG_TARGET_TRIPLET=x64-windows-static \
             -DVCPKG_MANIFEST_NO_DEFAULT_FEATURES=ON -DVCPKG_MANIFEST_FEATURES=wallet -DVCPKG_INSTALLED_DIR=D:/w/vi \
             -DVCPKG_INSTALL_OPTIONS=--x-buildtrees-root=D:/w/vbt -DBUILD_TESTS=OFF -DBUILD_GUI=OFF -DBUILD_BENCH=OFF \
-            -DBUILD_FUZZ_BINARY=OFF -DWITH_MODELNET=OFF -DWITH_ZMQ=OFF -DENABLE_WALLET=ON
+            -DBUILD_FUZZ_BINARY=OFF -DWITH_MODELNET=OFF -DWITH_ZMQ=OFF -DENABLE_WALLET=ON "-DPython3_EXECUTABLE=$SWAPNET_PYTHON"
       - name: ninja -k 0 btxd with cl.exe
         timeout-minutes: 200
         run: |
@@ -1982,6 +2038,16 @@ jobs:
         run: |
           brew install ninja pkgconf libevent zeromq libomp openssl@3 ccache
           command -v cmake >/dev/null || brew install cmake
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: ${{ env.SWAPNET_PY }}
+      - name: SwapNet Python (CPython ${{ env.SWAPNET_PY }} plus cryptography ${{ env.SWAPNET_CRYPTOGRAPHY }}, what cmake/SwapNet.cmake checks)
+        run: |
+          python3 -m pip install --disable-pip-version-check --only-binary=:all: "cryptography==$SWAPNET_CRYPTOGRAPHY"
+          py=$(python3 -c "import sys; print(sys.executable)")
+          if command -v cygpath >/dev/null; then py=$(cygpath -m "$py"); fi
+          echo "SWAPNET_PYTHON=$py" >> "$GITHUB_ENV"
+          python3 "$CIPY" ann notice "job=$GITHUB_JOB step=swapnet-python $(python3 -I -c "$SWAPNET_PY_CHECK" 2>&1 | tail -n 1)"
       - name: Pick Boost (the tree's depends pin unless the Boost >= 1.91 fix is in)
         id: boost
         run: |
@@ -2040,6 +2106,7 @@ jobs:
                 -DWITH_ZMQ=ON -DBUILD_GUI=OFF -DBUILD_BENCH=OFF -DWITH_CCACHE=ON)
           if [ "$BOOST_MODE" = pinned ]; then args+=(-DBoost_INCLUDE_DIR="$HOME/boost-pin/include"); fi
           if ! xcrun -sdk macosx metal -v >/dev/null 2>&1; then args+=(-DBTX_MATMUL_METAL_PRECOMPILE_KERNELS=OFF); fi
+          args+=(-DPython3_EXECUTABLE="$SWAPNET_PYTHON")
           python3 "$CIPY" configure --name macos --job "$GITHUB_JOB" --logs "$LOGS" --builddir build -- "${args[@]}"
           python3 "$CIPY" ann notice "job=$GITHUB_JOB step=boost-mode mode=$BOOST_MODE xcode=$(xcodebuild -version | head -n 1 | tr ' ' '-') macos=$(sw_vers -productVersion)"
       - name: Build btxd and btx-cli
@@ -2097,6 +2164,16 @@ jobs:
         run: |
           brew install ninja pkgconf libevent zeromq libomp openssl@3 ccache
           command -v cmake >/dev/null || brew install cmake
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: ${{ env.SWAPNET_PY }}
+      - name: SwapNet Python (CPython ${{ env.SWAPNET_PY }} plus cryptography ${{ env.SWAPNET_CRYPTOGRAPHY }}, what cmake/SwapNet.cmake checks)
+        run: |
+          python3 -m pip install --disable-pip-version-check --only-binary=:all: "cryptography==$SWAPNET_CRYPTOGRAPHY"
+          py=$(python3 -c "import sys; print(sys.executable)")
+          if command -v cygpath >/dev/null; then py=$(cygpath -m "$py"); fi
+          echo "SWAPNET_PYTHON=$py" >> "$GITHUB_ENV"
+          python3 "$CIPY" ann notice "job=$GITHUB_JOB step=swapnet-python $(python3 -I -c "$SWAPNET_PY_CHECK" 2>&1 | tail -n 1)"
       - name: Pick Boost (the tree's depends pin unless the Boost >= 1.91 fix is in)
         id: boost
         run: |
@@ -2148,6 +2225,7 @@ jobs:
                 -DWITH_ZMQ=ON -DBUILD_GUI=OFF -DBUILD_BENCH=OFF -DWITH_CCACHE=ON)
           if [ "$BOOST_MODE" = pinned ]; then args+=(-DBoost_INCLUDE_DIR="$HOME/boost-pin/include"); fi
           if ! xcrun -sdk macosx metal -v >/dev/null 2>&1; then args+=(-DBTX_MATMUL_METAL_PRECOMPILE_KERNELS=OFF); fi
+          args+=(-DPython3_EXECUTABLE="$SWAPNET_PYTHON")
           python3 "$CIPY" configure --name macos --job "$GITHUB_JOB" --logs "$LOGS" --builddir build -- "${args[@]}"
       - name: Build test_btx and the helpers it runs (keep going)
         timeout-minutes: 320
@@ -2215,6 +2293,9 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: ${{ env.SWAPNET_PY }}
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: ci-tools
@@ -2271,6 +2352,9 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: ${{ env.SWAPNET_PY }}
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: ci-tools
@@ -2327,6 +2411,9 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: ${{ env.SWAPNET_PY }}
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
         with:
           name: ci-tools
