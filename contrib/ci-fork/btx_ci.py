@@ -1731,8 +1731,9 @@ def cmd_functional(a):
     failed = sorted(s for s, (st, _, _) in got.items() if st == "Failed")
     if failed:
         ann.emit("error", f"label={a.label} failed={len(failed)}: " + ",".join(failed[:60]))
-    # The verdict is the known-failing gate's; this step fails only when the runner produced no results.
-    return 0 if got else 1
+    # Complete runs delegate their verdict to the known-failing gate. Missing
+    # selected results cannot reach that gate, so reject them here.
+    return 0 if got and not missing else 1
 
 
 # ---------------------------------------------------------------- cppcheck (product code)
