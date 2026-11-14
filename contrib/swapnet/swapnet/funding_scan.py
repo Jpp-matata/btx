@@ -57,7 +57,7 @@ def _scan_evm(driver, terms, sid):
     try:
         return _evm_lock(driver, terms, sid)
     except SwapError as error:
-        if error.code == 'FUNDING_LOOKUP':
+        if error.code in ('FUNDING_LOOKUP', 'FUNDING_PENDING'):
             raise
         raise SwapError('FUNDING_LOOKUP', 'Funding output lookup cannot be completed') from error
     except Exception as error:
@@ -66,15 +66,21 @@ def _scan_evm(driver, terms, sid):
 
 def _evm_lock(driver, terms, sid):
     # Latest storage is the existence check. A lock that is still only in the
-    # mempool has no latest state and no Locked log, so this lookup cannot see it.
+    # mempool has no latest state, so the funder's nonces are read first: a
+    # transaction mined after that read is visible to the storage read below.
     require(callable(getattr(driver, 'rpc', None)), 'FUNDING_LOOKUP', 'Funding output lookup cannot be completed')
     contract, salt, lid = _evm_identity(driver, terms, sid)
     _require_chain(driver)
+    latest, pending = _funder_nonces(driver, terms)
     view = _parse_swap(_rpc(driver, 'eth_call', {
         'to': contract,
         'data': '0x' + calldata('getSwap(bytes32)', bytes.fromhex(lid)).hex(),
     }, 'latest'))
     if view['state'] == 0:
+        # The funder signs lockNative from the refund account. An unmined
+        # transaction from it may be that lock; a second funding would reuse the
+        # same lock id. Stop; the next tick adopts the lock once it is mined.
+        require(pending <= latest, 'FUNDING_PENDING', 'The funding account has an unmined transaction; wait before funding')
         return None
     _require_lock_terms(view, terms)
     return {'txid': _locked_txid(driver, contract, lid, terms), 'lock_id': lid, 'salt': salt}
@@ -96,6 +102,19 @@ def _evm_identity(driver, terms, sid):
         require(type(mirrored) is dict and mirrored.get('lock_id') == lid and mirrored.get('salt') == salt,
                 'FUNDING_LOOKUP', 'Funding output lookup cannot be completed')
     return contract, salt, lid
+
+
+def _funder_nonces(driver, terms):
+    funder = '0x' + address_bytes(terms.refund_key).hex()
+    latest = _nonce(_rpc(driver, 'eth_getTransactionCount', funder, 'latest'))
+    pending = _nonce(_rpc(driver, 'eth_getTransactionCount', funder, 'pending'))
+    return latest, pending
+
+
+def _nonce(raw):
+    require(type(raw) is str and len(raw) > 2 and raw[:2].lower() == '0x' and _HEX.fullmatch(raw[2:]) is not None,
+            'FUNDING_LOOKUP', 'Funding output lookup cannot be completed')
+    return int(raw, 16)
 
 
 def _require_chain(driver):

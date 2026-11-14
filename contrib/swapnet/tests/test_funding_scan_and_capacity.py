@@ -256,6 +256,7 @@ class ScriptedEVM:
         self.logs = [] if logs is None else logs
         self.fail = fail or set()
         self.calls = []
+        self.nonces = {"latest": "0x5", "pending": "0x5"}
 
     def rpc(self, method, *args):
         self.calls.append((method, args))
@@ -263,6 +264,8 @@ class ScriptedEVM:
             raise RuntimeError("down")
         if method == "eth_chainId":
             return "0x1"
+        if method == "eth_getTransactionCount":
+            return self.nonces[args[1]]
         if method == "eth_call":
             return self.view
         if method == "eth_getLogs":
@@ -317,6 +320,49 @@ def test_evm_absent_lock_returns_none_without_reading_logs():
     assert "eth_getLogs" not in [method for method, _args in driver.calls]
 
 
+def test_evm_lock_still_in_the_mempool_stops_funding():
+    # latest storage is empty while the lockNative transaction is unmined. The
+    # funder's pending nonce is ahead of its latest nonce; funding must wait.
+    leg = evm_terms()
+    view = encode_swap(leg.hashlock, "0x" + "00" * 20, leg.refund_key, leg.claim_key, 0, 0, 0)
+    driver = ScriptedEVM(view)
+    driver.nonces = {"latest": "0x5", "pending": "0x6"}
+    with pytest.raises(SwapError, match="FUNDING_PENDING"):
+        find_funding_output(driver, leg, EVM_SID)
+    counted = [args for method, args in driver.calls if method == "eth_getTransactionCount"]
+    assert {args[0] for args in counted} == {leg.refund_key}
+    assert {args[1] for args in counted} == {"latest", "pending"}
+    # Mined and still absent (for example dropped): the lookup completes empty.
+    driver.nonces = {"latest": "0x6", "pending": "0x6"}
+    assert find_funding_output(driver, leg, EVM_SID) is None
+
+
+def test_evm_nonce_lookup_problems_do_not_fund():
+    leg = evm_terms()
+    view = encode_swap(leg.hashlock, "0x" + "00" * 20, leg.refund_key, leg.claim_key, 0, 0, 0)
+    with pytest.raises(SwapError, match="FUNDING_LOOKUP"):
+        find_funding_output(ScriptedEVM(view, fail={"eth_getTransactionCount"}), leg, EVM_SID)
+    for bad in ("5", "0x", "0xzz", None):
+        for nonces in ({"latest": "0x5", "pending": bad}, {"latest": bad, "pending": "0x5"}):
+            driver = ScriptedEVM(view)
+            driver.nonces = nonces
+            with pytest.raises(SwapError, match="FUNDING_LOOKUP"):
+                find_funding_output(driver, leg, EVM_SID)
+
+
+def test_evm_nonces_are_read_before_storage():
+    # A lock mined between the two reads must be seen by the storage read, so
+    # the nonces come first. Present storage is adopted even with a pending tx.
+    leg = evm_terms()
+    expected = expected_lock(leg, FUNDING_TX)
+    view = encode_swap(leg.hashlock, "0x" + "00" * 20, leg.refund_key, leg.claim_key, 10000, leg.lock_value, 1)
+    driver = ScriptedEVM(view, [locked_log(leg, expected["lock_id"], FUNDING_TX)])
+    driver.nonces = {"latest": "0x5", "pending": "0x6"}
+    assert find_funding_output(driver, leg, EVM_SID) == expected
+    order = [method for method, _args in driver.calls if method in ("eth_getTransactionCount", "eth_call")]
+    assert order == ["eth_getTransactionCount", "eth_getTransactionCount", "eth_call"]
+
+
 def test_evm_lock_without_a_log_keeps_the_lock_id():
     leg = evm_terms()
     view = encode_swap(leg.hashlock, "0x" + "00" * 20, leg.refund_key, leg.claim_key, 10000, leg.lock_value, 1)
@@ -357,12 +403,15 @@ class EthChain:
         self.fail = set()
         self.view = "0x" + "00" * 224
         self.logs = []
+        self.nonces = {"latest": "0x0", "pending": "0x0"}
 
     def rpc(self, method, *args):
         if method in self.fail:
             raise SwapError("CHAIN_RPC", "lookup failed")
         if method == "eth_chainId":
             return "0x1"
+        if method == "eth_getTransactionCount":
+            return self.nonces[args[1]]
         if method == "eth_syncing":
             return False
         if method == "eth_getCode":
@@ -500,6 +549,25 @@ def test_existing_evm_lock_is_adopted_and_prepare_funding_is_not_called(eth_pair
     assert state["evm_refund_plan"]["lock_id"] == ref["lock_id"]
     ops = eth_pair.nodes["alice"][1].operations(eth_pair.sid, private=True)
     assert [op["kind"] for op in ops] == []
+
+
+def test_restored_session_waits_for_an_unmined_evm_lock(eth_pair):
+    driver = eth_pair.nodes["alice"][3].drivers[ETH.id]
+    eth_pair.chain.nonces = {"latest": "0x0", "pending": "0x1"}
+    with pytest.raises(SwapError, match="FUNDING_PENDING"):
+        eth_pair.nodes["alice"][3].tick_one(eth_pair.sid)
+    assert driver.funding_calls == 0
+    state = eth_pair.state("alice")
+    assert state["stage"] == "committed" and not state["funding_prepared"]
+    assert eth_pair.nodes["alice"][1].operations(eth_pair.sid) == []
+    # Once the lock is mined, the same session adopts it instead of funding.
+    eth_pair.chain.nonces = {"latest": "0x1", "pending": "0x1"}
+    ref = plant_eth_lock(eth_pair)
+    alice = eth_pair.nodes["alice"][3]
+    alice.tick_one(eth_pair.sid)
+    alice.tick_one(eth_pair.sid)
+    assert driver.funding_calls == 0
+    assert eth_pair.state("alice")["refs"]["a"] == ref
 
 
 def test_evm_lookup_failure_does_not_fund(eth_pair):
