@@ -26,6 +26,8 @@
 # - The MinGW, native Windows and macOS jobs are measurement lanes (continue-on-error) until each has been
 #   green once; the gate is lint, clang-tidy-diff, cppcheck, the linux-* jobs, release-gate and summary.
 # - release-gate: the release tooling's own tests (test/util/*release*_test.py).
+# - SwapNet start: linux-build, macos-build and win-native-smoke start btxd on regtest with -swapnet=0 and with
+#   -swapnet=1 (feature_swapnet.py in linux-functional is the full Linux check).
 # - summary: one known-failing verdict over every Linux result, and the next known-failing list.
 #
 # Rules
@@ -533,6 +535,18 @@ jobs:
           path: ${{ runner.temp }}/linux-bin.tar
           retention-days: 3
           overwrite: true
+      # SwapNet is off unless -swapnet is set (src/init.cpp); an explicit -swapnet=1 that cannot start stops the node.
+      - name: SwapNet start on regtest, -swapnet=0 then -swapnet=1 (30 s each, getswapnetworkinfo, stop)
+        if: ${{ !cancelled() && steps.bsum.outputs.btxd == 'yes' && steps.bsum.outputs.btx_cli == 'yes' }}
+        timeout-minutes: 15
+        run: |
+          rc=0
+          for v in 0 1; do
+            python3 "$CIPY" smoke --btxd build/bin/btxd --cli build/bin/btx-cli --datadir "$RUNNER_TEMP/smoke-swapnet$v" \
+              --label "linux-swapnet$v" --job "$GITHUB_JOB" --port "3836$v" --rpcport "3837$v" --linger 30 \
+              --extra="-swapnet=$v" --capture getswapnetworkinfo --capture getswapcapabilities --out "$LOGS" || rc=1
+          done
+          exit "$rc"
       - name: Upload results and logs
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
@@ -1590,6 +1604,18 @@ jobs:
           python "$CIPY" smoke --btxd bin/btxd.exe --cli bin/btx-cli.exe --datadir "$RUNNER_TEMP/smoke-helper" \
             --label winnative-helper --job "$GITHUB_JOB" --port 38353 --rpcport 38352 --linger 60 \
             --capture getmodelnetworkinfo --out "$LOGS"
+      # SwapNet is off unless -swapnet is set (src/init.cpp); an explicit -swapnet=1 that cannot start stops the node.
+      - name: SwapNet start on regtest, -swapnet=0 then -swapnet=1 (30 s each, getswapnetworkinfo, stop)
+        if: ${{ !cancelled() }}
+        timeout-minutes: 15
+        run: |
+          rc=0
+          for v in 0 1; do
+            python "$CIPY" smoke --btxd bin/btxd.exe --cli bin/btx-cli.exe --datadir "$RUNNER_TEMP/smoke-swapnet$v" \
+              --label "winnative-swapnet$v" --job "$GITHUB_JOB" --port "3836$v" --rpcport "3837$v" --linger 30 \
+              --extra="-swapnet=$v" --capture getswapnetworkinfo --capture getswapcapabilities --out "$LOGS" || rc=1
+          done
+          exit "$rc"
       - name: Upload logs
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
@@ -2113,6 +2139,7 @@ jobs:
         timeout-minutes: 310
         run: python3 "$CIPY" build --name daemon --logs "$LOGS" --builddir build -- -k 0 -j"$(sysctl -n hw.ncpu)" btxd btx-cli
       - name: Build summary
+        id: bsum
         if: ${{ !cancelled() && steps.configure.outcome == 'success' }}
         run: python3 "$CIPY" build-summary --name daemon --job "$GITHUB_JOB" --logs "$LOGS" --exe btxd=build/bin/btxd btx_cli=build/bin/btx-cli
       - name: Save ccache
@@ -2121,6 +2148,18 @@ jobs:
         with:
           path: ~/.ccache-btx
           key: ccache-macos-${{ github.run_id }}-${{ github.run_attempt }}-build
+      # SwapNet is off unless -swapnet is set (src/init.cpp); an explicit -swapnet=1 that cannot start stops the node.
+      - name: SwapNet start on regtest, -swapnet=0 then -swapnet=1 (30 s each, getswapnetworkinfo, stop)
+        if: ${{ !cancelled() && steps.bsum.outputs.btxd == 'yes' && steps.bsum.outputs.btx_cli == 'yes' }}
+        timeout-minutes: 15
+        run: |
+          rc=0
+          for v in 0 1; do
+            python3 "$CIPY" smoke --btxd build/bin/btxd --cli build/bin/btx-cli --datadir "$RUNNER_TEMP/smoke-swapnet$v" \
+              --label "macos-swapnet$v" --job "$GITHUB_JOB" --port "3836$v" --rpcport "3837$v" --linger 30 \
+              --extra="-swapnet=$v" --capture getswapnetworkinfo --capture getswapcapabilities --out "$LOGS" || rc=1
+          done
+          exit "$rc"
       - name: Upload logs
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
